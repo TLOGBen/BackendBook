@@ -1,0 +1,6 @@
+site/
+.venv/
+.obsidian/
+__pycache__/
+.cache/
+.claude/
