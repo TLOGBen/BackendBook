@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自動 ack 掉訊息</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --ink: #1f2328;
+  --muted: #59636e;
+  --line: #d0d7de;
+  --cell: #f6f8fa;
+  --dot: #64748b;
+  --sent: #15803d;
+  --back: #2563eb;
+  --back-fill: #dbeafe;
+  --hot-fill: #fde68a;
+  --hot-line: #b45309;
+  --hot-ink: #111111;
+  --chip: #eef1f4;
+  --focus: #2563eb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e2129;
+    --ink: #e6e8ec;
+    --muted: #a0a8b4;
+    --line: #3a404c;
+    --cell: #262a34;
+    --dot: #94a3b8;
+    --sent: #4ade80;
+    --back: #60a5fa;
+    --back-fill: #1e3354;
+    --hot-fill: #5a3e0c;
+    --hot-line: #f59e0b;
+    --hot-ink: #fde68a;
+    --chip: #2c313c;
+    --focus: #60a5fa;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e2129;
+  --ink: #e6e8ec;
+  --muted: #a0a8b4;
+  --line: #3a404c;
+  --cell: #262a34;
+  --dot: #94a3b8;
+  --sent: #4ade80;
+  --back: #60a5fa;
+  --back-fill: #1e3354;
+  --hot-fill: #5a3e0c;
+  --hot-line: #f59e0b;
+  --hot-ink: #fde68a;
+  --chip: #2c313c;
+  --focus: #60a5fa;
+  color-scheme: dark;
+}
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Heiti TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.fig {
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 12px 16px 14px;
+  max-width: 820px;
+  width: 100%;
+  outline: none;
+}
+.fig:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 8px; }
+.fig *, .fig *::before, .fig *::after { box-sizing: border-box; }
+.fig code { font-family: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono", monospace; font-size: 12px; }
+
+.fig .now { display: flex; gap: 10px; align-items: baseline; min-height: 42px; margin-bottom: 8px; }
+.fig .now-t { flex: none; font-weight: 700; font-size: 20px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.fig .now-text { font-size: 14px; color: var(--ink); }
+
+.fig .row { border: 1px solid var(--line); border-radius: 10px; padding: 8px 8px 8px; margin-bottom: 8px; }
+.fig .row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 2px 6px; }
+.fig .row-name { font-weight: 700; font-size: 14px; }
+.fig .row-head code { color: var(--muted); }
+
+.fig .cells { display: grid; grid-template-columns: minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr); align-items: stretch; gap: 0 4px; }
+.fig .cell {
+  background: var(--cell);
+  border: 1.5px solid transparent;
+  border-radius: 8px;
+  padding: 6px 7px 7px;
+  min-width: 0;
+  transition: none;
+}
+.fig .cell.hot { background: var(--hot-fill); border-color: var(--hot-line); }
+.fig .cell.hot .cell-label, .fig .cell.hot .num { color: var(--hot-ink); }
+.fig .cell.back { border-color: var(--back); background: var(--back-fill); }
+.fig .cell-label { font-size: 12px; color: var(--muted); line-height: 1.3; min-height: 16px; }
+.fig .num { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; margin: 1px 0 4px; }
+.fig .dots { display: grid; grid-template-columns: repeat(6, 8px); grid-auto-rows: 8px; gap: 3px; min-height: 52px; align-content: start; }
+.fig .d { width: 8px; height: 8px; border-radius: 50%; }
+.fig .d.wait, .fig .d.mem { background: var(--dot); }
+.fig .d.held { border: 1.5px solid var(--dot); background: transparent; }
+.fig .d.sent { background: var(--sent); }
+.fig .d.lost { border: 1.5px dashed var(--hot-line); background: transparent; }
+.fig .d.back { background: var(--back); }
+
+.fig .arrow { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; }
+.fig .arrow span { display: inline-block; }
+.fig .arrow.flow { color: var(--ink); font-weight: 700; }
+.fig .arrow.rev span { transform: scaleX(-1); }
+
+.fig .note { margin: 7px 2px 0; font-size: 13px; color: var(--ink); min-height: 19px; border-radius: 6px; }
+.fig .note.hot { background: var(--hot-fill); color: var(--hot-ink); border: 1.5px solid var(--hot-line); padding: 4px 8px; font-weight: 600; }
+.fig .note.back { color: var(--ink); border-left: 3px solid var(--back); padding-left: 8px; }
+
+.fig .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); margin: 4px 2px 10px; }
+.fig .legend span { display: inline-flex; align-items: center; gap: 5px; }
+.fig .legend .d { flex: none; }
+
+.fig .ctrl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fig button {
+  font: inherit; font-size: 13px; color: var(--ink); background: var(--chip);
+  border: 1px solid var(--line); border-radius: 8px; min-height: 34px; min-width: 34px; padding: 0 10px; cursor: pointer;
+}
+.fig button:focus-visible, .fig input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.fig .chips { display: flex; gap: 4px; }
+.fig .chips button { padding: 0 8px; font-variant-numeric: tabular-nums; }
+.fig .chips button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.fig .scrub { flex: 1 1 140px; min-width: 120px; display: flex; align-items: center; }
+.fig .scrub input { width: 100%; accent-color: var(--ink); min-height: 34px; margin: 0; touch-action: pan-y; }
+.fig .theme { margin-left: auto; }
+
+@media (max-width: 420px) {
+  .fig { padding: 10px 12px 12px; }
+  .fig .num { font-size: 19px; }
+  .fig .cells { grid-template-columns: minmax(0,1fr) 12px minmax(0,1fr) 12px minmax(0,1fr); gap: 0 3px; }
+  .fig .cell { padding: 5px 5px 6px; }
+  .fig .dots { grid-template-columns: repeat(6, 7px); grid-auto-rows: 7px; gap: 2px; min-height: 42px; }
+  .fig .d { width: 7px; height: 7px; }
+  .fig .now-text { font-size: 13px; }
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="auto-ack-loss" data-dur="15" data-rest="11.5" tabindex="0" role="group"
+  aria-label="動態對照圖：同一批 300 則 order_created 訊息，在 T1 到 T5 之間，自動 ack 和寄完信才 ack 兩種做法下，emails 佇列、消費者記憶體、已寄出的信各有幾則。自動 ack 在消費者重啟後掉了 250 則；寄完才 ack 的 250 則重新入列。左右方向鍵切換時間點，空白鍵播放或暫停。">
+  <div class="now" aria-live="polite">
+    <span class="now-t" id="nowT">T4</span>
+    <span class="now-text" id="nowText"></span>
+  </div>
+
+  <div class="row" id="rowA">
+    <div class="row-head"><span class="row-name">自動 ack</span><code>auto_ack=True</code></div>
+    <div class="cells">
+      <div class="cell" data-k="q"><div class="cell-label"><code>emails</code> 佇列</div><div class="num">0</div><div class="dots"></div></div>
+      <div class="arrow" data-a="1"><span>→</span></div>
+      <div class="cell" data-k="m"><div class="cell-label">消費者記憶體</div><div class="num">0</div><div class="dots"></div></div>
+      <div class="arrow" data-a="2"><span>→</span></div>
+      <div class="cell" data-k="s"><div class="cell-label">已寄出的信</div><div class="num">0</div><div class="dots"></div></div>
+    </div>
+    <div class="note"></div>
+  </div>
+
+  <div class="row" id="rowB">
+    <div class="row-head"><span class="row-name">寄完信才 ack</span><code>basic_ack</code></div>
+    <div class="cells">
+      <div class="cell" data-k="q"><div class="cell-label"><code>emails</code> 佇列</div><div class="num">0</div><div class="dots"></div></div>
+      <div class="arrow" data-a="1"><span>→</span></div>
+      <div class="cell" data-k="m"><div class="cell-label">消費者記憶體</div><div class="num">0</div><div class="dots"></div></div>
+      <div class="arrow" data-a="2"><span>→</span></div>
+      <div class="cell" data-k="s"><div class="cell-label">已寄出的信</div><div class="num">0</div><div class="dots"></div></div>
+    </div>
+    <div class="note"></div>
+  </div>
+
+  <div class="legend" aria-hidden="true">
+    <span><i class="d wait"></i>1 點＝10 則訊息</span>
+    <span><i class="d held"></i>已推給消費者、還沒 ack（佇列先留著）</span>
+    <span><i class="d sent"></i>已寄出</span>
+    <span><i class="d back"></i>重新入列</span>
+    <span><i class="d lost"></i>消失</span>
+  </div>
+
+  <div class="ctrl">
+    <button type="button" id="play" aria-label="播放">▶ 播放</button>
+    <div class="chips" role="group" aria-label="跳到時間點">
+      <button type="button" data-step="0" aria-pressed="false">T1</button>
+      <button type="button" data-step="1" aria-pressed="false">T2</button>
+      <button type="button" data-step="2" aria-pressed="false">T3</button>
+      <button type="button" data-step="3" aria-pressed="false">T4</button>
+      <button type="button" data-step="4" aria-pressed="false">T5</button>
+    </div>
+    <label class="scrub"><input type="range" id="scrub" min="0" max="15" step="0.05" value="11.5" aria-label="時間軸，拖曳看 T1 到 T5"></label>
+    <button type="button" class="theme" id="theme" aria-label="切換深淺色">深／淺</button>
+  </div>
+</figure>
+
+<script>
+(function () {
+  var fig = document.querySelector('.fig');
+  var DUR = Number(fig.dataset.dur), REST = Number(fig.dataset.rest), STEP = 3, TRANS = 1;
+
+  // 每一步的狀態：num = 顯示的數字；dots = [[種類, 點數], ...]，1 點 = 10 則
+  var TITLES = [
+    '活動開始，下單 API 寫完訂單 #1001～#1300，每張各丟一則 order_created',
+    'RabbitMQ 盡量把訊息往消費者推',
+    '消費者一封一封寄，寄完 #1001～#1050',
+    '部署新版本，消費者被重啟，記憶體清空',
+    '新版消費者啟動，向 RabbitMQ 要訊息'
+  ];
+  var EMPTY = { q: [0, []], m: [0, []], s: [0, []] };
+  var A = [
+    { q: [300, [['wait', 30]]], m: [0, []], s: [0, []], note: '300 則在佇列裡，等著被推出去', flow: [] },
+    { q: [0, []], m: [300, [['mem', 30]]], s: [0, []], note: '自動 ack：訊息一推出去，就從佇列刪掉', flow: [1] },
+    { q: [0, []], m: [250, [['mem', 25]]], s: [50, [['sent', 5]]], note: '佇列深度一直是 0，看起來消化得很快', flow: [2] },
+    { q: [0, []], m: [0, [['lost', 25]]], s: [50, [['sent', 5]]], note: '記憶體裡還沒寄的 250 則，跟著重啟一起消失', hot: ['m'], noteHot: true, flow: [] },
+    { q: [0, []], m: [0, [['lost', 25]]], s: [50, [['sent', 5]]], note: '佇列已經是空的：#1051～#1300 的確認信永遠不會寄出，日誌也沒有任何錯誤', hot: ['m'], noteHot: true, flow: [] }
+  ];
+  var B = [
+    { q: [300, [['wait', 30]]], m: [0, []], s: [0, []], note: '300 則在佇列裡，等著被推出去', flow: [] },
+    { q: [300, [['held', 30]]], m: [300, [['mem', 30]]], s: [0, []], note: '推給消費者，但佇列先留著（還沒 ack）', flow: [1] },
+    { q: [250, [['held', 25]]], m: [250, [['mem', 25]]], s: [50, [['sent', 5]]], note: '寄完的 50 則 ack 之後才刪，剩 250 則還沒 ack', flow: [2] },
+    { q: [250, [['back', 25]]], m: [0, []], s: [50, [['sent', 5]]], note: '還沒寄就重啟，連線斷掉：沒 ack 的 250 則重新入列', back: ['q'], noteBack: true, flow: [] },
+    { q: [250, [['held', 25]]], m: [250, [['mem', 25]]], s: [50, [['sent', 5]]], note: '新版消費者拿到這 250 則，接著寄', flow: [1] }
+  ];
+
+  function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
+  function easeInOut(x) { return x < 0.5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2; }
+  function total(spec) { var n = 0; for (var i = 0; i < spec.length; i++) n += spec[i][1]; return n; }
+
+  function Row(el, data) {
+    var cells = {};
+    el.querySelectorAll('.cell').forEach(function (c) {
+      var k = c.dataset.k, dots = c.querySelector('.dots'), spans = [];
+      for (var i = 0; i < 30; i++) { var s = document.createElement('i'); s.className = 'd'; s.hidden = true; dots.appendChild(s); spans.push(s); }
+      cells[k] = { el: c, num: c.querySelector('.num'), spans: spans, last: {} };
+    });
+    var arrows = {};
+    el.querySelectorAll('.arrow').forEach(function (a) { arrows[a.dataset.a] = a; });
+    return { el: el, data: data, cells: cells, arrows: arrows, note: el.querySelector('.note'), lastNote: null };
+  }
+  var rows = [Row(document.getElementById('rowA'), A), Row(document.getElementById('rowB'), B)];
+
+  function setCls(node, cache, key, val) { if (cache[key] !== val) { cache[key] = val; node.className = val; } }
+
+  function drawCell(cell, prev, next, p, isHot, isBack) {
+    var n = Math.round(prev[0] + (next[0] - prev[0]) * p);
+    if (cell.last.n !== n) { cell.last.n = n; cell.num.textContent = n.toLocaleString('en-US'); }
+    var spec = p < 0.5 ? prev[1] : next[1];
+    var count = Math.round(total(prev[1]) + (total(next[1]) - total(prev[1])) * p);
+    var kinds = [];
+    for (var i = 0; i < spec.length; i++) for (var j = 0; j < spec[i][1]; j++) kinds.push(spec[i][0]);
+    while (kinds.length < count) kinds.push(kinds.length ? kinds[kinds.length - 1] : (next[1][0] || prev[1][0] || ['wait'])[0]);
+    for (var d = 0; d < 30; d++) {
+      var on = d < count, sp = cell.spans[d];
+      if (sp.hidden === on) sp.hidden = !on;
+      if (on) { var c = 'd ' + kinds[d]; if (sp._c !== c) { sp._c = c; sp.className = c; } }
+    }
+    setCls(cell.el, cell.last, 'cls', 'cell' + (isHot ? ' hot' : '') + (isBack ? ' back' : ''));
+  }
+
+  function paint(t) {
+    t = clamp(t, 0, DUR);
+    var i = Math.min(4, Math.floor(t / STEP));
+    var p = easeInOut(clamp((t - i * STEP) / TRANS, 0, 1));
+    var showNext = p >= 0.5;
+    rows.forEach(function (r) {
+      var next = r.data[i], prev = i > 0 ? r.data[i - 1] : EMPTY;
+      ['q', 'm', 's'].forEach(function (k) {
+        var hot = showNext && next.hot && next.hot.indexOf(k) >= 0;
+        var back = showNext && next.back && next.back.indexOf(k) >= 0;
+        drawCell(r.cells[k], prev[k], next[k], p, hot, back);
+      });
+      var moving = p > 0 && p < 1;
+      ['1', '2'].forEach(function (a) {
+        var flow = moving && next.flow.indexOf(Number(a)) >= 0;
+        var rev = r === rows[1] && i === 3 && a === '1' && moving;
+        r.arrows[a].className = 'arrow' + (flow || rev ? ' flow' : '') + (rev ? ' rev' : '');
+      });
+      var noteCls = 'note' + (next.noteHot ? ' hot' : '') + (next.noteBack ? ' back' : '');
+      var key = i + noteCls;
+      if (r.lastNote !== key) { r.lastNote = key; r.note.textContent = next.note; r.note.className = noteCls; }
+    });
+    if (paint.lastI !== i) {
+      paint.lastI = i;
+      document.getElementById('nowT').textContent = 'T' + (i + 1);
+      document.getElementById('nowText').textContent = TITLES[i];
+      chips.forEach(function (c, k) { c.setAttribute('aria-pressed', k === i ? 'true' : 'false'); });
+      fig.setAttribute('aria-valuetext', 'T' + (i + 1) + '：' + TITLES[i]);
+    }
+    scrub.value = t.toFixed(2);
+    cur = t;
+  }
+
+  var scrub = document.getElementById('scrub');
+  var playBtn = document.getElementById('play');
+  var chips = Array.prototype.slice.call(fig.querySelectorAll('.chips button'));
+  var cur = REST, playing = false, visible = true, raf = 0, lastTs = 0;
+
+  function setPlaying(v) {
+    playing = v;
+    playBtn.textContent = v ? '❚❚ 暫停' : '▶ 播放';
+    playBtn.setAttribute('aria-label', v ? '暫停' : '播放');
+    arm();
+  }
+  function arm() {
+    if (playing && visible && !raf) { lastTs = 0; raf = requestAnimationFrame(tick); }
+    if ((!playing || !visible) && raf) { cancelAnimationFrame(raf); raf = 0; }
+  }
+  function tick(ts) {
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0;
+    lastTs = ts;
+    var t = cur + dt;
+    if (t >= DUR) { paint(DUR); setPlaying(false); return; }
+    paint(t);
+    raf = requestAnimationFrame(tick);
+  }
+  function seek(t) { setPlaying(false); paint(t); }
+  function stepIndex() { return Math.min(4, Math.floor(cur / STEP)); }
+  function goStep(k) { seek(clamp(k, 0, 4) * STEP + 1.5); }
+
+  playBtn.addEventListener('click', function () {
+    if (playing) { setPlaying(false); return; }
+    if (cur >= DUR - 0.01) paint(0);
+    setPlaying(true);
+  });
+  chips.forEach(function (c) { c.addEventListener('click', function () { goStep(Number(c.dataset.step)); }); });
+  scrub.addEventListener('input', function () { seek(Number(scrub.value)); });
+  fig.addEventListener('keydown', function (e) {
+    if (e.target === scrub) return;
+    if (e.key === 'ArrowRight') { goStep(stepIndex() + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { goStep(stepIndex() - 1); e.preventDefault(); }
+    else if (e.key === 'Home') { goStep(0); e.preventDefault(); }
+    else if (e.key === 'End') { goStep(4); e.preventDefault(); }
+    else if ((e.key === ' ' || e.key === 'Enter') && e.target === fig) { playBtn.click(); e.preventDefault(); }
+  });
+
+  var root = document.documentElement;
+  var mq = window.matchMedia('(prefers-color-scheme: dark)');
+  document.getElementById('theme').addEventListener('click', function () {
+    var dark = root.dataset.theme ? root.dataset.theme === 'dark' : mq.matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+  });
+
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      visible = es[es.length - 1].isIntersecting;
+      arm();
+    }, { rootMargin: '120px' }).observe(fig);
+  }
+
+  window.seek = seek;
+  window.DUR = DUR;
+  window.timeline = function () { return { dur: DUR, rest: REST, steps: [0, 3, 6, 9, 12] }; };
+
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  paint(REST);
+  if (!reduce) { paint(0); setPlaying(true); }
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 site_name: 後端基本功
-site_description: 給新進後端工程師的 50 個基本功主題：並行、交易、索引、快取、重試、訊息佇列、分散式一致性與維運。
+site_description: 給新進後端工程師的 50 篇入門教材：並行與交易、資料庫效能、快取、重試與容錯、訊息佇列、分散式一致性與維運。每篇從具體的出事情境開始，用時間軸和圖講清楚機制。
 docs_dir: docs
 repo_url: https://git.hy-tech.com.tw/ben.tsai/newbiebook
 repo_name: ben.tsai/newbiebook
@@ -14,15 +14,15 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
-      accent: amber
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-night
         name: 切換成深色
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: amber
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: 切換成淺色
@@ -39,6 +39,9 @@ theme:
 
 extra_css:
   - assets/extra.css
+
+extra_javascript:
+  - assets/extra.js
 
 markdown_extensions:
   - md_in_html
@@ -115,6 +118,7 @@ nav:
       - 39 事件驅動架構: 39-事件驅動架構.md
       - 40 Webhook 驗證: 40-Webhook 驗證.md
       - 41 Webhook 重試: 41-Webhook 重試.md
+      - 51 同步與非同步: 51-同步與非同步.md
   - 九、分散式資料一致性:
       - 42 最終一致性: 42-最終一致性.md
       - 43 分散式交易: 43-分散式交易.md
@@ -126,4 +130,14 @@ nav:
       - 48 優雅關閉: 48-優雅關閉.md
       - 49 健康檢查: 49-健康檢查.md
       - 50 分散式追蹤: 50-分散式追蹤.md
+  - 十一、測試與驗證:
+      - 52 傳統測試方式: 52-傳統測試方式.md
+      - 53 形式驗證: 53-形式驗證.md
+  - 十二、設計與分層:
+      - 54 SOLID 原則: 54-SOLID.md
+      - 55 外觀模式: 55-Facade.md
+      - 56 使用案例層: 56-Use Case.md
+      - 57 六邊形架構: 57-六邊形架構.md
+      - 58 依責任分層: 58-依責任分層.md
+      - 59 可見性與模組深度: 59-可見性與模組深度.md
   - 難度地圖: difficulty.md

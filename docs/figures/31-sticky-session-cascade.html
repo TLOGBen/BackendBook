@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sticky session 連鎖故障</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2433; --muted:#4f5d75; --soft:#5a6378;
+  --rule:rgba(45,49,66,.18); --line:#a3abbc; --card:#f6f7f9;
+  --corp:#2e5aa8; --other:#8a93a6;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111;
+  --down:#b42318; --track:#e3e6ed; --btn:#eef0f4; --btn-on:#2e5aa8; --btn-on-ink:#ffffff;
+  --sans:"PingFang TC","Microsoft JhengHei","Noto Sans TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e9ebf0; --muted:#b8bdc9; --soft:#a6aec0;
+    --rule:rgba(233,235,240,.18); --line:#5e6679; --card:#262a35;
+    --corp:#86abee; --other:#8e97aa;
+    --hot-fill:#4a3910; --hot-stroke:#f0b03c; --hot-ink:#fde68a;
+    --down:#ff8f80; --track:#3a3f4c; --btn:#2e3341; --btn-on:#86abee; --btn-on-ink:#111111;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e9ebf0; --muted:#b8bdc9; --soft:#a6aec0;
+  --rule:rgba(233,235,240,.18); --line:#5e6679; --card:#262a35;
+  --corp:#86abee; --other:#8e97aa;
+  --hot-fill:#4a3910; --hot-stroke:#f0b03c; --hot-ink:#fde68a;
+  --down:#ff8f80; --track:#3a3f4c; --btn:#2e3341; --btn-on:#86abee; --btn-on-ink:#111111;
+  color-scheme:dark;
+}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+*{box-sizing:border-box}
+.fig{margin:0 auto;padding:12px 16px;max-width:880px;}
+.fig:focus-visible{outline:2px solid var(--corp);outline-offset:-2px;border-radius:8px}
+.stage{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));column-gap:8px}
+.users{grid-column:1/-1;display:grid;grid-template-columns:3fr 2fr;gap:8px}
+.ug{border:1px solid var(--rule);border-radius:8px;padding:6px 10px;display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px;line-height:1.35}
+.ug b{font-weight:600}
+.ug small{display:block;font-size:12px;color:var(--soft)}
+.ug i{flex:none;width:10px;height:10px;border-radius:50%}
+.ug.corp i{background:var(--corp)} .ug.other i{background:var(--other)}
+.lane{position:relative;height:64px;overflow:hidden}
+.lane.top{grid-column:1/-1;height:32px}
+.lane .ln{position:absolute;left:calc(50% - 1px);top:0;bottom:0;width:2px;background:var(--line)}
+.lane.top .ln{display:none}
+.lane .ln2{position:absolute;top:0;bottom:0;width:2px;background:var(--line)}
+.lane.failed .ln{background:none;border-left:2px dashed var(--line);opacity:.6}
+.dot{position:absolute;left:50%;top:0;width:8px;height:8px;margin-left:-4px;border-radius:50%;will-change:transform,opacity;opacity:0}
+.dot.c{background:var(--corp)} .dot.o{background:var(--other)}
+.dot.r{width:10px;height:10px;margin-left:-5px;background:var(--bg);border:2px solid var(--hot-stroke)}
+.x{position:absolute;left:50%;width:20px;margin-left:-10px;text-align:center;font:700 16px/18px var(--sans);color:var(--down);opacity:0}
+.x.b{bottom:0} .x.t{top:2px}
+.lb{grid-column:1/-1;border:1px solid var(--rule);border-radius:8px;background:var(--card);padding:8px 12px;display:flex;flex-wrap:wrap;align-items:baseline;column-gap:10px;row-gap:2px;min-height:56px}
+.lb .nm{font-size:15px;font-weight:600}
+.lb code{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.lb .note{flex:1 1 200px;font-size:13px;color:var(--soft);line-height:1.5}
+.vm{border:1px solid var(--rule);border-radius:8px;background:var(--card);padding:8px;container-type:inline-size;min-width:0}
+.vm .nm{font-size:15px;font-weight:600;line-height:20px}
+.pill{display:block;min-height:18px;margin-top:2px}
+.pill span{display:inline-block;font-size:12px;line-height:16px;padding:0 6px;border-radius:9px;border:1px solid currentColor;white-space:nowrap}
+.pill .down{color:var(--down)} .pill .info{color:var(--muted)} .pill .warn{color:var(--hot-stroke)}
+.meter{display:flex;align-items:center;gap:6px;margin-top:6px;min-height:16px}
+.bar{flex:1 1 auto;height:6px;border-radius:3px;background:var(--track);overflow:hidden;min-width:16px}
+.bar b{display:block;height:100%;width:0;background:var(--muted);border-radius:3px}
+.mt{font-family:var(--mono);font-size:12px;color:var(--soft);white-space:nowrap}
+.sl{margin-top:6px;font-family:var(--mono);font-size:12px;color:var(--soft);line-height:16px}
+.chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;min-height:27px;align-content:flex-start;align-items:center}
+.chip{width:12px;height:12px;border-radius:3px;background:var(--other)}
+.chip.c{background:var(--corp)}
+.miss{display:none;align-items:center;gap:4px;font-size:12px;line-height:16px;color:var(--hot-ink)}
+.miss em{font-style:normal;width:14px;height:14px;border:2px dashed var(--hot-stroke);border-radius:3px;font:700 10px/10px var(--sans);display:inline-flex;align-items:center;justify-content:center}
+.vm.missing .miss{display:inline-flex}
+.vm.hot,.lb.hot,.db.hot{background:var(--hot-fill);box-shadow:inset 0 0 0 2px var(--hot-stroke);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.vm.hot .mt,.vm.hot .sl,.lb.hot .note,.lb.hot code,.db.hot .dl small{color:var(--hot-ink)}
+.vm.hot .bar{background:rgba(127,90,20,.22)}
+.vm.hot .bar b{background:var(--hot-stroke)}
+.vm.hot .pill .down,.vm.hot .pill .warn,.vm.hot .pill .info{color:var(--hot-ink)}
+.vm.failed{opacity:.55;border-style:dashed}
+.db{grid-column:1/-1;margin-top:10px;border:1px solid var(--rule);border-radius:8px;background:var(--card);padding:6px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-height:44px}
+.db .dl{font-size:14px;font-weight:600}
+.db .dl small{font-weight:400;font-size:12px;color:var(--soft);margin-left:4px}
+.ord{display:none;font-size:13px;line-height:18px;padding:2px 8px;border-radius:6px;border:1px solid var(--hot-stroke);background:var(--bg);color:var(--ink)}
+.ord b{font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:10px;font-size:12px;color:var(--soft);line-height:18px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:50%}
+.legend .lc{background:var(--corp)} .legend .lo{background:var(--other)}
+.legend .lr{width:10px;height:10px;border:2px solid var(--hot-stroke)}
+.legend .ls{width:12px;height:12px;border-radius:3px;background:var(--corp)}
+.readout{display:flex;gap:10px;align-items:flex-start;margin-top:10px;min-height:3.4em;font-size:15px;line-height:1.6}
+.readout .tag{flex:none;font:600 13px/24px var(--mono);padding:0 8px;border-radius:6px;background:var(--hot-fill);color:var(--hot-ink);box-shadow:inset 0 0 0 1px var(--hot-stroke)}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.controls button{font:500 13px/1 var(--sans);min-height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--rule);background:var(--btn);color:var(--ink);cursor:pointer}
+.controls button:focus-visible,.controls input:focus-visible{outline:2px solid var(--corp);outline-offset:2px}
+.controls .play{min-width:84px;font-weight:600}
+.controls input[type=range]{flex:1 1 160px;min-width:120px;accent-color:var(--corp);height:34px;margin:0}
+.steps{display:flex;gap:4px;flex-wrap:wrap}
+.steps button{min-width:38px;padding:0 6px;font-family:var(--mono)}
+.steps button[aria-pressed="true"]{background:var(--btn-on);color:var(--btn-on-ink);border-color:var(--btn-on)}
+.controls .theme{margin-left:auto;padding:0 10px}
+@container (max-width: 96px){
+  .sl{display:none}
+  .miss .ml{display:none}
+}
+@media (max-width: 520px){
+  .stage{column-gap:4px}
+  .users{gap:4px}
+  .ug{padding:6px 8px}
+  .vm{padding:6px}
+  .vm .nm{font-size:14px}
+  .readout{font-size:14px;min-height:6.4em}
+  .lb{padding:8px 10px}
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="sticky-cascade" data-dur="24" data-rest="15.2" tabindex="0"
+  aria-label="動畫：Nginx 用 ip_hash 把共用同一個 IP 的公司員工全綁在 VM-2；VM-2 被 OOM killer 收掉後，存在它記憶體裡的 session 一起不見，這批使用者被改送到 VM-3，VM-3 找不到他們的 sid 而回傳登入頁，重新登入的流量又把 VM-3 拖垮，付款重試還建了兩筆訂單。">
+  <div class="stage" aria-hidden="true">
+    <div class="users">
+      <div class="ug corp"><i></i><div><b>大公司員工</b><small>很多台電腦共用一個對外 IP（NAT）</small></div></div>
+      <div class="ug other"><i></i><div><b>其他使用者</b><small>各自的 IP</small></div></div>
+    </div>
+    <div class="lane top" id="lane-top"><div class="ln2" style="left:30%"></div><div class="ln2" style="left:80%"></div></div>
+    <div class="lb" id="lb"><span class="nm">Nginx</span><code>ip_hash;</code><span class="note" id="lb-note"></span></div>
+    <div class="lane" id="lane-0"><div class="ln"></div><div class="x t">✕</div><div class="x b">✕</div></div>
+    <div class="lane" id="lane-1"><div class="ln"></div><div class="x t">✕</div><div class="x b">✕</div></div>
+    <div class="lane" id="lane-2"><div class="ln"></div><div class="x t">✕</div><div class="x b">✕</div></div>
+    <div class="lane" id="lane-3"><div class="ln"></div><div class="x t">✕</div><div class="x b">✕</div></div>
+    <div class="vm" id="vm-0"><div class="nm">VM-1</div><div class="pill"></div><div class="meter"><div class="bar"><b></b></div><span class="mt"></span></div><div class="sl">SESSIONS</div><div class="chips"></div></div>
+    <div class="vm" id="vm-1"><div class="nm">VM-2</div><div class="pill"></div><div class="meter"><div class="bar"><b></b></div><span class="mt"></span></div><div class="sl">SESSIONS</div><div class="chips"></div></div>
+    <div class="vm" id="vm-2"><div class="nm">VM-3</div><div class="pill"></div><div class="meter"><div class="bar"><b></b></div><span class="mt"></span></div><div class="sl">SESSIONS</div><div class="chips"></div></div>
+    <div class="vm" id="vm-3"><div class="nm">VM-4</div><div class="pill"></div><div class="meter"><div class="bar"><b></b></div><span class="mt"></span></div><div class="sl">SESSIONS</div><div class="chips"></div></div>
+    <div class="db" id="db"><span class="dl">資料庫<small>訂單</small></span>
+      <span class="ord" id="ord-1"><b>訂單 #1</b>　已寫入，回應沒送回</span>
+      <span class="ord" id="ord-2"><b>訂單 #2</b>　逾時重試，又建一筆</span>
+    </div>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span><i class="lc"></i>公司員工的請求</span>
+    <span><i class="lo"></i>其他使用者的請求</span>
+    <span><i class="lr"></i>回傳的登入頁</span>
+    <span><i class="ls"></i>sid：只存在這台記憶體的 SESSIONS</span>
+  </div>
+  <div class="readout" role="status" aria-live="polite"><span class="tag" id="tag">T4</span><span id="text"></span></div>
+  <div class="controls">
+    <button type="button" class="play" id="play" aria-label="播放">▶ 播放</button>
+    <input type="range" id="scrub" min="0" max="24" step="0.05" value="15.2" aria-label="時間軸（T1 到 T6）">
+    <div class="steps" role="group" aria-label="跳到某一步">
+      <button type="button" data-step="0" aria-pressed="false">T1</button>
+      <button type="button" data-step="1" aria-pressed="false">T2</button>
+      <button type="button" data-step="2" aria-pressed="false">T3</button>
+      <button type="button" data-step="3" aria-pressed="false">T4</button>
+      <button type="button" data-step="4" aria-pressed="false">T5</button>
+      <button type="button" data-step="5" aria-pressed="false">T6</button>
+    </div>
+    <button type="button" class="theme" id="theme" aria-label="切換深色或淺色">◐</button>
+  </div>
+</figure>
+<script>
+(function(){
+  "use strict";
+  var DUR = 24, REST = 15.2, STEP = 4, TR = 0.8;
+  var STEPS = [
+    "開賣。大公司的員工都從同一個對外 IP 連進來（NAT），ip_hash 把這個 IP 的請求全部送到 VM-2：VM-2 的 CPU 衝到 100%，其他三台約 20%。",
+    "VM-2 記憶體耗盡，行程被 OOM killer 收掉，停止回應。存在它記憶體裡的 SESSIONS 也跟著一起不見。",
+    "Nginx 轉給 VM-2 的請求一直連不上，失敗次數到了門檻，就把 VM-2 標成失敗，之後的請求改分給另外三台。",
+    "原本固定在 VM-2 的使用者被分到 VM-3。VM-3 的 SESSIONS 裡沒有他們的 sid，全部當作沒登入，回傳登入頁。",
+    "這些使用者一再重新登入、重新整理，流量翻一倍，把 VM-3 也拖垮，停止回應。",
+    "有人剛好在 VM-2 掛掉那一刻按下「付款」：第一筆訂單已寫進資料庫，回應卻沒送回；前端逾時自動重試，送到另一台，又建了第二筆。"
+  ];
+  var LB_NOTE = [
+    "同一個 IP 永遠送到同一台",
+    "轉給 VM-2 的請求連不上",
+    "失敗次數到門檻：VM-2 標成失敗",
+    "請求改分給 VM-1、VM-3、VM-4",
+    "請求改分給 VM-1、VM-3、VM-4",
+    "請求改分給 VM-1、VM-3、VM-4"
+  ];
+  var SID = [[0,0],[1,1,1,1,0],[0,0],[0,0]]; // 1 = 公司員工的 sid
+  var NC = 16, NO = 4, NR = 8, LANE_TRAVEL = 56, TOP_TRAVEL = 24, SPEED = 0.45;
+
+  function clamp(x,a,b){return x<a?a:(x>b?b:x);}
+  function ease(x){x=clamp(x,0,1);return 1-Math.pow(1-x,3);}
+  function frac(x){return x-Math.floor(x);}
+  function stepOf(t){return Math.min(5,Math.max(0,Math.floor(t/STEP)));}
+
+  // ---- the model: every value is a pure function of t ----
+  var METER = [
+    [0.2,1,0.2,0.2],
+    [0.2,0,0.2,0.2],
+    [0.35,0,0.35,0.35],
+    [0.3,0,0.6,0.3],
+    [0.3,0,1,0.3],
+    [0.3,0,0,0.3]
+  ];
+  function meterAt(t,j){
+    var i = stepOf(t), u = t - i*STEP;
+    var cur = METER[i][j];
+    if (i===4 && j===2 && u>=2) { var k = ease((u-2)/TR); return 1 + (0-1)*k; }
+    if (i===5 && j===2) return 0;
+    var prev = i>0 ? METER[i-1][j] : cur;
+    if (i===5 && j===2) prev = 0;
+    if (i===1 && j===1) { return u<0.6 ? 1 : 1 - ease((u-0.6)/TR); }
+    if (i===2 && j===1) return 0;
+    return prev + (cur-prev)*ease(u/TR);
+  }
+  function model(t){
+    var i = stepOf(t), u = t - i*STEP;
+    var m = {i:i, u:u, lanes:[], vms:[], focus:null};
+    var corpLane = i<=1 ? 1 : 2;
+    var corpCount = i<=3 ? 8 : 8 + 8*ease(u/1.0);
+    if (i===5) corpCount = 16;
+    var vm3Down = (i===4 && u>=2) || i===5;
+    for (var j=0;j<4;j++){
+      var L = {corp:0, other:3, rings:0, status:'ok', xb:0, xt:0};
+      if (j===corpLane) L.corp = corpCount;
+      if (i>=2 && j!==1) L.other = 4;
+      if (j===1){
+        if (i===1) { L.status = u>=0.6 ? 'blocked' : 'ok'; L.xb = ease((u-0.6)/0.4); }
+        if (i>=2) { L.status = 'failed'; L.other = 0; L.corp = 0; L.xt = 1; }
+      }
+      if (j===2){
+        if (i===3) L.rings = 4;
+        if (i===4 && u<2) L.rings = 8;
+        if (vm3Down) { L.status = 'blocked'; L.rings = 0; L.xb = i===5 ? 1 : ease((u-2)/0.4); }
+      }
+      m.lanes.push(L);
+    }
+    // VM cards
+    for (j=0;j<4;j++){
+      var V = {cls:'', pill:'', pillCls:'info', mt:'', meter:meterAt(t,j), sidFade:1, missing:false};
+      if (i<=1 && j!==1) V.mt = '約 20%';
+      if (j===1){
+        if (i===0) V.mt = '100%';
+        if (i===1){ if (u>=0.6){ V.pill='停止回應'; V.pillCls='down'; V.mt='—'; V.sidFade = 1-ease((u-0.6)/TR);} else V.mt='100%'; }
+        if (i>=2){ V.pill='標成失敗'; V.pillCls='down'; V.mt='—'; V.sidFade=0; V.cls='failed'; }
+      }
+      if (i>=2 && j!==1) V.pill = '接手中';
+      if (j===2){
+        if (i===3){ V.pill='回登入頁'; V.pillCls='warn'; V.missing=true; }
+        if (i===4){ V.missing=true; if (u<2){ V.pill='流量翻倍'; V.pillCls='warn'; } else { V.pill='停止回應'; V.pillCls='down'; V.mt='—'; } }
+        if (i===5){ V.pill='停止回應'; V.pillCls='down'; V.mt='—'; V.missing=true; }
+      }
+      m.vms.push(V);
+    }
+    m.focus = ['vm-1','vm-1','lb','vm-2','vm-2','db'][i];
+    m.ord1 = i===5 && u>=0.4;
+    m.ord2 = i===5 && u>=1.6;
+    m.topCorp = corpCount;
+    return m;
+  }
+
+  // ---- build the DOM once ----
+  var $ = function(id){return document.getElementById(id);};
+  var fig = $('fig');
+  function mk(parent, cls){var d=document.createElement('div');d.className=cls;parent.appendChild(d);return d;}
+  var lanes = [], top = {c:[], o:[]};
+  var topEl = $('lane-top');
+  for (var k=0;k<NC;k++){ var d=mk(topEl,'dot c'); d.style.left='30%'; top.c.push(d); }
+  for (k=0;k<NO;k++){ var d2=mk(topEl,'dot o'); d2.style.left='80%'; top.o.push(d2); }
+  for (var j=0;j<4;j++){
+    var el = $('lane-'+j), L = {el:el, c:[], o:[], r:[], xt:el.querySelector('.x.t'), xb:el.querySelector('.x.b')};
+    for (k=0;k<NC;k++) L.c.push(mk(el,'dot c'));
+    for (k=0;k<NO;k++) L.o.push(mk(el,'dot o'));
+    for (k=0;k<NR;k++) L.r.push(mk(el,'dot r'));
+    lanes.push(L);
+    var v = $('vm-'+j), chips = v.querySelector('.chips');
+    v._chips = [];
+    for (k=0;k<SID[j].length;k++){ var c=mk(chips,'chip'+(SID[j][k]?' c':'')); v._chips.push(c); }
+    var miss = document.createElement('span'); miss.className='miss'; miss.innerHTML='<em>?</em><span class="ml">沒有這些 sid</span>'; chips.appendChild(miss);
+    v._pill = v.querySelector('.pill'); v._bar = v.querySelector('.bar b'); v._mt = v.querySelector('.mt');
+  }
+  var vms = [0,1,2,3].map(function(j){return $('vm-'+j);});
+  var lbEl = $('lb'), lbNote = $('lb-note'), dbEl = $('db'), ord1 = $('ord-1'), ord2 = $('ord-2');
+  var tagEl = $('tag'), textEl = $('text'), scrub = $('scrub'), playBtn = $('play');
+  var stepBtns = Array.prototype.slice.call(document.querySelectorAll('.steps button'));
+
+  function jitter(k){ return ((k*37)%9) - 4; }
+  function placeStream(dots, count, t, travel, seed, mode, dx){
+    // mode: 'ok' | 'blocked' | 'up'
+    var n = dots.length;
+    for (var k=0;k<n;k++){
+      // fixed slots k/n; even slots fill first, so doubling the count fills the gaps without moving any dot
+      var rank = (k % 2 === 0) ? k/2 : Math.ceil(n/2) + (k-1)/2;
+      var a = clamp(count - rank, 0, 1);
+      var p = frac(t*SPEED + k/n + seed);
+      var op = a;
+      if (mode==='blocked' && p>0.7) op *= Math.max(0, 1-(p-0.7)/0.3);
+      if (mode!=='up') { if (p<0.08) op *= p/0.08; if (mode==='ok' && p>0.92) op *= (1-p)/0.08; }
+      var y = mode==='up' ? (1-p)*travel : p*travel;
+      if (mode==='up' && p>0.9) op *= (1-p)/0.1;
+      var x = (dx===false ? 0 : jitter(k));
+      dots[k].style.transform = 'translate(' + x + 'px,' + y.toFixed(1) + 'px)';
+      dots[k].style.opacity = op.toFixed(3);
+    }
+  }
+
+  var lastStep = -1, curT = REST;
+  function render(t){
+    t = clamp(t, 0, DUR - 0.001);
+    curT = t;
+    var m = model(t);
+    placeStream(top.c, m.topCorp, t, TOP_TRAVEL, 0.13, 'ok');
+    placeStream(top.o, 3, t, TOP_TRAVEL, 0.41, 'ok');
+    for (var j=0;j<4;j++){
+      var L = lanes[j], S = m.lanes[j];
+      L.el.classList.toggle('failed', S.status==='failed');
+      var mode = S.status==='blocked' ? 'blocked' : 'ok';
+      placeStream(L.c, S.corp, t, LANE_TRAVEL, 0.07*j, mode);
+      placeStream(L.o, S.other, t, LANE_TRAVEL, 0.29 + 0.11*j, mode, false);
+      placeStream(L.r, S.rings, t, LANE_TRAVEL, 0.5, 'up');
+      L.xt.style.opacity = S.xt; L.xb.style.opacity = S.xb.toFixed(3);
+      var V = m.vms[j], v = vms[j];
+      v.classList.toggle('hot', m.focus === 'vm-'+j);
+      v.classList.toggle('failed', V.cls==='failed');
+      v.classList.toggle('missing', V.missing);
+      var ph = V.pill ? '<span class="'+V.pillCls+'">'+V.pill+'</span>' : '';
+      if (v._pill._h !== ph){ v._pill.innerHTML = ph; v._pill._h = ph; }
+      v._bar.style.width = (V.meter*100).toFixed(1)+'%';
+      if (v._mt.textContent !== V.mt) v._mt.textContent = V.mt;
+      for (var k=0;k<v._chips.length;k++) v._chips[k].style.opacity = (SID[j][k] ? V.sidFade : (j===1 ? V.sidFade : 1)).toFixed(3);
+    }
+    lbEl.classList.toggle('hot', m.focus==='lb');
+    dbEl.classList.toggle('hot', m.focus==='db');
+    if (lbNote.textContent !== LB_NOTE[m.i]) lbNote.textContent = LB_NOTE[m.i];
+    ord1.style.display = m.ord1 ? 'inline-block' : 'none';
+    ord2.style.display = m.ord2 ? 'inline-block' : 'none';
+    if (m.i !== lastStep){
+      lastStep = m.i;
+      tagEl.textContent = 'T' + (m.i+1);
+      textEl.textContent = STEPS[m.i];
+      stepBtns.forEach(function(b,ix){ b.setAttribute('aria-pressed', ix===m.i ? 'true' : 'false'); });
+    }
+    scrub.value = t.toFixed(2);
+  }
+
+  // ---- playback: rAF only while playing and visible ----
+  var playing = false, visible = true, raf = 0, lastTs = 0, started = false;
+  function setBtn(){
+    var atEnd = curT >= DUR - 0.05;
+    playBtn.textContent = playing ? '❚❚ 暫停' : (atEnd ? '↻ 重播' : '▶ 播放');
+    playBtn.setAttribute('aria-label', playing ? '暫停' : (atEnd ? '重播' : '播放'));
+  }
+  function frame(ts){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = lastTs ? Math.min(0.1, (ts - lastTs)/1000) : 0;
+    lastTs = ts;
+    var nt = curT + dt;
+    if (nt >= DUR - 0.001){ render(DUR - 0.001); playing = false; setBtn(); return; }
+    render(nt);
+    raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (playing && visible && !raf){ lastTs = 0; raf = requestAnimationFrame(frame); } }
+  function play(){
+    if (!started || curT >= DUR - 0.05){ render(0); }
+    started = true; playing = true; setBtn(); arm();
+  }
+  function pause(){ playing = false; if (raf){ cancelAnimationFrame(raf); raf = 0; } setBtn(); }
+  function seek(t){ pause(); started = true; render(t); setBtn(); }
+
+  playBtn.addEventListener('click', function(){ playing ? pause() : play(); });
+  scrub.addEventListener('input', function(){ seek(parseFloat(scrub.value)); });
+  stepBtns.forEach(function(b){ b.addEventListener('click', function(){ seek(parseInt(b.getAttribute('data-step'),10)*STEP + 3.2); }); });
+  $('theme').addEventListener('click', function(){
+    var root = document.documentElement;
+    var dark = root.getAttribute('data-theme') ? root.getAttribute('data-theme')==='dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    if (e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); playing ? pause() : play(); }
+    else if (e.key === 'ArrowRight'){ e.preventDefault(); seek(Math.min(5, stepOf(curT)+1)*STEP + 3.2); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(Math.max(0, stepOf(curT)-1)*STEP + 3.2); }
+  });
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); }, {rootMargin:'120px'}).observe(fig);
+  }
+  // report height to a host page (at most once per resize)
+  if (window.parent !== window && 'ResizeObserver' in window){
+    var lastH = 0;
+    new ResizeObserver(function(es){
+      var h = Math.ceil(es[0].contentRect.height + 24);
+      if (h !== lastH){ lastH = h; try { window.parent.postMessage({type:'figure-height', fig:'sticky-cascade', height:h}, '*'); } catch(_){} }
+    }).observe(fig);
+  }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur:DUR, rest:REST, steps:STEPS.length}; };
+  render(REST);
+  setBtn();
+})();
+</script>
+</body>
+</html>

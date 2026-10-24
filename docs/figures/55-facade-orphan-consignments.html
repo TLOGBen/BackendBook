@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Facade 與孤兒託運單</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f5f6f8;
+    --chip: #ffffff;
+    --ink: #1f2430;
+    --muted: #4f5d75;
+    --soft: #5f6878;
+    --rule: rgba(31, 36, 48, 0.14);
+    --rule-strong: rgba(31, 36, 48, 0.32);
+    --hot-fill: #fde68a;
+    --hot-stroke: #b45309;
+    --hot-ink: #78350f;
+    --ok: #1d6f43;
+    --ok-fill: #dcf1e4;
+    --skip: #8a93a3;
+    --btn: #2e5aa8;
+    --btn-ink: #ffffff;
+    --font: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans TC", "Microsoft JhengHei", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1e2129;
+      --panel: #272b36;
+      --chip: #1e2129;
+      --ink: #e8eaf0;
+      --muted: #b4bccb;
+      --soft: #a3abbc;
+      --rule: rgba(232, 234, 240, 0.14);
+      --rule-strong: rgba(232, 234, 240, 0.34);
+      --hot-fill: #4a3410;
+      --hot-stroke: #f59e0b;
+      --hot-ink: #fde68a;
+      --ok: #7fd6a4;
+      --ok-fill: #173a29;
+      --skip: #7d8596;
+      --btn: #7aa5ea;
+      --btn-ink: #10141c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1e2129;
+    --panel: #272b36;
+    --chip: #1e2129;
+    --ink: #e8eaf0;
+    --muted: #b4bccb;
+    --soft: #a3abbc;
+    --rule: rgba(232, 234, 240, 0.14);
+    --rule-strong: rgba(232, 234, 240, 0.34);
+    --hot-fill: #4a3410;
+    --hot-stroke: #f59e0b;
+    --hot-ink: #fde68a;
+    --ok: #7fd6a4;
+    --ok-fill: #173a29;
+    --skip: #7d8596;
+    --btn: #7aa5ea;
+    --btn-ink: #10141c;
+    color-scheme: dark;
+  }
+
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 13px/1.5 var(--font);
+    padding: 8px 16px 12px;
+    -webkit-text-size-adjust: 100%;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  .fig { margin: 0; max-width: 960px; margin-inline: auto; outline: none; }
+  .fig:focus-visible { outline: 2px solid var(--btn); outline-offset: 4px; border-radius: 6px; }
+  button { font: inherit; color: inherit; }
+  button:focus-visible, .scrub:focus-visible { outline: 2px solid var(--btn); outline-offset: 2px; }
+  code, .mono { font-family: var(--mono); }
+
+  /* stacked variants: every variant occupies the same grid cell, so the box is as tall as the longest one and never jumps */
+  .stack { display: grid; }
+  .stack > * { grid-area: 1 / 1; visibility: hidden; }
+  .stack > .on { visibility: visible; }
+
+  /* step rail */
+  .top { display: flex; gap: 8px; align-items: stretch; }
+  .steps { list-style: none; margin: 0; padding: 0; flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .steps button {
+    width: 100%; min-height: 36px; padding: 2px; cursor: pointer;
+    border: 1px solid var(--rule); border-radius: 6px; background: var(--panel);
+    font-weight: 700; font-size: 13px; color: var(--soft);
+  }
+  .steps button.done { color: var(--ink); border-color: var(--rule-strong); }
+  .steps button.cur { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .theme {
+    min-height: 36px; min-width: 44px; border: 1px solid var(--rule-strong); border-radius: 6px;
+    background: transparent; cursor: pointer; font-size: 12px; color: var(--muted); padding: 0 8px;
+  }
+
+  .now { margin-top: 10px; display: flex; gap: 10px; align-items: baseline; }
+  .now .k { font-weight: 700; font-size: 15px; flex: none; }
+  .now .stack { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; }
+
+  /* two columns */
+  .cols { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .col { border: 1px solid var(--rule); border-radius: 10px; padding: 12px; background: var(--panel); min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .col-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .col-name { font-size: 15px; font-weight: 700; }
+  .col-tag { font-size: 12px; color: var(--soft); }
+  .note { font-size: 13px; color: var(--muted); }
+  .note code { font-size: 12px; color: var(--ink); }
+
+  /* flows (left) */
+  .flows { display: flex; flex-direction: column; gap: 8px; }
+  .flow { border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); padding: 6px 8px 8px; }
+  .flow-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+  .flow-name { font-weight: 700; font-size: 13px; }
+  .ftag { font-size: 12px; color: var(--soft); white-space: nowrap; }
+  .ftag.ok { color: var(--ok); font-weight: 600; }
+  .ftag.hot { color: var(--hot-ink); background: var(--hot-fill); border: 1px solid var(--hot-stroke); border-radius: 4px; padding: 0 4px; font-weight: 700; }
+  .ftag.off { visibility: hidden; }
+
+  .chips { margin-top: 6px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; position: relative; }
+  .chip {
+    border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--chip);
+    padding: 3px 4px; text-align: center; min-width: 0; position: relative;
+  }
+  .chip .lb { display: block; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chip .dt { display: block; font-family: var(--mono); font-size: 12px; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 18px; }
+  .chip.ok { background: var(--ok-fill); border-color: var(--ok); }
+  .chip.ok .dt { color: var(--ok); }
+  .chip.hot { background: var(--hot-fill); border: 2px solid var(--hot-stroke); padding: 2px 3px; }
+  .chip.hot .lb, .chip.hot .dt { color: var(--hot-ink); }
+  .chip.skip { border-style: dashed; opacity: .75; }
+  .chip.skip .lb, .chip.skip .dt { color: var(--skip); }
+  .chip.slot-hot .dt { color: var(--hot-ink); background: var(--hot-fill); border-radius: 3px; }
+  .chip + .chip::before {
+    content: "→"; position: absolute; left: -4px; top: 50%; transform: translate(-50%, -50%);
+    font-size: 12px; color: var(--soft); background: transparent; line-height: 1;
+  }
+  .pulse { box-shadow: 0 0 0 3px color-mix(in srgb, var(--hot-stroke) 35%, transparent); }
+  .pulse-ok { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 30%, transparent); }
+
+  .legend { font-size: 12px; color: var(--soft); }
+  .legend code { font-size: 12px; }
+
+  /* right: flows → facade */
+  .callers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  .caller { border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); padding: 4px; text-align: center; min-width: 0; }
+  .caller .flow-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .caller .dt { display: block; font-family: var(--mono); font-size: 12px; color: var(--soft); }
+  .caller.flash { border-color: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 30%, transparent); }
+  .caller.flash .dt { color: var(--ok); font-weight: 700; }
+  .down { text-align: center; font-size: 12px; color: var(--soft); line-height: 1.3; }
+  .down code { font-size: 12px; color: var(--ink); }
+  .facade { border: 2px solid var(--hot-stroke); border-radius: 8px; background: var(--bg); padding: 6px 8px 8px; }
+  .facade-name { font-family: var(--mono); font-weight: 700; font-size: 13px; }
+  .const { margin-top: 4px; font-family: var(--mono); font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--rule); display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+  .const.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); font-weight: 700; }
+  .cancel { margin-top: 6px; border: 2px solid var(--hot-stroke); background: var(--hot-fill); color: var(--hot-ink); border-radius: 6px; padding: 2px 6px; font-size: 12px; font-weight: 600; }
+  .cancel code { font-size: 12px; }
+  .cancel.off { visibility: hidden; }
+
+  /* result row */
+  .result { border-top: 1px dashed var(--rule-strong); padding-top: 8px; font-size: 13px; }
+  .result .rk { font-size: 12px; color: var(--soft); }
+  .result .bad { color: var(--hot-ink); background: var(--hot-fill); border: 1px solid var(--hot-stroke); border-radius: 4px; padding: 0 4px; font-weight: 700; }
+  .result .good { color: var(--ok); font-weight: 700; }
+  .result code { font-size: 12px; overflow-wrap: anywhere; }
+
+  /* ledger */
+  .ledger { border: 1px solid var(--rule-strong); border-radius: 8px; background: var(--bg); padding: 8px; }
+  .ledger-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .ledger-name { font-size: 12px; color: var(--soft); font-weight: 600; }
+  .count { font-size: 13px; font-weight: 700; white-space: nowrap; }
+  .count b { font-size: 22px; font-variant-numeric: tabular-nums; margin: 0 2px; }
+  .count.hot b { color: var(--hot-stroke); }
+  .count.zero b { color: var(--ok); }
+  .tickets { margin-top: 6px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; min-height: 48px; }
+  .tk { border: 1px solid var(--rule-strong); border-radius: 6px; padding: 2px 4px; text-align: center; background: var(--chip); min-width: 0; }
+  .tk .no { display: block; font-family: var(--mono); font-size: 12px; font-weight: 700; }
+  .tk .st { display: block; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tk.off { visibility: hidden; }
+  .tk.wait .st { color: var(--soft); }
+  .tk.orphan { background: var(--hot-fill); border: 2px solid var(--hot-stroke); padding: 1px 3px; }
+  .tk.orphan .no, .tk.orphan .st { color: var(--hot-ink); }
+  .tk.booked { background: var(--ok-fill); border-color: var(--ok); }
+  .tk.booked .st { color: var(--ok); }
+  .tk.cancelled { border-style: dashed; }
+  .tk.cancelled .no { text-decoration: line-through; color: var(--skip); }
+  .tk.cancelled .st { color: var(--skip); }
+  .ledger .note { margin-top: 4px; font-size: 12px; }
+
+  /* controls */
+  .ctrl { margin-top: 12px; display: flex; align-items: center; gap: 6px; }
+  .ctrl button {
+    min-height: 36px; min-width: 40px; border: 1px solid var(--rule-strong); border-radius: 6px;
+    background: var(--panel); cursor: pointer; font-size: 13px; padding: 0 8px;
+  }
+  .ctrl #play { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); min-width: 64px; font-weight: 600; }
+  .scrub { flex: 1; min-width: 0; height: 32px; accent-color: var(--btn); margin: 0 4px; }
+  .clock { font-family: var(--mono); font-size: 12px; color: var(--soft); min-width: 48px; text-align: right; }
+
+  @media (max-width: 640px) {
+    .cols { grid-template-columns: 1fr; gap: 12px; }
+  }
+  @media (max-width: 380px) {
+    .ctrl { gap: 4px; }
+    .ctrl button { min-width: 36px; padding: 0 6px; }
+    .ctrl #play { min-width: 56px; }
+    .clock { display: none; }
+  }
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="facade-orphan-consignments" data-dur="14" data-rest="13.5" tabindex="0"
+  aria-label="動畫：同一個物流商改版事件，左邊沒有 Facade，3 個流程各自呼叫物流商 SDK 的 3 步，補寄流程漏改時段，客服按 3 次補寄，物流商後台留下 3 張沒人取件的託運單；右邊有 ShippingFacade，只改一個常數，預約取件失敗時會取消託運單，留下 0 張。">
+
+  <div class="top">
+    <ol class="steps" id="steps">
+      <li><button type="button" data-k="0" aria-label="跳到 T1">T1</button></li>
+      <li><button type="button" data-k="1" aria-label="跳到 T2">T2</button></li>
+      <li><button type="button" data-k="2" aria-label="跳到 T3">T3</button></li>
+      <li><button type="button" data-k="3" aria-label="跳到 T4">T4</button></li>
+      <li><button type="button" data-k="4" aria-label="跳到 T5">T5</button></li>
+      <li><button type="button" data-k="5" aria-label="跳到 T6">T6</button></li>
+      <li><button type="button" data-k="6" class="cur" aria-label="跳到 T7">T7</button></li>
+    </ol>
+    <button type="button" class="theme" id="theme" aria-label="切換深色或淺色">深／淺</button>
+  </div>
+
+  <div class="now" aria-live="polite">
+    <span class="k" id="nowK">T7</span>
+    <div class="stack" id="ev">
+      <span>物流商公告 v2：時段從 <code>"AM"</code>、<code>"PM"</code> 改成 <code>"09-12"</code>、<code>"14-18"</code>，舊的值會被拒絕</span>
+      <span>工程師改程式，配合新的時段格式</span>
+      <span>編譯、測試都通過，上線</span>
+      <span>客服替訂單 A-1001 按「補寄」</span>
+      <span>第 2 步「預約取件」出錯了</span>
+      <span>失敗之後，物流商後台留下什麼</span>
+      <span class="on">結果：沒人取件的託運單有幾張</span>
+    </div>
+  </div>
+
+  <div class="cols">
+    <!-- ============ LEFT: no facade ============ -->
+    <section class="col" aria-label="沒有 Facade">
+      <div class="col-head">
+        <span class="col-name">沒有 Facade</span>
+        <span class="col-tag">3 個流程各自照順序呼叫 3 步</span>
+      </div>
+      <div class="note stack" id="Lnote">
+        <span>3 個流程各寫一份 3 步，時段都是 <code>"AM"</code>。物流商一改，3 處都要改。</span>
+        <span>搜尋 <code>bookPickup(</code> 找到 2 處改好。補寄流程寫在客服後台模組裡，沒搜到，還是 <code>"AM"</code>。</span>
+        <span>下單、退換貨正常出貨；補寄還沒有人用到，所以沒人發現。</span>
+        <span><code>createConsignment</code> 成功，拿到託運單 C-0001。</span>
+        <span><code>bookPickup(C-0001, 明天, "AM")</code> 被物流商拒絕，<code>printLabel</code> 沒執行。</span>
+        <span>客服看到「補寄失敗」，又按了 2 次：又建立 C-0002、C-0003，同樣卡在預約取件。</span>
+        <span class="on">3 張託運單沒有司機會來取，A-1001 的包裹一直沒寄出。</span>
+      </div>
+
+      <div class="legend">① <code>createConsignment</code> → ② <code>bookPickup</code> → ③ <code>printLabel</code></div>
+
+      <div class="flows">
+        <div class="flow" id="L0">
+          <div class="flow-head"><span class="flow-name">下單流程</span><span class="ftag ok">正常出貨 ✓</span></div>
+          <div class="chips">
+            <span class="chip"><span class="lb">① 建託運單</span><span class="dt">&nbsp;</span></span>
+            <span class="chip"><span class="lb">② 約取件</span><span class="dt">"09-12"</span></span>
+            <span class="chip"><span class="lb">③ 印標籤</span><span class="dt">&nbsp;</span></span>
+          </div>
+        </div>
+        <div class="flow" id="L1">
+          <div class="flow-head"><span class="flow-name">退換貨流程</span><span class="ftag ok">正常出貨 ✓</span></div>
+          <div class="chips">
+            <span class="chip"><span class="lb">① 建託運單</span><span class="dt">&nbsp;</span></span>
+            <span class="chip"><span class="lb">② 約取件</span><span class="dt">"09-12"</span></span>
+            <span class="chip"><span class="lb">③ 印標籤</span><span class="dt">&nbsp;</span></span>
+          </div>
+        </div>
+        <div class="flow" id="L2">
+          <div class="flow-head"><span class="flow-name">補寄流程</span><span class="ftag hot">沒搜到，漏改</span></div>
+          <div class="chips">
+            <span class="chip ok"><span class="lb">① 建託運單</span><span class="dt">C-0003</span></span>
+            <span class="chip hot"><span class="lb">② 約取件</span><span class="dt">✕ "AM"</span></span>
+            <span class="chip skip"><span class="lb">③ 印標籤</span><span class="dt">沒執行</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="result stack" id="Lres">
+        <span><span class="rk">結果</span><br>—</span>
+        <span><span class="rk">結果</span><br>下單、退換貨：正常出貨</span>
+        <span><span class="rk">結果</span><br>補寄：託運單建好了，接著預約取件</span>
+        <span class="on"><span class="rk">客服看到</span><br><span class="bad">補寄失敗</span>　日誌：<code>LogisticsException: INVALID_TIME_SLOT</code></span>
+      </div>
+
+      <div class="ledger">
+        <div class="ledger-head">
+          <span class="ledger-name">物流商後台：託運單</span>
+          <span class="count hot" id="Lcount">沒人取件 <b>3</b> 張</span>
+        </div>
+        <div class="tickets">
+          <span class="tk orphan" id="LT0"><span class="no">C-0001</span><span class="st">沒人取件</span></span>
+          <span class="tk orphan" id="LT1"><span class="no">C-0002</span><span class="st">沒人取件</span></span>
+          <span class="tk orphan" id="LT2"><span class="no">C-0003</span><span class="st">沒人取件</span></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ RIGHT: with facade ============ -->
+    <section class="col" aria-label="有 ShippingFacade">
+      <div class="col-head">
+        <span class="col-name">有 ShippingFacade</span>
+        <span class="col-tag">3 個流程只呼叫 <code>ship(order)</code></span>
+      </div>
+      <div class="note stack" id="Rnote">
+        <span>時段只寫在 ShippingFacade 的一個常數裡，3 個流程都不知道有 3 步。</span>
+        <span>只改 <code>DEFAULT_TIME_SLOT</code> 這一個常數，3 個流程一起生效。</span>
+        <span>3 個流程送出去的時段都是 <code>"09-12"</code>。</span>
+        <span><code>ship(order)</code> 依序建好 C-0001、約好取件、印好標籤，回傳 <code>ShipmentReceipt</code>。</span>
+        <span>換個情況：取件系統故障，第 2 步丟出 <code>PICKUP_UNAVAILABLE</code>。Facade 呼叫 <code>cancelConsignment</code> 取消剛建好的託運單。</span>
+        <span>中途失敗的收拾只寫在 Facade 這一處，3 個流程都用得到。</span>
+        <span class="on">沒有留下沒人取件的託運單：<code>orphanConsignments()</code> 是空的。</span>
+      </div>
+
+      <div class="callers">
+        <span class="caller" id="RC0"><span class="flow-name">下單流程</span><span class="dt">"09-12"</span></span>
+        <span class="caller" id="RC1"><span class="flow-name">退換貨流程</span><span class="dt">"09-12"</span></span>
+        <span class="caller" id="RC2"><span class="flow-name">補寄流程</span><span class="dt">"09-12"</span></span>
+      </div>
+      <div class="down">↓ ↓ ↓　都只呼叫 <code>ship(order)</code></div>
+
+      <div class="facade">
+        <div class="facade-name">ShippingFacade</div>
+        <div class="const" id="Rconst">DEFAULT_TIME_SLOT = "09-12"</div>
+        <div class="chips" id="Rchips">
+          <span class="chip ok"><span class="lb">① 建託運單</span><span class="dt">C-0001</span></span>
+          <span class="chip hot"><span class="lb">② 約取件</span><span class="dt">✕ 故障</span></span>
+          <span class="chip skip"><span class="lb">③ 印標籤</span><span class="dt">沒執行</span></span>
+        </div>
+        <div class="cancel" id="Rcancel">↩ <code>cancelConsignment(C-0001)</code> 取消託運單</div>
+      </div>
+
+      <div class="result stack" id="Rres">
+        <span><span class="rk">呼叫端收到</span><br>—</span>
+        <span><span class="rk">呼叫端收到</span><br><span class="good">✓ ShipmentReceipt</span>（託運單號 C-0001、標籤網址）</span>
+        <span class="on"><span class="rk">呼叫端收到</span><br><span class="bad">ShippingFailedException</span>　<code>預約取件失敗：PICKUP_UNAVAILABLE，已取消託運單 C-0001</code></span>
+      </div>
+
+      <div class="ledger">
+        <div class="ledger-head">
+          <span class="ledger-name">物流商後台：託運單</span>
+          <span class="count zero" id="Rcount">沒人取件 <b>0</b> 張</span>
+        </div>
+        <div class="tickets">
+          <span class="tk cancelled" id="RT0"><span class="no">C-0001</span><span class="st">已取消</span></span>
+          <span class="tk off"><span class="no">&nbsp;</span><span class="st">&nbsp;</span></span>
+          <span class="tk off"><span class="no">&nbsp;</span><span class="st">&nbsp;</span></span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="ctrl">
+    <button type="button" id="prev" aria-label="上一格">◀</button>
+    <button type="button" id="play" aria-label="播放">▶ 播放</button>
+    <button type="button" id="next" aria-label="下一格">▶</button>
+    <input class="scrub" id="scrub" type="range" min="0" max="14" step="0.01" value="13.5" aria-label="時間軸，T1 到 T7">
+    <span class="clock" id="clock">T7</span>
+  </div>
+</figure>
+
+<script>
+(() => {
+  const fig = document.getElementById('fig');
+  const DUR = parseFloat(fig.dataset.dur);
+  const REST = parseFloat(fig.dataset.rest);
+  const STEP = 2;
+  const $ = (id) => document.getElementById(id);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+
+  // ---- cached node refs ----
+  const stepBtns = [...document.querySelectorAll('#steps button')];
+  const stacks = { ev: $('ev'), Lnote: $('Lnote'), Rnote: $('Rnote'), Lres: $('Lres'), Rres: $('Rres') };
+  const stackKids = {};
+  for (const k in stacks) stackKids[k] = [...stacks[k].children];
+  const Lrows = [0, 1, 2].map((i) => {
+    const row = $('L' + i);
+    return { tag: row.querySelector('.ftag'), chips: [...row.querySelectorAll('.chip')] };
+  });
+  const Rcallers = [0, 1, 2].map((i) => $('RC' + i));
+  const Rchips = [...$('Rchips').querySelectorAll('.chip')];
+  const LT = [0, 1, 2].map((i) => $('LT' + i));
+  const RT0 = $('RT0');
+  const els = {
+    nowK: $('nowK'), clock: $('clock'), scrub: $('scrub'), play: $('play'),
+    Lcount: $('Lcount'), Rcount: $('Rcount'), Rconst: $('Rconst'), Rcancel: $('Rcancel'),
+  };
+
+  // ---- write helpers: only touch the DOM when the value changed ----
+  const setCls = (el, c) => { if (el.className !== c) el.className = c; };
+  const setTxt = (el, s) => { if (el.textContent !== s) el.textContent = s; };
+  const setStack = (key, idx) => stackKids[key].forEach((n, i) => setCls(n, i === idx ? 'on' : ''));
+  const chip = (el, cls, dt) => { setCls(el, 'chip' + (cls ? ' ' + cls : '')); setTxt(el.querySelector('.dt'), dt || ' '); };
+  const tick = (el, cls, st) => { setCls(el, 'tk ' + cls); setTxt(el.querySelector('.st'), st); };
+  const fresh = (lt, th) => lt >= th && lt - th < 0.45; // short pulse right after an event fires
+
+  // ---- the whole figure as a pure function of t ----
+  function render(t) {
+    t = Math.max(0, Math.min(DUR, t));
+    const k = Math.min(6, Math.floor(t / STEP));
+    const lt = t - k * STEP;
+
+    stepBtns.forEach((b, i) => setCls(b, i === k ? 'cur' : (i < k ? 'done' : '')));
+    setTxt(els.nowK, 'T' + (k + 1));
+    setTxt(els.clock, 'T' + (k + 1));
+    if (document.activeElement !== els.scrub || !scrubbing) els.scrub.value = t.toFixed(2);
+    setStack('ev', k);
+    setStack('Lnote', k);
+    setStack('Rnote', k);
+
+    // ===== LEFT =====
+    // time slot strings on each flow's bookPickup
+    for (let r = 0; r < 3; r++) {
+      const row = Lrows[r];
+      let slot = '"AM"';
+      if (r === 0 && (k > 1 || (k === 1 && lt >= 0.4))) slot = '"09-12"';
+      if (r === 1 && (k > 1 || (k === 1 && lt >= 0.7))) slot = '"09-12"';
+      if (r < 2) {
+        const justFixed = k === 1 && fresh(lt, r === 0 ? 0.4 : 0.7);
+        chip(row.chips[0], '', '');
+        chip(row.chips[1], k >= 2 && lt >= 0.4 || k > 2 ? 'ok' + (k === 2 && fresh(lt, 0.4) ? ' pulse-ok' : '') : (justFixed ? 'pulse-ok' : ''), slot);
+        chip(row.chips[2], k >= 2 && lt >= 0.4 || k > 2 ? 'ok' : '', '');
+        if (k >= 2 && (k > 2 || lt >= 0.4)) { setCls(row.tag, 'ftag ok'); setTxt(row.tag, '正常出貨 ✓'); }
+        else { setCls(row.tag, 'ftag off'); setTxt(row.tag, '—'); }
+      } else {
+        // the resend flow
+        const missed = k > 1 || (k === 1 && lt >= 1.0);
+        if (missed) { setCls(row.tag, 'ftag hot'); setTxt(row.tag, '沒搜到，漏改'); }
+        else { setCls(row.tag, 'ftag off'); setTxt(row.tag, '—'); }
+
+        // ① create
+        let cNo = '';
+        if (k === 3 && lt >= 0.4) cNo = 'C-0001';
+        if (k === 4) cNo = 'C-0001';
+        if (k === 5) cNo = lt >= 1.0 ? 'C-0003' : (lt >= 0.4 ? 'C-0002' : 'C-0001');
+        if (k === 6) cNo = 'C-0003';
+        const cPulse = (k === 3 && fresh(lt, 0.4)) || (k === 5 && (fresh(lt, 0.4) || fresh(lt, 1.0)));
+        chip(row.chips[0], cNo ? 'ok' + (cPulse ? ' pulse-ok' : '') : '', cNo);
+
+        // ② book
+        const failed = k > 4 || (k === 4 && lt >= 0.5);
+        const bPulse = (k === 4 && fresh(lt, 0.5)) || (k === 5 && (fresh(lt, 0.6) || fresh(lt, 1.2)));
+        if (failed) chip(row.chips[1], 'hot' + (bPulse ? ' pulse' : ''), '✕ "AM"');
+        else chip(row.chips[1], missed ? 'slot-hot' + (k === 1 && fresh(lt, 1.0) ? ' pulse' : '') : '', '"AM"');
+
+        // ③ print
+        const skipped = k > 4 || (k === 4 && lt >= 0.9);
+        chip(row.chips[2], skipped ? 'skip' : '', skipped ? '沒執行' : '');
+      }
+    }
+
+    // result row
+    let lres = 0;
+    if (k === 2 && lt >= 0.4) lres = 1;
+    if (k === 3) lres = lt >= 0.4 ? 2 : 1;
+    if (k > 4 || (k === 4 && lt >= 0.7)) lres = 3;
+    else if (k === 4) lres = 2;
+    setStack('Lres', lres);
+
+    // ledger tickets
+    const L = [
+      k === 3 ? (lt >= 0.5 ? 'wait' : 'off') : (k >= 4 ? (k > 4 || lt >= 0.6 ? 'orphan' : 'wait') : 'off'),
+      k > 5 || (k === 5 && lt >= 0.5) ? 'orphan' : 'off',
+      k > 5 || (k === 5 && lt >= 1.1) ? 'orphan' : 'off',
+    ];
+    const lPulse = [k === 4 && fresh(lt, 0.6), k === 5 && fresh(lt, 0.5), k === 5 && fresh(lt, 1.1)];
+    let orphans = 0;
+    L.forEach((s, i) => {
+      if (s === 'orphan') orphans++;
+      tick(LT[i], s + (lPulse[i] ? ' pulse' : ''), s === 'wait' ? '等預約取件' : '沒人取件');
+    });
+    setCls(els.Lcount, 'count' + (orphans ? ' hot' : ''));
+    setTxt(els.Lcount.querySelector('b'), String(orphans));
+
+    // ===== RIGHT =====
+    const constFixed = k > 1 || (k === 1 && lt >= 0.5);
+    setTxt(els.Rconst, 'DEFAULT_TIME_SLOT = ' + (constFixed ? '"09-12"' : '"AM"'));
+    setCls(els.Rconst, 'const' + (k === 1 && constFixed ? ' hot' + (fresh(lt, 0.5) ? ' pulse' : '') : ''));
+
+    const callersFixed = k > 1 || (k === 1 && lt >= 0.8);
+    Rcallers.forEach((c) => {
+      setCls(c, 'caller' + (k === 1 && callersFixed ? ' flash' : ''));
+      setTxt(c.querySelector('.dt'), callersFixed ? '"09-12"' : '"AM"');
+    });
+
+    // facade's own three steps
+    let c0 = ['', ''], c1 = ['', constFixed ? '"09-12"' : '"AM"'], c2 = ['', ''];
+    let cancelOn = false, rres = 0, rt = 'off', rtSt = ' ';
+    if (k === 3) {
+      if (lt >= 0.3) { c0 = ['ok' + (fresh(lt, 0.3) ? ' pulse-ok' : ''), 'C-0001']; rt = 'wait'; rtSt = '等預約取件'; }
+      if (lt >= 0.6) { c1 = ['ok' + (fresh(lt, 0.6) ? ' pulse-ok' : ''), '✓ "09-12"']; rt = 'booked'; rtSt = '已約好取件'; }
+      if (lt >= 0.9) c2 = ['ok' + (fresh(lt, 0.9) ? ' pulse-ok' : ''), '標籤網址'];
+      if (lt >= 1.1) rres = 1;
+    }
+    if (k >= 4) {
+      const lt4 = k === 4 ? lt : 9;
+      c1 = ['', '"09-12"'];
+      if (lt4 >= 0.2) { c0 = ['ok', 'C-0001']; rt = 'wait'; rtSt = '等預約取件'; }
+      if (lt4 >= 0.5) c1 = ['hot' + (k === 4 && fresh(lt, 0.5) ? ' pulse' : ''), '✕ 故障'];
+      if (lt4 >= 0.8) c2 = ['skip', '沒執行'];
+      if (lt4 >= 1.0) { cancelOn = true; rt = 'cancelled' + (k === 4 && fresh(lt, 1.0) ? ' pulse' : ''); rtSt = '已取消'; }
+      if (lt4 >= 1.2) rres = 2;
+    }
+    chip(Rchips[0], c0[0], c0[1]);
+    chip(Rchips[1], c1[0], c1[1]);
+    chip(Rchips[2], c2[0], c2[1]);
+    setCls(els.Rcancel, 'cancel' + (cancelOn ? (k === 4 && fresh(lt, 1.0) ? ' pulse' : '') : ' off'));
+    setStack('Rres', rres);
+    tick(RT0, rt, rtSt);
+    if (rt === 'off') setTxt(RT0.querySelector('.no'), ' '); else setTxt(RT0.querySelector('.no'), 'C-0001');
+    setCls(els.Rcount, 'count zero');
+  }
+
+  // ---- clock / loop ----
+  let t = REST, playing = false, visible = false, raf = 0, last = 0, scrubbing = false, toured = false;
+
+  function setPlaying(p) {
+    playing = p;
+    els.play.textContent = p ? '❚❚ 暫停' : '▶ 播放';
+    els.play.setAttribute('aria-label', p ? '暫停' : '播放');
+    arm();
+  }
+  function arm() {
+    if (playing && visible && !document.hidden && !raf) { last = 0; raf = requestAnimationFrame(frame); }
+  }
+  function frame(now) {
+    raf = 0;
+    if (!playing || !visible || document.hidden) return;
+    if (last) t += (now - last) / 1000;
+    last = now;
+    if (t >= DUR) { t = DUR; render(t); setPlaying(false); return; }
+    render(t);
+    raf = requestAnimationFrame(frame);
+  }
+  function seek(x) { t = Math.max(0, Math.min(DUR, x)); render(t); }
+  window.seek = seek;
+
+  const goFrame = (k) => { setPlaying(false); seek(Math.max(0, Math.min(6, k)) * STEP + 1.5); };
+  const curK = () => Math.min(6, Math.floor(t / STEP));
+
+  stepBtns.forEach((b) => b.addEventListener('click', () => goFrame(+b.dataset.k)));
+  $('prev').addEventListener('click', () => goFrame(curK() - 1));
+  $('next').addEventListener('click', () => goFrame(curK() + 1));
+  els.play.addEventListener('click', () => {
+    if (playing) { setPlaying(false); return; }
+    if (t >= DUR - 0.6) t = 0;
+    setPlaying(true);
+  });
+  els.scrub.addEventListener('input', () => { scrubbing = true; setPlaying(false); seek(parseFloat(els.scrub.value)); });
+  els.scrub.addEventListener('change', () => { scrubbing = false; });
+  fig.addEventListener('keydown', (e) => {
+    if (e.target === els.scrub) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); goFrame(curK() + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); goFrame(curK() - 1); }
+    else if (e.key === ' ' && e.target === fig) { e.preventDefault(); els.play.click(); }
+  });
+  $('theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    const cur = root.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  });
+  document.addEventListener('visibilitychange', arm);
+
+  render(t);
+
+  const io = new IntersectionObserver((entries) => {
+    visible = entries.some((e) => e.isIntersecting);
+    if (visible && !toured && !reduce.matches) { toured = true; t = 0; render(t); setPlaying(true); }
+    arm();
+  }, { rootMargin: '120px' });
+  io.observe(fig);
+})();
+</script>
+</body>
+</html>

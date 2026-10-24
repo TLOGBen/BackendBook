@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>失敗訊息三條路</title>
+<style>
+:root {
+  --bg: #ffffff; --surface: #f6f7f9; --ink: #1f2430; --muted: #4f5d75; --soft: #5a6580; --line: #d5d9e0;
+  --dot: #8a95ab; --dim-ink: #7a8396;
+  --hot-fill: #fde68a; --hot-stroke: #b45309; --hot-ink: #111111;
+  --ok: #2e5aa8;
+  --f-ui: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --f-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Noto Sans TC", "Microsoft JhengHei", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e2129; --surface: #272b35; --ink: #eceef2; --muted: #b8bfcc; --soft: #9aa3b5; --line: #3b4150;
+    --dot: #7d8699; --dim-ink: #8790a3;
+    --hot-fill: #5a3a0c; --hot-stroke: #f59e0b; --hot-ink: #fde68a;
+    --ok: #8fb2ea;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e2129; --surface: #272b35; --ink: #eceef2; --muted: #b8bfcc; --soft: #9aa3b5; --line: #3b4150;
+  --dot: #7d8699; --dim-ink: #8790a3;
+  --hot-fill: #5a3a0c; --hot-stroke: #f59e0b; --hot-ink: #fde68a;
+  --ok: #8fb2ea;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); padding: 12px 16px; -webkit-text-size-adjust: 100%; }
+code { font: 12px var(--f-mono); }
+.fig { margin: 0 auto; max-width: 960px; min-width: 0; display: flex; flex-direction: column; gap: 12px; outline: none; }
+.fig:focus-visible { outline: 2px solid var(--hot-stroke); outline-offset: 4px; border-radius: 6px; }
+
+/* top readouts */
+.top { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.clock { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.clock .ch { font: 700 14px var(--f-ui); }
+.clock .tag { font: 700 13px var(--f-mono); background: var(--ink); color: var(--bg); padding: 2px 8px; border-radius: 4px; }
+.clock .when { font-size: 13px; color: var(--muted); }
+.alarm { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--surface); white-space: nowrap; }
+.alarm.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); font-weight: 700; }
+
+/* flow row */
+.flow { display: grid; gap: 8px; align-items: stretch;
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 184px) 16px minmax(0, 148px);
+  grid-template-areas: "q a1 w a2 s"; }
+.qbox { grid-area: q; } .wk { grid-area: w; } .svc { grid-area: s; } .a1 { grid-area: a1; } .a2 { grid-area: a2; }
+.arr { display: flex; align-items: center; justify-content: center; color: var(--soft); font-size: 14px; }
+.qbox { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.qlbl { font-size: 12px; color: var(--soft); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.qlbl b { color: var(--ink); font-size: 14px; }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: -1px; margin-right: 3px; background: var(--dot); }
+.legend i.p { background: var(--hot-fill); border: 2px solid var(--hot-stroke); }
+.legend i.r { background: transparent; border: 2px solid var(--ok); }
+.lane { position: relative; height: 44px; border-top: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line); background: var(--surface); overflow: hidden; }
+.lane::after { content: ""; position: absolute; right: 0; top: 50%; border-left: 8px solid var(--soft); border-top: 6px solid transparent; border-bottom: 6px solid transparent; transform: translateY(-50%); }
+.dot { position: absolute; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--dot);
+  left: calc((11.5 - var(--x, 0)) * 100% / 12); opacity: 0; will-change: left, opacity; }
+.dot.p { background: var(--hot-fill); border: 2.5px solid var(--hot-stroke); width: 22px; height: 22px; margin: -11px 0 0 -11px; z-index: 2; }
+.dot.r { background: transparent; border: 2.5px solid var(--ok); }
+.more { position: absolute; left: 4px; top: 50%; transform: translateY(-50%); font-size: 12px; font-weight: 700; color: var(--hot-ink); background: var(--hot-fill); border: 1px solid var(--hot-stroke); border-radius: 4px; padding: 1px 4px; z-index: 3; display: none; }
+.qnote { font-size: 12px; color: var(--soft); min-height: 1.4em; }
+.qnote.hot { color: var(--hot-ink); background: var(--hot-fill); border-radius: 4px; padding: 0 4px; align-self: flex-start; }
+
+.box { background: var(--surface); border: 1.5px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.box .name { font-weight: 700; font-size: 14px; }
+.box .sub { font-size: 12px; color: var(--soft); line-height: 1.4; overflow-wrap: anywhere; }
+.box .now { font-size: 13px; font-weight: 600; min-height: 1.5em; padding: 1px 6px; border-radius: 4px; border: 1.5px solid transparent; align-self: flex-start; }
+.box .now.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); }
+.box .now.ok { color: var(--ok); }
+.cpu { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--soft); }
+.cpu .bar { position: relative; flex: 1 1 auto; height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; min-width: 40px; }
+.cpu .bar i { position: absolute; inset: 0 auto 0 0; width: 20%; background: var(--soft); }
+.cpu .bar i.hot { background: var(--hot-stroke); }
+.cpu .pct { min-width: 3.2em; text-align: right; font-weight: 700; color: var(--ink); }
+
+/* exits */
+.exhead { font-size: 12px; color: var(--soft); display: flex; align-items: center; gap: 6px; }
+.exits { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ex { border: 1.5px dashed var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--dim-ink); }
+.ex .name { font-weight: 700; font-size: 14px; }
+.ex .sub { font-size: 12px; line-height: 1.4; word-break: break-word; }
+.ex .cnt { font-size: 13px; font-weight: 700; min-height: 1.5em; }
+.ex.on { border-style: solid; border-color: var(--soft); color: var(--ink); background: var(--surface); }
+.ex.on .sub { color: var(--soft); }
+.ex.hot { background: var(--hot-fill); border: 2px solid var(--hot-stroke); color: var(--hot-ink); }
+.ex.hot .sub { color: var(--hot-ink); }
+.dlqdots { display: flex; flex-wrap: wrap; gap: 3px; min-height: 12px; }
+.dlqdots i { width: 10px; height: 10px; border-radius: 50%; background: var(--hot-fill); border: 2px solid var(--hot-stroke); display: none; }
+.ex.hot .dlqdots i { background: var(--bg); }
+
+/* story line */
+.story { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 200px) minmax(0, 200px); gap: 8px 12px; align-items: stretch; }
+.say { font-size: 14px; line-height: 1.55; min-height: 4.6em; display: flex; align-items: center; }
+.say code { background: var(--surface); border: 1px solid var(--line); padding: 0 4px; border-radius: 3px; }
+.screen { border: 1.5px solid var(--line); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.screen .k { font-size: 12px; color: var(--soft); }
+.screen .v { font-size: 13px; font-weight: 600; line-height: 1.45; }
+.screen.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); }
+.screen.hot .k { color: var(--hot-ink); }
+
+/* controls */
+.ctrl { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
+.ctrl button { flex: none; min-width: 36px; height: 32px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: 12px var(--f-mono); padding: 0 8px; }
+.ctrl button:hover { border-color: var(--hot-stroke); }
+.ctrl button[aria-current="step"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.ctrl .play { min-width: 72px; font: 600 13px var(--f-ui); }
+.ctrl .theme { font: 12px var(--f-ui); }
+.ctrl input[type=range] { flex: 1 1 200px; min-width: 0; height: 32px; accent-color: var(--hot-stroke); margin: 0; }
+.groups { display: flex; gap: 6px 12px; flex-wrap: wrap; width: 100%; }
+.grp { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.grp .gl { font-size: 12px; color: var(--soft); margin-right: 2px; white-space: nowrap; }
+.hint { font-size: 12px; color: var(--soft); width: 100%; }
+:focus-visible { outline: 2px solid var(--hot-stroke); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .flow { grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr); grid-template-areas: "q q q" "w a2 s"; }
+  .a1 { display: none; }
+  .story { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .say { grid-column: 1 / -1; min-height: 4.6em; }
+}
+@media (max-width: 480px) {
+  .exits { grid-template-columns: minmax(0, 1fr); }
+  .ex { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+  .ex .sub { flex: 1 1 140px; }
+  .ex .cnt { width: 100%; }
+  .say { min-height: 6.2em; }
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="dlq-three-paths" data-dur="26" data-rest="13.4" tabindex="0"
+  aria-label="同一則統編為空的壞訊息，在三種寫法下的下場：一、basic_nack(requeue=True) 無限重試，壞訊息在佇列和 worker 之間來回一秒好幾十次，正常訂單排在後面、佇列一路堆高，CPU 100%，最後佇列堆積告警響；二、改成 requeue=False 但沒有設定 DLX，訊息直接被丟掉，3 天 1,200 多張發票沒開出、完全沒有告警，月底對帳才發現；三、設好 DLX 和死信佇列 orders.dlq，壞訊息一進來就被隔離，正常訂單照常處理，10 分鐘後 DLQ 告警，看到失敗原因是統一編號為空，修好後 redrive 送回主佇列，DLQ 歸零。">
+  <div class="top">
+    <div class="clock"><span class="ch" data-k="ch">② 默默丟掉</span><span class="tag" data-k="tag">T7</span><span class="when" data-k="when">接下來 3 天</span></div>
+    <span class="alarm hot" data-k="alarm">告警：沒有</span>
+  </div>
+
+  <div class="flow">
+    <div class="qbox">
+      <div class="qlbl"><b>佇列 orders</b><span class="legend" aria-hidden="true"><span><i></i>正常訂單</span><span><i class="p"></i>統編為空</span><span><i class="r"></i>redrive 送回</span></span></div>
+      <div class="lane" data-k="lane" aria-hidden="true"><span class="more" data-k="more">＋更多</span></div>
+      <div class="qnote" data-k="qnote">佇列長度正常</div>
+    </div>
+    <div class="arr a1" aria-hidden="true">▸</div>
+    <div class="box wk" data-k="wk">
+      <span class="name">發票 worker</span>
+      <span class="sub" data-k="act"><code>basic_nack(requeue=False)</code></span>
+      <span class="cpu"><span>CPU</span><span class="bar"><i data-k="cpu"></i></span><span class="pct" data-k="pct"></span></span>
+      <span class="now" data-k="wnow">—</span>
+    </div>
+    <div class="arr a2" aria-hidden="true">▸</div>
+    <div class="box svc">
+      <span class="name">電子發票服務</span>
+      <span class="sub">開立發票</span>
+      <span class="now" data-k="snow">—</span>
+    </div>
+  </div>
+
+  <div class="exhead" aria-hidden="true"><span>▾</span><span>開立失敗的訊息，從哪個出口出去？</span></div>
+  <div class="exits">
+    <div class="ex" data-k="ex1">
+      <span class="name">① 丟回佇列</span>
+      <span class="sub"><code>requeue=True</code>，沒有次數上限</span>
+      <span class="cnt" data-k="c1"></span>
+    </div>
+    <div class="ex" data-k="ex2">
+      <span class="name">② 丟掉</span>
+      <span class="sub"><code>requeue=False</code>，佇列沒有設定 DLX</span>
+      <span class="cnt" data-k="c2"></span>
+    </div>
+    <div class="ex" data-k="ex3">
+      <span class="name">③ 死信佇列 <code>orders.dlq</code></span>
+      <span class="sub" data-k="s3">還沒設定 DLX</span>
+      <span class="dlqdots" data-k="dd" aria-hidden="true"></span>
+      <span class="cnt" data-k="c3"></span>
+    </div>
+  </div>
+
+  <div class="story">
+    <div class="say"><span data-k="say"></span></div>
+    <div class="screen" data-k="u"><span class="k">使用者看到</span><span class="v" data-k="uv">—</span></div>
+    <div class="screen" data-k="e"><span class="k">工程師看到</span><span class="v" data-k="ev">—</span></div>
+  </div>
+
+  <div class="ctrl"></div>
+  <p class="sr" role="status" aria-live="polite" data-k="live"></p>
+</figure>
+
+<script>
+(() => {
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const ease = (u) => u * u * (3 - 2 * u);
+
+// ---- chapters and stops (facts from 36-死信佇列.md) ----
+const CH = [
+  { n: 1, name: '① 無限重試', t0: 0, t1: 10 },
+  { n: 2, name: '② 默默丟掉', t0: 10, t1: 16 },
+  { n: 3, name: '③ 有 DLQ', t0: 16, t1: 26 },
+];
+const STOPS = [
+  { ch: 1, id: 'T1', t: 0, show: 1.0, when: '',
+    say: '前端 bug 上線：第一張統編為空的公司戶訂單成立，<code>order.created</code> 進了佇列。',
+    u: ['—'], e: ['—'] },
+  { ch: 1, id: 'T2', t: 2, show: 3.1, when: '',
+    say: 'worker 拿到它，發票服務回 <code>400</code>，程式進到 <code>except</code>，執行 <code>basic_nack(requeue=True)</code>，壞訊息回到佇列。',
+    u: ['—'], e: ['—'] },
+  { ch: 1, id: 'T3', t: 4, show: 5.0, when: '',
+    say: '同一則訊息馬上又被拿出來，又是 <code>400</code>，又被丟回去，一秒好幾十次。這就是<b>毒訊息</b>。',
+    u: ['—'], e: ['日誌一分鐘多出好幾萬行一模一樣的「開立發票失敗」', 1] },
+  { ch: 1, id: 'T4', t: 6, show: 7.6, when: '',
+    say: '更多公司戶訂單進來，壞訊息變成好幾則，一直佔著 worker；正常訂單排在後面，佇列長度一路往上爬。',
+    u: ['正常訂單的發票越拖越晚', 1], e: ['worker 的 CPU 衝到 100%', 1] },
+  { ch: 1, id: 'T5', t: 8, show: 8.7, when: '',
+    say: '「佇列堆積」告警響起。值班工程師把 <code>requeue=True</code> 改成 <code>requeue=False</code> 重新部署，佇列很快清空，告警解除。',
+    u: ['正常訂單的發票越拖越晚', 1], e: ['「佇列堆積」告警', 1] },
+  { ch: 2, id: 'T6', t: 10, show: 11.2, when: '',
+    say: '一張公司戶訂單進來，發票服務回 <code>400</code>，worker 執行 <code>basic_nack(requeue=False)</code>。佇列沒有設定 DLX，訊息直接被丟掉。',
+    u: ['下單一切正常'], e: ['什麼都沒有'] },
+  { ch: 2, id: 'T7', t: 12, show: 13.4, when: '接下來 3 天',
+    say: '接下來 3 天，每一張公司戶訂單都這樣被丟掉。從 worker 看，每則都「正常處理完了」，佇列長度正常，沒有任何告警。',
+    u: ['公司戶的訂單都沒有開出發票', 1], e: ['什麼都沒有：佇列長度正常、沒有告警', 1] },
+  { ch: 2, id: 'T8', t: 14, show: 15.0, when: '月底',
+    say: '會計月底對帳，發現發票數量對不起來，只能從訂單資料庫反查、一張一張補開。',
+    u: ['公司戶的訂單都沒有開出發票', 1], e: ['會計對帳才發現發票數量對不起來', 1] },
+  { ch: 3, id: 'T1', t: 16, show: 17.6, when: '如果一開始就有 DLQ',
+    say: '如果一開始就設好 DLX 和 DLQ：統編為空的訂單一進來就被送進 <code>orders.dlq</code>，正常訂單照常處理。',
+    u: ['下單一切正常'], e: ['DLQ 開始累積'] },
+  { ch: 3, id: 'T2', t: 18, show: 19.0, when: '上線 10 分鐘後',
+    say: '上線 10 分鐘後，DLQ 告警響起，裡面已經有十幾則。',
+    u: ['下單一切正常'], e: ['DLQ 告警：DLQ 不是空的', 1] },
+  { ch: 3, id: 'T3', t: 20, show: 21.0, when: '',
+    say: '工程師打開 DLQ，失敗原因都寫著「統一編號為空」。',
+    u: ['下單一切正常'], e: ['失敗原因：統一編號為空', 1] },
+  { ch: 3, id: 'T4', t: 22, show: 23.0, when: '',
+    say: '修好前端、補正資料，之後不再有新的壞訊息進來。DLQ 裡的十幾則還在，等著送回去。',
+    u: ['下單一切正常'], e: ['修好前端、補正資料'] },
+  { ch: 3, id: 'T5', t: 24, show: 25.6, when: '不用等到月底',
+    say: '把 DLQ 的訊息 redrive 回主佇列，補開發票，DLQ 歸 0。',
+    u: ['發票補開了，不用等到月底'], e: ['DLQ 清空，告警解除'] },
+];
+const T_UNBLOCK = 9.0;   // T5: redeploy with requeue=False
+const T_REDRIVE = 24.0;
+
+// ---- arrivals: every message, in queue order ----
+const births = [];
+births.push([-0.5, 'n'], [-0.2, 'n']);
+for (let b = 0.2; b < 9.95; b += 0.55) births.push([b, 'n']);         // ch1 normal orders
+births.push([1.5, 'p'], [6.3, 'p'], [6.9, 'p'], [7.5, 'p']);          // ch1 poison: 1, then 好幾則
+for (let b = 10.2; b < 16; b += 0.9) births.push([b, 'n']);            // ch2
+births.push([10.5, 'p'], [12.3, 'p'], [12.75, 'p'], [13.2, 'p'], [13.65, 'p']);
+for (let b = 16.1; b < 26; b += 0.9) births.push([b, 'n']);            // ch3
+for (let k = 0; k < 13; k++) births.push([16.3 + k * 0.13, 'p']);       // 十幾則 by T2
+births.push([18.6, 'p']);
+const N_DLQ = 14;
+for (let k = 0; k < N_DLQ; k++) births.push([T_REDRIVE + 0.1 + k * 0.12, 'r']);
+births.sort((a, b) => a[0] - b[0]);
+const items = births.map(([born, kind], r) => ({ r, born, kind, ch: born < 10 ? 1 : born < 16 ? 2 : 3 }));
+const P1 = items.find((it) => it.kind === 'p');
+const LAT = 0.3, PROC = 0.3;
+function flowH(t) { let h = 0; for (const it of items) h += clamp((t - it.born - LAT) / PROC); return h; }
+function cap(t) {
+  if (t < T_UNBLOCK) return P1.r;
+  if (t < 10) return P1.r + (t - T_UNBLOCK) * 14;
+  return Infinity;
+}
+const H = (t) => Math.min(flowH(t), cap(t));
+// when the first poison reaches the head (start of the loop)
+let T_HEAD = 2.0;
+for (let t = 0; t < 9; t += 0.01) { if (flowH(t) >= P1.r - 1e-6) { T_HEAD = t; break; } }
+const loopPeriod = (t) => (t < 4 ? 0.9 : 0.2);
+function loopPhase(t) {           // 0..1 within one nack → requeue → redeliver cycle
+  if (t < 4) return ((t - T_HEAD) / 0.9) % 1;
+  const base = (4 - T_HEAD) / 0.9;
+  return (base + (t - 4) / 0.2) % 1;
+}
+// done time of each item (H passes r + 1), from one sampled pass of H
+for (const it of items) it.done = Infinity;
+{
+  let j = 0;
+  for (let i = -100; i < 2700 && j < items.length; i++) {
+    const t = i / 100, hv = H(t);
+    while (j < items.length && hv >= items[j].r + 0.98) { items[j].done = t; j++; }
+  }
+}
+const chOf = (t) => (t < 10 ? 1 : t < 16 ? 2 : 3);
+function stopAt(t) { let s = STOPS[0]; for (const x of STOPS) if (t >= x.t - 1e-6) s = x; return s; }
+
+// ---- DOM ----
+const el = document.querySelector('.fig');
+const $ = (k) => el.querySelector(`[data-k="${k}"]`);
+const N = {};
+for (const k of ['ch', 'tag', 'when', 'alarm', 'lane', 'more', 'qnote', 'wk', 'act', 'cpu', 'pct', 'wnow', 'snow',
+  'ex1', 'ex2', 'ex3', 'c1', 'c2', 'c3', 's3', 'dd', 'say', 'u', 'uv', 'e', 'ev', 'live']) N[k] = $(k);
+const POOL = 18;
+const dots = [];
+for (let i = 0; i < POOL; i++) { const d = document.createElement('span'); d.className = 'dot'; N.lane.appendChild(d); dots.push(d); }
+const dd = [];
+for (let i = 0; i < 16; i++) { const d = document.createElement('i'); N.dd.appendChild(d); dd.push(d); }
+const memo = new Map();
+const put = (node, key, val, how = 'text') => {
+  if (memo.get(key) === val) return; memo.set(key, val);
+  if (how === 'text') node.textContent = val; else if (how === 'html') node.innerHTML = val; else how(val);
+};
+const cls = (node, key, val) => put(node, key, val, (v) => { node.className = v; });
+
+function render(t) {
+  const s = stopAt(t), ch = chOf(t), h = H(t);
+  put(N.ch, 'ch', CH[ch - 1].name);
+  put(N.tag, 'tag', s.id);
+  put(N.when, 'when', s.when);
+  put(N.say, 'say', s.say, 'html');
+  put(N.uv, 'uv', s.u[0]); cls(N.u, 'uc', 'screen' + (s.u[1] ? ' hot' : ''));
+  // engineer view updates inside T5 / ch3 T5
+  let ev = s.e[0], eh = !!s.e[1];
+  if (ch === 1 && t >= 9.6) { ev = '告警解除'; eh = false; }
+  put(N.ev, 'ev', ev); cls(N.e, 'ec', 'screen' + (eh ? ' hot' : ''));
+
+  // which item is in the worker right now
+  const looping = ch === 1 && t >= T_HEAD && t < T_UNBLOCK && P1.born <= t;
+  const ph = looping ? loopPhase(t) : 0;
+  const inWorkerLoop = looping && ph < 0.55;
+  const k = Math.floor(h + 1e-6), fr = h - k;
+  let cur = null;
+  if (looping) cur = inWorkerLoop ? P1 : null;
+  else if (fr > 0.02 && items[k] && items[k].born <= t) cur = items[k];
+
+  // alarm
+  let al = '告警：沒有', ah = false;
+  if (ch === 1 && t >= 8 && t < 9.6) { al = '告警：佇列堆積'; ah = true; }
+  else if (ch === 1 && t >= 9.6) al = '告警解除';
+  else if (ch === 2 && t >= 12) { al = '告警：沒有'; ah = true; }
+  const dlqIn = items.filter((it) => it.kind === 'p' && it.ch === 3 && it.done <= t).length;
+  const dlqOut = items.filter((it) => it.kind === 'r' && it.born <= t).length;
+  const dlqN = Math.max(0, dlqIn - dlqOut);
+  if (ch === 3 && t >= 18 && t < 22) { al = 'DLQ 告警：DLQ 不是空的'; ah = true; }
+  else if (ch === 3 && t >= 22 && dlqN > 0) al = 'DLQ 告警：還有訊息';
+  else if (ch === 3 && t >= T_REDRIVE && dlqN === 0) al = '告警解除';
+  put(N.alarm, 'al', al); cls(N.alarm, 'alc', 'alarm' + (ah ? ' hot' : ''));
+
+  // worker
+  let act;
+  if (ch === 1 && t < T_UNBLOCK) act = '<code>except Exception</code> → <code>basic_nack(requeue=True)</code>';
+  else if (ch < 3) act = '<code>basic_nack(requeue=False)</code>';
+  else act = '<code>requeue=False</code>，佇列已設 DLX → <code>orders.dlq</code>';
+  put(N.act, 'act', act, 'html');
+  let cpu = 0.15;
+  if (ch === 1) {
+    if (t < 2) cpu = 0.15; else if (t < 4) cpu = lerp(0.15, 0.55, seg(t, 2, 4)); else if (t < 6) cpu = lerp(0.55, 1, seg(t, 4, 5.4));
+    else if (t < T_UNBLOCK) cpu = 1; else cpu = lerp(1, 0.15, seg(t, T_UNBLOCK, 9.8));
+  } else if (cur) cpu = 0.3;
+  N.cpu.style.width = (cpu * 100).toFixed(1) + '%';
+  put(N.cpu, 'cpuc', cpu > 0.97 ? 'hot' : '', (v) => { N.cpu.className = v; });
+  put(N.pct, 'pct', cpu > 0.97 ? '100%' : '');
+  let wn = '等待訊息', wc = 'now', sn = '—', sc = 'now';
+  if (cur) {
+    if (cur.kind === 'p') { wn = '統編為空的訂單'; wc = 'now hot'; sn = '400 Bad Request'; sc = 'now hot'; }
+    else if (cur.kind === 'r') { wn = 'redrive 送回的訂單'; sn = '開立成功（補開）'; sc = 'now ok'; }
+    else { wn = '正常訂單'; sn = '開立成功'; sc = 'now ok'; }
+  } else if (looping) { wn = '又拿到同一則'; wc = 'now hot'; }
+  put(N.wnow, 'wn', wn); cls(N.wnow, 'wc', wc);
+  put(N.snow, 'sn', sn); cls(N.snow, 'sc', sc);
+  cls(N.wk, 'wkc', 'box wk');
+
+  // exits
+  const failing = cur && cur.kind === 'p';
+  const e1on = ch === 1 && t < T_UNBLOCK, e2on = (ch === 1 && t >= T_UNBLOCK) || ch === 2, e3on = ch === 3;
+  const e1hot = looping && t >= T_HEAD + 0.3;
+  const e2hot = e2on && (failing || (ch === 2 && t >= 12));
+  const e3hot = e3on && (failing || (t >= 18 && t < 22));
+  cls(N.ex1, 'e1', 'ex' + (e1hot ? ' hot' : e1on ? ' on' : ''));
+  cls(N.ex2, 'e2', 'ex' + (e2hot ? ' hot' : e2on ? ' on' : ''));
+  cls(N.ex3, 'e3', 'ex' + (e3hot ? ' hot' : e3on ? ' on' : ''));
+  let c1 = '';
+  if (looping) c1 = t < 4 ? '又被丟回來了' : '一秒好幾十次，回來又出去';
+  put(N.c1, 'c1', c1);
+  let c2 = '';
+  if (ch === 1 && t >= T_UNBLOCK) c2 = '壞訊息被丟掉，佇列清空';
+  else if (ch === 2) {
+    const firstDone = items.find((it) => it.kind === 'p' && it.ch === 2).done;
+    if (t < 12) c2 = t >= firstDone ? '沒開出的發票：1 張' : '';
+    else c2 = t < 13 ? '沒開出的發票：越來越多' : '沒開出的發票：1,200 多張';
+  }
+  put(N.c2, 'c2', c2);
+  put(N.s3, 's3', e3on ? '設好 DLX，失敗的訊息隔離在這裡等人看' : '還沒設定 DLX');
+  let c3 = '';
+  if (e3on) {
+    if (t < 18) c3 = dlqN ? '開始累積' : '';
+    else if (dlqN > 0) c3 = t >= 20 && t < 24 ? '十幾則，原因：統一編號為空' : '十幾則';
+    else c3 = '0 則';
+  }
+  put(N.c3, 'c3', c3);
+  const nd = e3on ? Math.min(16, dlqN) : 0;
+  put(N.dd, 'ddn', nd, (v) => { dd.forEach((d, i) => { d.style.display = i < v ? 'block' : 'none'; }); });
+
+  // queue lane
+  let used = 0, overflow = false;
+  for (const it of items) {
+    if (it.born > t || it.done < t - 0.05) continue;
+    const x = it.r - h;
+    if (x <= -1) continue;
+    if (x > 11.6) { overflow = true; continue; }
+    if (used >= POOL) break;
+    const d = dots[used++];
+    const enter = 1 - ease(seg(t, it.born, it.born + 0.35));
+    let xv = x + enter * 1.5, op = seg(t, it.born, it.born + 0.25);
+    if (x < 0) { op *= clamp(1 + x); }
+    if (it === P1 && looping) { xv = 0; op = inWorkerLoop ? 0.2 : 1; }
+    put(d, 'dc' + used, 'dot' + (it.kind === 'p' ? ' p' : it.kind === 'r' ? ' r' : ''), (v) => { d.className = v; });
+    d.style.setProperty('--x', Math.min(xv, 11.6).toFixed(3));
+    d.style.opacity = op.toFixed(3);
+  }
+  for (let i = used; i < POOL; i++) { if (dots[i].style.opacity !== '0') dots[i].style.opacity = '0'; }
+  put(N.more, 'more', overflow, (v) => { N.more.style.display = v ? 'block' : 'none'; });
+  let qn = '佇列長度正常', qh = false;
+  if (ch === 1 && t >= 6 && t < T_UNBLOCK) { qn = '正常訂單排在壞訊息後面，佇列長度一路往上爬'; qh = true; }
+  else if (ch === 1 && t >= 2 && t < 6) { qn = '壞訊息卡在隊頭，後面開始排隊'; qh = t >= 4; }
+  else if (ch === 1 && t >= T_UNBLOCK) qn = '佇列很快清空';
+  else if (ch === 3 && t >= T_REDRIVE && t < 25.8) qn = 'redrive：DLQ 的訊息限速送回主佇列';
+  put(N.qnote, 'qn', qn); cls(N.qnote, 'qnc', 'qnote' + (qh ? ' hot' : ''));
+  return s;
+}
+
+// ---- controls: play / pause, scrubber, grouped stops, keyboard, theme ----
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const dur = +el.dataset.dur, rest = +el.dataset.rest;
+const ctrl = el.querySelector('.ctrl');
+const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'play';
+const range = document.createElement('input'); range.type = 'range'; range.min = 0; range.max = dur; range.step = 0.01;
+range.id = 'scrub-' + el.dataset.fig; range.setAttribute('aria-label', '時間軸');
+const theme = document.createElement('button'); theme.type = 'button'; theme.className = 'theme';
+const groups = document.createElement('div'); groups.className = 'groups';
+const stopBtns = [];
+for (const c of CH) {
+  const g = document.createElement('div'); g.className = 'grp'; g.setAttribute('role', 'group'); g.setAttribute('aria-label', c.name);
+  const gl = document.createElement('span'); gl.className = 'gl'; gl.textContent = c.name; g.appendChild(gl);
+  STOPS.filter((s) => s.ch === c.n).forEach((s) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = s.id;
+    b.setAttribute('aria-label', `${c.name} ${s.id}`);
+    b.addEventListener('click', () => { f.playing = false; f.fresh = false; f.t = s.show; sync(); paint(true); });
+    g.appendChild(b); stopBtns.push(b);
+  });
+  groups.appendChild(g);
+}
+const hint = document.createElement('span'); hint.className = 'hint';
+hint.textContent = '按播放從頭看三條路，或拖時間軸、點停點；鍵盤左右鍵也可以切換停點。';
+ctrl.append(btn, range, theme, groups, hint);
+const f = { t: rest, playing: false, visible: false, last: 0, fresh: true };
+
+function paint(announce) {
+  const s = render(f.t);
+  range.value = f.t;
+  const cn = CH.find((c) => c.n === s.ch).name;
+  range.setAttribute('aria-valuetext', `${cn} ${s.id}`);
+  stopBtns.forEach((b, i) => { if (STOPS[i] === s) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
+  if (announce) N.live.textContent = `${cn} ${s.id}：${N.say.textContent}`;
+}
+function sync() {
+  btn.textContent = f.playing ? '❚❚ 暫停' : '▶ 播放';
+  btn.setAttribute('aria-label', f.playing ? '暫停' : '播放');
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+  theme.textContent = dark ? '淺色' : '深色'; theme.setAttribute('aria-label', dark ? '切換為淺色' : '切換為深色');
+}
+const toggle = () => {
+  if (!f.playing && (f.fresh || f.t >= dur - 0.01)) f.t = 0;
+  f.fresh = false; f.playing = !f.playing; sync(); kick();
+};
+btn.addEventListener('click', toggle);
+range.addEventListener('input', () => { f.playing = false; f.fresh = false; f.t = +range.value; sync(); paint(false); });
+el.addEventListener('keydown', (e) => {
+  if (e.target === range) return;
+  const i = STOPS.indexOf(stopAt(f.t));
+  if (e.key === ' ' && e.target === el) { e.preventDefault(); toggle(); return; }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    const j = clamp(i + (e.key === 'ArrowRight' ? 1 : -1), 0, STOPS.length - 1);
+    stopBtns[j].click(); stopBtns[j].focus();
+  }
+});
+theme.addEventListener('click', () => {
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+});
+
+// frame loop: only while playing and on screen, <= 30 fps, stops at the end (no loop)
+new IntersectionObserver((es) => { f.visible = es.some((e) => e.isIntersecting); kick(); }, { rootMargin: '120px' }).observe(el);
+let raf = 0;
+const live = () => f.playing && f.visible;
+function tick(now) {
+  raf = 0;
+  if (!live()) { f.last = 0; return; }
+  if (!f.last) f.last = now;
+  else if (now - f.last >= 33) {
+    f.t = Math.min(dur, f.t + Math.min(0.1, (now - f.last) / 1000)); f.last = now; paint(false);
+    if (f.t >= dur) { f.playing = false; sync(); return; }
+  }
+  raf = requestAnimationFrame(tick);
+}
+function kick() { if (!raf && live()) raf = requestAnimationFrame(tick); }
+
+// seek(t) paints frame t and pauses: the hook for checks, render and a host page
+window.DUR = dur;
+window.seek = (t) => { f.playing = false; f.fresh = false; f.t = clamp(+t, 0, dur); sync(); paint(false); };
+
+// tell a host page our height (once per size change)
+if ('ResizeObserver' in window && window.parent !== window) {
+  let lastH = 0;
+  new ResizeObserver((es) => {
+    const hh = Math.ceil(es[0].contentRect.height + 24);
+    if (hh !== lastH) { lastH = hh; parent.postMessage({ type: 'figure-height', fig: el.dataset.fig, height: hh }, '*'); }
+  }).observe(document.body);
+}
+
+sync(); paint(false);
+if (reduce) { f.t = rest; paint(false); }
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', sync);
+new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>
+</body>
+</html>

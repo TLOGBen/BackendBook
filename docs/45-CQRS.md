@@ -2,7 +2,43 @@
 
 > CQRS（命令查詢職責分離）把「改資料」和「查資料」交給兩套不同的資料表和程式處理：改資料的那套負責把規則守好，查資料的那套把資料整理成畫面好查、查得快的樣子。
 
-**難度**：★★★　**閱讀時間**：約 25 分鐘　**前置知識**：[最終一致性](42-最終一致性.md)、[信箱模式](44-信箱模式.md)、[冪等性](25-冪等性.md)
+**難度**：★★★　**閱讀時間**：約 25 分鐘　**前置知識**：[資料庫交易](03-資料庫交易.md)、[冪等性](25-冪等性.md)、[最終一致性](42-最終一致性.md)、[信箱模式](44-信箱模式.md)
+
+## 核心問題與理念
+
+**它要解決的問題**：電商客服後台的訂單列表要依很多條件篩選，背後是一條把 6 張表接起來查（join）的重查詢。它跟下單的寫入擠在同一個資料庫上，週年慶時查詢一多，資料庫忙不過來，連結帳都跟著逾時（下面的情境會完整走一遍）。
+
+**核心理念**：畫面要什麼樣子，就事先替它存一份那個樣子；規則照舊只在原本那份資料上檢查。
+
+**想通的那一步**：
+
+- **卡住的地方**：直覺的做法是讓同一份資料表又守規則、又好查。為了列表查得快加一堆重複的欄位，每次寫入都得一起維護；為了寫入正確讓每筆資料只存一處，列表頁就得每次把 6 張表接起來查，兩邊互相拉扯。
+- **火花**：讀和寫要的形狀本來就不一樣，乾脆存兩份：寫入那份照規則改，再由背景程式把每次變化整理進另一份畫面專用的表。查詢那份壞了或要改版，都能從寫入那份重新產生，所以它可以怎麼好查就怎麼存。
+
+## 閱讀前推薦具備知識
+
+| 知識 | 要會到什麼程度 | 這篇哪裡會用到 | 不熟的話先看 |
+|---|---|---|---|
+| SQL 的 `JOIN` 和 `UPDATE ... WHERE` | **必備**：看得懂一條用 `JOIN` 把 `orders` 和 `customers` 接起來的查詢，也看得懂 `UPDATE ... WHERE` 改了哪幾列 | 情境裡 6 張表 join 的訂單列表、「為什麼要分開模型」的正規化對照、「動手看看」的 `schema.sql` 和投影用的 SQL | [PostgreSQL：JOIN](https://www.postgresql.org/docs/current/tutorial-join.html) |
+| [資料庫交易](03-資料庫交易.md) | **必備**：知道 `with conn.transaction():` 區塊裡的幾筆寫入會一起 commit 或一起作廢，區塊外面的程式不在交易裡 | 第二次出事的根因（commit 之後才寫 Elasticsearch）、`place_order` 把訂單和事件寫在同一個交易 | 本系列第 03 篇 |
+| [最終一致性](42-最終一致性.md) | **加分**：知道「寫入成功之後，別的地方要過一小段時間才看得到」是正常狀態，系統會自己追上 | 「讀模型最終一致，那剛寫完馬上讀怎麼辦」 | 本系列第 42 篇 |
+| [信箱模式](44-信箱模式.md) | **加分**：能說出為什麼「commit 之後再呼叫另一個系統」會漏資料，以及把事件寫進同一個交易的信箱表怎麼補上這個縫 | 第二次出事的修法、Level 3 的第 1 個設計、「常見地雷」第 2 點 | 本系列第 44 篇 |
+| [冪等性](25-冪等性.md) | **加分**：知道同一筆事件處理兩次，結果要跟處理一次一樣；「設定成某個值」比「累加」安全 | 投影程式的版本守門、「常見地雷」第 3 點 | 本系列第 25 篇 |
+| Python 的函式、`for` 迴圈、`with` | **加分**：看得懂 `for sku, qty, price in items:` 一次拿出 tuple 裡的 3 個值 | 「動手看看」的 `cqrs_demo.py` | [Python 官方教學（中文）](https://docs.python.org/zh-tw/3/tutorial/index.html) 第 4、5 章 |
+
+**快速自我檢查**：下面這段下單程式裡，最後一行 `es.index(...)` 逾時、拋出例外。這時 PostgreSQL 裡還有這張訂單嗎？
+
+```python
+with conn.transaction():
+    order_id = insert_order(conn, data)
+es.index(index="orders", id=order_id, document=to_doc(data))  # 這行逾時，拋出例外
+```
+
+<details markdown="1"><summary>看答案</summary>
+
+還有。`with` 區塊結束時交易就已經 commit 了，`es.index` 寫在區塊外面，不在任何交易裡，它失敗也不會讓訂單回滾。這就是情境裡「PostgreSQL 有、Elasticsearch 永遠沒有」的原因。答不出來的話，先看第 03 篇〈資料庫交易〉，弄清楚交易從哪裡開始、到哪裡結束。
+
+</details>
 
 ## 為什麼要在意：一個具體的情境
 
@@ -24,17 +60,19 @@
 
 ### 第二次出事：搬到 Elasticsearch 之後，訂單會漏
 
-團隊決定把訂單列表搬到 Elasticsearch（一種專門做搜尋和篩選的資料庫），客服後台改查 Elasticsearch，PostgreSQL 只負責下單。工程師在下單的程式碼裡，commit 訂單之後順手寫一份到 Elasticsearch：
+團隊決定把訂單列表搬到 Elasticsearch（一種專門做搜尋和篩選的資料庫），客服後台改查 Elasticsearch，PostgreSQL 只負責下單。工程師在下單的程式碼裡，先在 `with conn.transaction():` 區塊裡寫入訂單，區塊結束、訂單 commit 之後，再呼叫 `es.index(...)` 寫一份到 Elasticsearch；寫失敗就用 `logger.warning(...)` 記一行，照樣回 201 給客人。類似的錯誤寫法在「常見地雷」的〈2. 雙寫：commit 之後再直接寫讀庫〉。
 
-```python
-# ❌ 出事的寫法：先 commit 訂單，再另外寫一份到 Elasticsearch
-with conn.transaction():
-    order_id = insert_order(conn, data)
-try:
-    es.index(index="orders", id=order_id, document=to_doc(data))  # 逾時就漏了這筆
-except Exception:
-    logger.warning("寫入 ES 失敗，order_id=%s", order_id)  # 只記一行，沒有人會補
-return {"order_id": order_id}, 201
+下面這張圖看的是這支下單 API 的兩次寫入：兩次寫入各自獨立，黃色那一步失敗時，前一步已經收不回來。
+
+```mermaid
+flowchart LR
+    API["下單 API"] --> PG[("PostgreSQL：commit 訂單")]
+    PG --> ES["寫入 Elasticsearch"]
+    ES -->|"成功"| OK["回 201"]
+    ES -->|"逾時或失敗"| WARN["記一行 warning"]
+    WARN --> OK
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class ES,WARN hot
 ```
 
 上線後頭兩週沒有異狀。之後某一筆訂單 1001 是這樣走的：
@@ -51,7 +89,7 @@ return {"order_id": order_id}, 201
 
 客人看到的是下單成功、手上有確認信；客服看到的是「後台搜不到這筆訂單」。工程師翻日誌，只找得到一行 `寫入 ES 失敗，order_id=1001` 的 warning，沒有 error，所以告警從來沒響過。
 
-根因在第 2–5 行的順序：第 2–3 行的交易在 `with` 區塊結束時就 commit 了，第 5 行的 `es.index` 不在任何交易裡；它失敗時，第 7 行只記一行 warning 就繼續往下走。這種「改資料庫之後，再另外寫第二個系統」的做法叫**雙寫**（dual write），兩邊沒有共同的交易，中間任何一步失敗，兩邊就永久對不上。再加上 Elasticsearch 裡的資料只在下單當下寫一次，就算發現漏了，也沒有可靠的來源可以重新產生一份。
+根因在先後順序：訂單的交易在 `with` 區塊結束時就 commit 了，之後的 `es.index` 不在任何交易裡；它失敗時，程式只記一行 warning 就繼續往下走。這種「改資料庫之後，再另外寫第二個系統」的做法叫**雙寫**（dual write），兩邊沒有共同的交易，中間任何一步失敗，兩邊就永久對不上。再加上 Elasticsearch 裡的資料只在下單當下寫一次，就算發現漏了，也沒有可靠的來源可以重新產生一份。
 
 修法是在下單的同一個交易裡，多寫一筆「訂單成立了」的事件到信箱表（見[信箱模式](44-信箱模式.md)），再由另一支背景程式讀事件、更新 Elasticsearch，失敗就重試，必要時能從頭重建整份資料。下面「它是怎麼運作的」的 Level 3、「動手看看」和「常見地雷」第 2 點會講這套做法。
 
@@ -62,16 +100,18 @@ return {"order_id": order_id}, 201
 ```mermaid
 flowchart LR
     U["使用者 / 客服"] --> CMD["Command API（改資料）"]
-    CMD --> W[("寫入 DB：orders、domain_events")]
+    CMD e1@--> W[("寫入 DB：orders、domain_events")]
     W -. "背景讀新事件" .-> P["投影程式"]
-    P --> R[("讀取 DB：order_list_view")]
+    P e2@--> R[("讀取 DB：order_list_view")]
     U --> QRY["Query API（查資料）"]
     QRY --> R
+    e1@{ animate: true }
+    e2@{ animate: true }
     classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
     class P,R,QRY hot
 ```
 
-左上那條路叫**寫入模型**（write model）：Command API 和寫入 DB，負責檢查規則、把資料改對。右下那條路叫**讀模型**（read model）：Query API 和讀取 DB，裡面的資料是替某個畫面整理好的樣子。黃色是 CQRS 多出來的部分，中間的**投影程式**（projector）在背景把寫入端的新事件整理進讀取 DB，這個動作叫**投影**（projection）。投影程式跑完之前，讀取 DB 裡還沒有新訂單，這就是[最終一致性](42-最終一致性.md)；寫入 DB 裡那張 `domain_events` 是[信箱模式](44-信箱模式.md)的信箱表；讀取端如果只是主庫的複本、表的形狀一模一樣，就屬於[讀取副本](17-讀取副本.md)的範圍。
+從 Command API 到寫入 DB 那條路叫**寫入模型**（write model），負責檢查規則、把資料改對。從 Query API 到讀取 DB 那條路叫**讀模型**（read model），裡面的資料是替某個畫面整理好的樣子。黃色是 CQRS 多出來的部分，中間的**投影程式**（projector）在背景把寫入端的新事件整理進讀取 DB，這個動作叫**投影**（projection）。投影程式跑完之前，讀取 DB 裡還沒有新訂單，這就是[最終一致性](42-最終一致性.md)；寫入 DB 裡那張 `domain_events` 是[信箱模式](44-信箱模式.md)的信箱表；讀取端如果只是主庫的複本、表的形狀一模一樣，就屬於[讀取副本](17-讀取副本.md)的範圍。
 
 ## 生活比喻
 
@@ -96,6 +136,17 @@ flowchart LR
 - **命令（command）**：意圖改變狀態，例如「下單」「取消訂單」「變更收件地址」。命令可能被拒絕（庫存不足、狀態不允許），它的回傳值通常很少：成功或失敗、新資源的 id、新的版本號。
 - **查詢（query）**：只讀，不改任何狀態，例如「列出我最近 20 筆訂單」。查詢可以隨便重試、隨便快取。
 
+下面這張圖看的是一個請求進來時，怎麼分辨它是命令還是查詢：
+
+```mermaid
+flowchart LR
+    REQ["一個請求"] --> ASK{"會改變狀態嗎"}
+    ASK -->|"會"| C["命令：下單、取消訂單"]
+    ASK -->|"不會"| Q["查詢：列出最近 20 筆訂單"]
+    C --> CR["可能被拒絕，回傳很少：成功或失敗、id、版本號"]
+    Q --> QR["可以重試、可以快取"]
+```
+
 這個概念源自 Bertrand Meyer 提出的 CQS（Command Query Separation）原則：一個方法要嘛改狀態、要嘛回傳資料，不要兩個都做。Greg Young 把這個想法放大到架構層級，就是 CQRS：不只方法分開，連**模型**都分開。
 
 ### 為什麼要分開模型
@@ -112,7 +163,31 @@ flowchart LR
 
 硬要一個模型同時滿足兩邊，要嘛為了列表頁加一堆冗餘欄位，寫入時還得同步維護它們；要嘛為了寫入正確保持正規化，讀取時就得 6 張表 join。
 
+下面這張圖看的是同一份訂單資料的兩種形狀，以及客服列表頁從哪裡拿資料：
+
+```mermaid
+flowchart LR
+    subgraph WM["寫入模型：正規化"]
+        O["orders"]
+        OI["order_items"]
+        CU["customers"]
+        PA["payments"]
+        SH["shipments"]
+        CO["coupons"]
+    end
+    subgraph RM["讀模型：反正規化"]
+        V["order_list_view：一列就是列表頁的一列"]
+    end
+    WM -->|"投影時先整理好"| V
+    WM -.->|"沒有讀模型時，每次查詢都 6 張表 join"| PAGE["客服訂單列表頁"]
+    V -->|"直接查一張表"| PAGE
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class V hot
+```
+
 ### CQRS 是一個光譜，不是開關
+
+讀寫要分開到什麼程度，可以分成 3 個等級。這張圖由左到右排出來，越往右分得越開，下面逐一說明：
 
 ```mermaid
 flowchart LR
@@ -186,18 +261,68 @@ sequenceDiagram
 
 ### 讀模型最終一致，那「剛寫完馬上讀」怎麼辦
 
-CQRS 上線時最常被問到這個問題。常見解法由簡單到複雜排列：
+CQRS 上線時最常被問到這個問題。用上面的 42 號訂單來看，下單後馬上查列表，會依序發生這些事：
+
+<figure class="draw-fig">
+<iframe class="draw-fig__frame" src="../figures/45-cqrs-read-lag.html" title="按播放或點 T1～T5，看 42 號訂單先進寫入 DB、讀模型晚一步才有；注意黃色的空窗：T3 那一刻訂單已經成立，列表卻看不到。" loading="lazy" style="height: 840px;"></iframe>
+<figcaption>按播放或點 T1～T5，看 42 號訂單先進寫入 DB、讀模型晚一步才有；注意黃色的空窗：T3 那一刻訂單已經成立，列表卻看不到。</figcaption>
+</figure>
+
+| 時間 | 發生什麼 | 寫入 DB 的 42 號 | 讀模型的 42 號 | 列表頁看到 42 號嗎 |
+|---|---|---|---|---|
+| T1 | 使用者送出 `POST /orders`，交易 commit | 有，version=1 | 沒有 | |
+| T2 | 使用者拿到 201 和 order_id=42 | 有，version=1 | 沒有 | |
+| T3 | 前端馬上打 `GET /orders` | 有，version=1 | 沒有 | 看不到 |
+| T4 | 投影程式處理 `OrderPlaced` | 有，version=1 | 有，version=1 | |
+| T5 | 前端再打一次 `GET /orders` | 有，version=1 | 有，version=1 | 看得到 |
+
+T3 那一刻，訂單其實已經成立，只是讀模型還沒追上。常見解法由簡單到複雜排列：
 
 - **命令直接回傳需要的資料**：下單 API 回傳完整的訂單內容，前端直接顯示，不要下單完立刻打列表 API。
 - **前端樂觀更新（optimistic UI）**：先把新訂單插進畫面，等之後的查詢自然追上。
 - **帶版本號查詢**：命令回傳 `version=3`，查詢時帶上，Query API 發現讀模型版本還小於 3，就短暫等待或改從寫入端讀這一筆。
 - **關鍵畫面直接讀寫入模型**：例如「付款結果頁」就是不能錯，直接查寫入庫，不經過讀模型。CQRS 沒規定所有讀取都只能走讀模型。
 
+下面這張圖看的是「帶版本號查詢」在讀模型還沒追上時怎麼處理，這裡畫的是改從寫入端讀的那一種：
+
+```mermaid
+sequenceDiagram
+    participant U as 前端
+    participant Q as Query API
+    participant R as 讀取 DB
+    participant W as 寫入 DB
+    U->>Q: 查詢 42 號訂單 帶 version=3
+    Q->>R: 查 42 號的讀模型
+    R-->>Q: version=2
+    Note over Q: 讀模型版本小於 3
+    Q->>W: 改從寫入端讀這一筆
+    W-->>Q: version=3 的訂單
+    Q-->>U: 回傳 version=3 的資料
+```
+
 這跟[讀取副本](17-讀取副本.md)遇到的[複寫延遲](18-複寫延遲.md)是同一類問題，解法也很像。讀取副本是**同一個模型的複本**；CQRS 的讀模型則是另一個形狀的模型。
 
 ### CQRS 和事件來源的關係
 
 很多文章把 CQRS 和[事件來源（event sourcing）](46-事件來源.md)綁在一起講，因為事件來源的寫入端只存事件，幾乎一定要搭配 CQRS 才查得動。反過來就不成立了：**CQRS 的寫入端可以是很普通的關聯式資料表**，就像本篇的範例一樣，用信箱表送出事件就夠了。不要因為想做 CQRS 就順便導入事件來源，那是另一筆大成本。
+
+下面這張圖看的是寫入端的兩種做法，都能把事件交給投影程式、餵出同樣的讀模型：
+
+```mermaid
+flowchart LR
+    subgraph A["做法一：一般資料表（本篇）"]
+        T[("orders 等資料表 + domain_events 信箱表")]
+    end
+    subgraph B["做法二：事件來源"]
+        EV[("只存事件的事件儲存庫")]
+    end
+    T e1@--> P["投影程式"]
+    EV --> P
+    P --> R[("讀模型")]
+    e1@{ animate: true }
+```
+
+本篇走的是做法一，動態箭頭標的就是這條路。
 
 ## 動手看看
 
@@ -298,7 +423,6 @@ import psycopg
 
 DSN = "postgresql://postgres:secret@localhost:5432/postgres"
 
-
 # ---------- 命令端：只管規則正確，順手寫一筆事件 ----------
 
 def place_order(conn, customer_id, items):
@@ -336,7 +460,6 @@ def place_order(conn, customer_id, items):
         )
     return order_id, 1
 
-
 def cancel_order(conn, order_id):
     """取消訂單。規則檢查一律看寫入模型，不看讀模型。"""
     with conn.transaction():
@@ -362,7 +485,6 @@ def cancel_order(conn, order_id):
             (order_id, new_version, json.dumps({"status": "cancelled"})),
         )
     return new_version
-
 
 # ---------- 投影程式：讀模型的唯一寫入者，必須冪等 ----------
 
@@ -397,7 +519,6 @@ def apply_event(conn, order_id, version, typ, p):
     else:
         raise ValueError(f"不認得的事件類型：{typ}")  # 讓它失敗，別默默吞掉
 
-
 def run_projector_once(conn, batch_size=100):
     """處理一批事件，回傳處理了幾筆。
 
@@ -423,7 +544,6 @@ def run_projector_once(conn, batch_size=100):
             conn.execute("UPDATE domain_events SET processed_at = now() WHERE id = %s", (ev_id,))
     return len(events)
 
-
 # ---------- 查詢端：只讀讀模型，不碰領域規則 ----------
 
 def list_orders(conn, status=None):
@@ -434,7 +554,6 @@ def list_orders(conn, status=None):
         params.append(status)
     sql += " ORDER BY created_at DESC LIMIT 20"
     return conn.execute(sql, params).fetchall()
-
 
 if __name__ == "__main__":
     with psycopg.connect(DSN, autocommit=True) as conn:

@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>複寫延遲隊伍</title>
+<style>
+:root {
+  --bg: #ffffff; --surface: #f6f7f9; --ink: #1f2430; --muted: #4f5d75; --soft: #5a6580; --line: #d5d9e0;
+  --wal: #c9ced8; --wal-ink: #3a4254;
+  --hot-fill: #fde68a; --hot-stroke: #b45309; --hot-ink: #111111;
+  --ok: #2e5aa8;
+  --f-ui: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --f-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Noto Sans TC", "Microsoft JhengHei", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e2129; --surface: #272b35; --ink: #eceef2; --muted: #b8bfcc; --soft: #9aa3b5; --line: #3b4150;
+    --wal: #4a5162; --wal-ink: #dfe3ea;
+    --hot-fill: #5a3a0c; --hot-stroke: #f59e0b; --hot-ink: #fde68a;
+    --ok: #8fb2ea;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e2129; --surface: #272b35; --ink: #eceef2; --muted: #b8bfcc; --soft: #9aa3b5; --line: #3b4150;
+  --wal: #4a5162; --wal-ink: #dfe3ea;
+  --hot-fill: #5a3a0c; --hot-stroke: #f59e0b; --hot-ink: #fde68a;
+  --ok: #8fb2ea;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); padding: 12px 16px; -webkit-text-size-adjust: 100%; }
+.fig { margin: 0 auto; max-width: 960px; min-width: 0; display: flex; flex-direction: column; gap: 12px; outline: none; }
+.fig:focus-visible { outline: 2px solid var(--hot-stroke); outline-offset: 4px; border-radius: 6px; }
+
+/* top readouts */
+.top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.clock { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.clock .tag { font: 700 13px var(--f-mono); background: var(--ink); color: var(--bg); padding: 2px 8px; border-radius: 4px; }
+.clock .time { font: 700 18px var(--f-mono); font-variant-numeric: tabular-nums; }
+.lag { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; max-width: 420px; min-width: 0; }
+.lag .lbl { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.meter { position: relative; flex: 1 1 auto; height: 12px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; min-width: 60px; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--hot-stroke); border-radius: 6px; transform-origin: left; }
+.lag .val { font: 700 14px var(--f-ui); flex: 0 1 auto; min-width: 5em; text-align: right; }
+
+/* stage */
+.stage { display: grid; gap: 12px 16px; align-items: center;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr) minmax(0, 200px);
+  grid-template-areas: "src . rpt" "pri q rep"; }
+.src { grid-area: src; } .rpt { grid-area: rpt; } .pri { grid-area: pri; } .rep { grid-area: rep; } .q { grid-area: q; }
+.chip { font-size: 12px; line-height: 1.35; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--line); color: var(--soft); transition: none; min-height: 32px; display: flex; align-items: center; }
+.chip.on { background: var(--hot-fill); border: 1px solid var(--hot-stroke); color: var(--hot-ink); }
+.db { background: var(--surface); border: 1.5px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.db.ring { border-color: var(--hot-stroke); box-shadow: 0 0 0 2px var(--hot-stroke); }
+.db .name { font-weight: 600; font-size: 15px; }
+.db .sub { font: 12px var(--f-mono); color: var(--soft); word-break: break-all; }
+.db .addr { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
+.db .addr .k { font: 12px var(--f-mono); color: var(--soft); }
+.db .addr .v { font-weight: 700; font-size: 20px; padding: 0 6px; border-radius: 4px; border: 1.5px solid transparent; display: inline-block; }
+.db .addr .v.new { color: var(--ok); }
+.db .addr .v.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); }
+
+.q { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.q .qlbl { font-size: 12px; color: var(--soft); display: flex; justify-content: space-between; gap: 8px; }
+.lane { position: relative; height: 48px; border-top: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line); background: var(--surface); overflow: hidden; }
+.lane::after { content: ""; position: absolute; right: 0; top: 50%; width: 0; height: 0; border-left: 8px solid var(--soft); border-top: 6px solid transparent; border-bottom: 6px solid transparent; transform: translateY(-50%); }
+.blk { position: absolute; top: 9px; height: 28px; width: calc(100% / 12 - 4px); left: calc(var(--x, 0) * 100% / 12 + 2px); border-radius: 4px; background: var(--wal);
+  opacity: 0; will-change: left, opacity; }
+.blk.me { background: var(--hot-fill); color: var(--hot-ink); border: 2px solid var(--hot-stroke); z-index: 2; top: 7px; height: 32px;
+  width: max(calc(100% / 12 - 4px), 52px); left: calc((var(--x, 0) + 1) * 100% / 12 - 2px); transform: translateX(-100%);
+  font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; white-space: nowrap; }
+.head { position: absolute; right: 0; top: 0; bottom: 0; width: 3px; background: var(--soft); }
+
+/* story line */
+.story { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 260px); gap: 12px 16px; align-items: stretch; }
+.say { font-size: 14px; line-height: 1.55; min-height: 3.1em; display: flex; align-items: center; }
+.say code { font: 13px var(--f-mono); background: var(--surface); border: 1px solid var(--line); padding: 0 4px; border-radius: 3px; }
+.screen { border: 1.5px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.screen .k { font-size: 12px; color: var(--soft); }
+.screen .v { font-size: 14px; font-weight: 600; }
+.screen.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); }
+.screen.hot .k { color: var(--hot-ink); }
+
+/* controls */
+.ctrl { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
+.ctrl button { flex: none; min-width: 36px; height: 32px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: 12px var(--f-mono); padding: 0 8px; }
+.ctrl button:hover { border-color: var(--hot-stroke); }
+.ctrl button[aria-current="step"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.ctrl .play { min-width: 64px; font: 600 13px var(--f-ui); }
+.ctrl input[type=range] { flex: 1 1 160px; min-width: 0; height: 32px; accent-color: var(--hot-stroke); margin: 0; }
+.stops { display: flex; gap: 4px; flex-wrap: wrap; }
+.hint { font-size: 12px; color: var(--soft); width: 100%; }
+:focus-visible { outline: 2px solid var(--hot-stroke); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 560px) {
+  .stage { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "src rpt" "pri rep" "q q"; gap: 8px 10px; }
+  .story { grid-template-columns: minmax(0, 1fr); }
+  .db .addr .v { font-size: 18px; }
+  .lag { max-width: none; }
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="replica-lag-queue" data-dur="13.6" data-rest="6.8" tabindex="0"
+  aria-label="複寫延遲時間軸：批次工作和副本上的報表讓副本的 WAL 重播隊伍排到約 40 秒；使用者 22:05:10 把地址改成新家，主庫馬上是新家，但這筆變更排在隊伍後面，副本一直是舊家，重新整理和結帳都讀到舊家，直到 22:05:50 之後副本才重播到它。">
+  <div class="top">
+    <div class="clock"><span class="tag" data-k="tag">T4</span><span class="time" data-k="time">22:05:15</span></div>
+    <div class="lag"><span class="lbl">副本落後</span><span class="meter" aria-hidden="true"><i data-k="meter" style="width:100%"></i></span><span class="val" data-k="lag">約 40 秒</span></div>
+  </div>
+
+  <div class="stage">
+    <div class="chip src" data-k="src"><span>批次工作：一次 <code>UPDATE</code> 300 萬筆商品價格</span></div>
+    <div class="chip rpt" data-k="rpt">資料組在副本上跑報表</div>
+    <div class="db pri" data-k="pri">
+      <span class="name">主庫</span>
+      <span class="sub">寫入：PUT /me/address</span>
+      <span class="addr"><span class="k">address</span><span class="v new" data-k="pv">新家</span></span>
+    </div>
+    <div class="q">
+      <div class="qlbl"><span>WAL：主庫 → 副本</span><span>照順序重播 ▸</span></div>
+      <div class="lane" data-k="lane" aria-hidden="true"><span class="head"></span></div>
+    </div>
+    <div class="db rep ring" data-k="rep">
+      <span class="name">副本</span>
+      <span class="sub">讀取：GET /me</span>
+      <span class="addr"><span class="k">address</span><span class="v hot" data-k="rv">舊家</span></span>
+    </div>
+  </div>
+
+  <div class="story">
+    <div class="say"><span data-k="say">使用者重新整理，<code>GET /me</code> 走副本，讀到的還是舊家。</span></div>
+    <div class="screen hot" data-k="scr"><span class="k">使用者看到</span><span class="v" data-k="scrv">收件地址：舊家</span></div>
+  </div>
+
+  <div class="ctrl"></div>
+  <p class="sr" role="status" aria-live="polite" data-k="live"></p>
+</figure>
+
+<script>
+(() => {
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const ease = (u) => u * u * (3 - 2 * u);
+
+// ---- the model: a pure function of t ----
+const STOPS = [
+  { id: 'T1', t: 0.0,  time: '22:00',
+    say: '批次工作開始一次 <code>UPDATE</code> 300 萬筆商品價格，主庫瞬間產生大量 WAL。',
+    scr: ['使用者看到', '收件地址：舊家'], lag: '從 50 毫秒開始往上爬' },
+  { id: 'T2', t: 2.4,  time: '22:00',
+    say: '資料組在副本上跑報表，副本為了不打斷它，延後套用一部分 WAL。',
+    scr: ['使用者看到', '收件地址：舊家'], lag: '繼續變大' },
+  { id: 'T3', t: 4.2,  time: '22:05:10',
+    say: '使用者把地址改成新家按儲存：<code>PUT /me/address</code> 走主庫，commit 成功。這筆變更排在 40 多秒的隊伍後面。',
+    scr: ['使用者看到', '已儲存'], lag: '約 40 秒' },
+  { id: 'T4', t: 6.0,  time: '22:05:15',
+    say: '使用者重新整理，<code>GET /me</code> 走副本，讀到的還是舊家。',
+    scr: ['使用者看到', '收件地址：舊家'], lag: '約 40 秒', hot: true },
+  { id: 'T5', t: 7.6,  time: '22:05:30',
+    say: '使用者以為沒存到，又改了幾次、整理了幾次，每次都是舊家。',
+    scr: ['使用者看到', '收件地址：舊家'], lag: '約 40 秒', hot: true },
+  { id: 'T6', t: 9.2,  time: 'T6',
+    say: '使用者直接去結帳，結帳頁從副本帶出舊家，訂單用舊地址成立。',
+    scr: ['結帳頁帶出', '訂單寄到：舊家'], lag: '約 40 秒', hot: true },
+  { id: 'T7', t: 10.8, time: '22:05:50 之後',
+    say: '副本終於重播到 T3 的那筆變更，副本也變成新家。',
+    scr: ['副本上查到', '收件地址：新家'], lag: '慢慢回落' },
+];
+const T_ME = 4.2;          // the address change enters the WAL
+const T_APPLY = 11.6;      // the replica replays it
+const SLOTS = 12;
+const ME = 12;             // WAL id of the address change; ids 0..11 are batch WAL
+const born = (k) => (k === ME ? T_ME : 0.15 + k * 0.14);
+// cumulative WAL replayed by the replica
+function replayed(t) {
+  if (t < 0.6) return 0;
+  if (t < 2.4) return lerp(0, 1, seg(t, 0.6, 2.4));          // T1: replay trickles
+  if (t < 4.2) return lerp(1, 1.5, seg(t, 2.4, 4.2));        // T2: report holds replay back
+  if (t < T_APPLY) return lerp(1.5, ME + 0.02, seg(t, 4.2, T_APPLY)); // slow, in order
+  return ME + 0.02 + (t - T_APPLY) * 0.8;
+}
+function stopAt(t) { let s = STOPS[0]; for (const x of STOPS) if (t >= x.t - 1e-6) s = x; return s; }
+function meterAt(t) {
+  if (t < 2.4) return lerp(0.03, 0.4, ease(seg(t, 0, 2.4)));
+  if (t < 4.2) return lerp(0.4, 0.92, ease(seg(t, 2.4, 4.2)));
+  if (t < T_APPLY) return lerp(0.92, 1, seg(t, 4.2, 5));
+  return lerp(1, 0.25, ease(seg(t, T_APPLY, 13.6)));
+}
+
+// ---- DOM ----
+const el = document.querySelector('.fig');
+const $ = (k) => el.querySelector(`[data-k="${k}"]`);
+const N = { tag: $('tag'), time: $('time'), meter: $('meter'), lag: $('lag'), src: $('src'), rpt: $('rpt'),
+  pri: $('pri'), rep: $('rep'), pv: $('pv'), rv: $('rv'), lane: $('lane'), say: $('say'), scr: $('scr'), scrv: $('scrv'), live: $('live') };
+const scrk = N.scr.querySelector('.k');
+const blocks = [];
+for (let k = 0; k <= ME; k++) {
+  const b = document.createElement('span');
+  b.className = 'blk' + (k === ME ? ' me' : '');
+  if (k === ME) b.textContent = '改地址';
+  N.lane.appendChild(b); blocks.push(b);
+}
+const memo = new Map();
+const put = (node, key, val, how = 'text') => {
+  const id = key; if (memo.get(id) === val) return; memo.set(id, val);
+  if (how === 'text') node.textContent = val; else if (how === 'html') node.innerHTML = val; else how(val);
+};
+
+function render(t) {
+  const s = stopAt(t);
+  put(N.tag, 'tag', s.id);
+  put(N.time, 'time', s.time);
+  put(N.lag, 'lag', s.lag);
+  N.meter.style.width = (meterAt(t) * 100).toFixed(1) + '%';
+  put(N.say, 'say', s.say, 'html');
+  put(scrk, 'scrk', s.scr[0]);
+  put(N.scrv, 'scrv', s.scr[1]);
+  const priNew = t >= T_ME + 0.25, repNew = t >= T_APPLY;
+  put(N.pv, 'pv', priNew ? '新家' : '舊家');
+  put(N.rv, 'rv', repNew ? '新家' : '舊家');
+  const readHot = !!s.hot;
+  put(N.pv, 'pvc', (priNew ? 'v new' : 'v') + (s.id === 'T3' && priNew ? ' hot' : ''), (v) => { N.pv.className = v; });
+  put(N.rv, 'rvc', repNew ? 'v new' : (readHot ? 'v hot' : 'v'), (v) => { N.rv.className = v; });
+  put(N.src, 'src', s.id === 'T1', (v) => N.src.classList.toggle('on', v));
+  put(N.rpt, 'rpt', s.id === 'T2', (v) => N.rpt.classList.toggle('on', v));
+  put(N.pri, 'pri', s.id === 'T3', (v) => N.pri.classList.toggle('ring', v));
+  put(N.rep, 'rep', readHot || s.id === 'T7', (v) => N.rep.classList.toggle('ring', v));
+  put(N.scr, 'scr', readHot, (v) => N.scr.classList.toggle('hot', v));
+  // the queue: WAL k sits (k - replayed) slots before the replay head (right edge)
+  const c = replayed(t);
+  for (let k = 0; k <= ME; k++) {
+    const b = blocks[k];
+    const pos = k - c;                       // 0 = at the head, SLOTS-1 = back of the queue
+    const alive = t >= born(k);
+    let op = 0, x = 0;
+    if (alive && pos > -0.6 && pos < SLOTS - 0.2) {
+      const fadeIn = k === ME ? seg(t, T_ME, T_ME + 0.3) : seg(t, born(k), born(k) + 0.25);
+      const fadeOut = pos < 0 ? clamp(1 + pos / 0.6) : 1;
+      op = fadeIn * fadeOut;
+      // newly written WAL drops in from the primary side
+      const enter = k === ME ? 1 - ease(seg(t, T_ME, T_ME + 0.5)) : 1 - ease(seg(t, born(k), born(k) + 0.4));
+      x = (SLOTS - 1 - Math.max(pos, 0)) + enter * -1.2;
+    }
+    b.style.opacity = op.toFixed(3);
+    b.style.setProperty('--x', x.toFixed(3));
+  }
+  return s;
+}
+
+// ---- controls: play / pause, scrubber, T1–T7 stops, keyboard ----
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const dur = +el.dataset.dur, rest = +el.dataset.rest;
+const ctrl = el.querySelector('.ctrl');
+const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'play';
+const range = document.createElement('input'); range.type = 'range'; range.min = 0; range.max = dur; range.step = 0.01;
+range.id = 'scrub-' + el.dataset.fig; range.setAttribute('aria-label', '時間軸');
+const stops = document.createElement('div'); stops.className = 'stops'; stops.setAttribute('role', 'group'); stops.setAttribute('aria-label', '跳到停點');
+const stopBtns = STOPS.map((s) => {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = s.id;
+  b.setAttribute('aria-label', `${s.id}（${s.time}）`);
+  b.addEventListener('click', () => { f.playing = false; f.t = s.id === 'T7' ? 12.4 : s.t + 0.8; sync(); paint(true); });
+  stops.appendChild(b); return b;
+});
+const theme = document.createElement('button'); theme.type = 'button';
+const hint = document.createElement('span'); hint.className = 'hint'; hint.textContent = '按播放，或拖時間軸、點 T1–T7；鍵盤左右鍵也可以切換停點。';
+ctrl.append(btn, range, stops, theme, hint);
+const f = { t: rest, playing: false, visible: false, last: 0, fresh: true };
+
+function paint(announce) {
+  const s = render(f.t);
+  range.value = f.t;
+  range.setAttribute('aria-valuetext', `${s.id}，${s.time}`);
+  stopBtns.forEach((b, i) => { if (STOPS[i] === s) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
+  if (announce) N.live.textContent = `${s.id}，${s.time}：${N.say.textContent}`;
+}
+function sync() {
+  btn.textContent = f.playing ? '❚❚ 暫停' : '▶ 播放';
+  btn.setAttribute('aria-label', f.playing ? '暫停' : '播放');
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+  theme.textContent = dark ? '淺色' : '深色'; theme.setAttribute('aria-label', dark ? '切換為淺色' : '切換為深色');
+}
+const toggle = () => {
+  if (!f.playing && (f.fresh || f.t >= dur - 0.01)) f.t = 0;
+  f.fresh = false; f.playing = !f.playing; sync(); kick();
+};
+btn.addEventListener('click', toggle);
+range.addEventListener('input', () => { f.playing = false; f.fresh = false; f.t = +range.value; sync(); paint(false); });
+el.addEventListener('keydown', (e) => {
+  if (e.target === range) return;
+  const i = STOPS.indexOf(stopAt(f.t));
+  if (e.key === ' ' && e.target === el) { e.preventDefault(); toggle(); return; }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    const j = clamp(i + (e.key === 'ArrowRight' ? 1 : -1), 0, STOPS.length - 1);
+    stopBtns[j].click(); stopBtns[j].focus();
+  }
+});
+theme.addEventListener('click', () => {
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+});
+
+// frame loop: only while playing and on screen, <= 30 fps, stops at the end (no loop)
+new IntersectionObserver((es) => { f.visible = es.some((e) => e.isIntersecting); kick(); }, { rootMargin: '120px' }).observe(el);
+let raf = 0;
+const live = () => f.playing && f.visible;
+function tick(now) {
+  raf = 0;
+  if (!live()) { f.last = 0; return; }
+  if (!f.last) f.last = now;
+  else if (now - f.last >= 33) {
+    f.t = Math.min(dur, f.t + Math.min(0.1, (now - f.last) / 1000)); f.last = now; paint(false);
+    if (f.t >= dur) { f.playing = false; sync(); return; }
+  }
+  raf = requestAnimationFrame(tick);
+}
+function kick() { if (!raf && live()) raf = requestAnimationFrame(tick); }
+
+// seek(t) paints frame t and pauses: the hook for checks, render and a host page
+window.DUR = dur;
+window.seek = (t) => { f.playing = false; f.fresh = false; f.t = clamp(+t, 0, dur); sync(); paint(false); };
+
+// tell a host page our height (once per size change)
+if ('ResizeObserver' in window && window.parent !== window) {
+  let lastH = 0;
+  new ResizeObserver((es) => {
+    const h = Math.ceil(es[0].contentRect.height + 24);
+    if (h !== lastH) { lastH = h; parent.postMessage({ type: 'figure-height', fig: el.dataset.fig, height: h }, '*'); }
+  }).observe(document.body);
+}
+
+const redraw = () => { sync(); paint(false); };
+redraw();
+if (reduce) { f.t = rest; paint(false); }
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', sync);
+new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>
+</body>
+</html>

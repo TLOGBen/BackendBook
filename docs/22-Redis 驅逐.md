@@ -4,6 +4,34 @@
 
 **難度**：★★☆　**閱讀時間**：約 18 分鐘　**前置知識**：[快取失效](21-快取失效.md)
 
+## 核心問題與理念
+
+**它要解決的問題**：一台 Redis（把資料放在記憶體裡的資料庫，常拿來當快取）同時放了丟了沒關係的菜單快取，和丟了就出事的登入狀態、待寄信件的排隊清單、簡訊驗證碼的次數計數器。沒人決定記憶體滿了要怎樣，結果先是整台被系統砍掉重啟，接著所有寫入都被拒絕、菜單頁出錯，改成「滿了就刪最久沒用的」之後，又悄悄刪掉了不能丟的登入狀態和待寄信件（下面的情境會完整走一遍）。
+
+**核心理念**：先分清哪些資料能丟：能丟的滿了就刪最久沒用的，不能丟的滿了寧可拒絕寫入。
+
+**想通的那一步**：
+
+- **卡住的地方**：直覺的做法是替這台 Redis 挑一個最好的「滿了怎麼辦」規則。它卡在規則是整台共用的：選「拒絕寫入」，菜單快取寫不進去，頁面跟著出錯；選「刪最久沒用的」，半小時沒動作的登入狀態和排隊中的工作也會被刪。
+- **火花**：一台只能有一種規則，那就照「能不能丟」把資料拆到兩台，快取那台刪最久沒用的，重要資料那台拒絕寫入。每台只剩一種資料，規則一下就選得出來。
+
+## 閱讀前推薦具備知識
+
+| 知識 | 要會到什麼程度 | 這篇哪裡會用到 | 不熟的話先看 |
+|---|---|---|---|
+| Redis 的 `GET`／`SET` 與 TTL | **必備**：知道 `SET key value EX 600` 的 key 600 秒後會自己消失，沒帶 `EX` 的 key 會一直留著，`TTL` 回 `-1` 代表沒設過期時間 | 〈過期 vs 驅逐〉、地雷 3「key 都沒設 TTL」、`volatile-*` 策略只挑有 TTL 的 key | [Redis 資料型別](https://redis.io/docs/latest/develop/data-types/) 的 Strings |
+| [快取失效](21-快取失效.md) | **必備**：能說出 cache-aside 的讀取流程：先 `GET`，沒命中就查資料庫，再 `SET` 寫回快取 | 情境裡的 `get_menu` 和那張「請求在哪裡斷掉」的圖、地雷 2 | 本系列第 21 篇 |
+| Python 的 `try`／`except` | **加分**：看得懂 `except redis.exceptions.RedisError:` 接住錯誤之後，程式會繼續往下跑，不會讓整個請求失敗 | 地雷 2 的降級寫法、「動手看看」的 `evict_demo.py` | [Python 官方教學（中文）](https://docs.python.org/zh-tw/3/tutorial/index.html) 第 8 章 |
+| Docker | **加分**：會用 `docker run` 帶參數起一個容器，用 `docker exec` 在容器裡跑 `redis-cli` | 「動手看看」起一台上限 5MB 的 Redis | [Docker 入門](https://docs.docker.com/get-started/) |
+
+**快速自我檢查**：在 Redis 裡依序執行 `SET a 1 EX 60` 和 `SET b 2`。70 秒後 `GET a`、`GET b` 各拿到什麼？`TTL b` 回傳什麼？
+
+<details markdown="1"><summary>看答案</summary>
+
+`GET a` 拿到 nil，因為 60 秒的 TTL 已經到期；`GET b` 拿到 `"2"`，`TTL b` 回 `-1`，代表 key 存在但沒有過期時間。這篇會一直區分「時間到自己消失」和「記憶體滿了被 Redis 刪掉」，前提就是先分得清楚哪些 key 有 TTL。答不出來也沒關係，先看 Redis 資料型別裡 Strings 的範例，再回頭看第 21 篇〈快取失效〉的〈先分清楚：快取「失效」有兩種〉。
+
+</details>
+
 ## 為什麼要在意：一個具體的情境
 
 這是一個假設情境。你負責一個線上訂餐服務的後端，初期為了省錢，整個後端只用一台 Redis（一個 Redis 實例），跑在記憶體上限 4GB 的容器裡。這台 Redis 同時放了四種東西：
@@ -15,32 +43,39 @@
 
 沒人動過 Redis 的設定，所以是兩個預設值：`maxmemory 0`（不限制記憶體用量）加 `maxmemory-policy noeviction`（記憶體滿了就拒絕寫入，什麼都不刪）。
 
-查菜單的程式碼長這樣：
+查菜單的程式 `get_menu` 走的是一般的快取流程：先 `GET` 快取，沒命中就查資料庫，再把結果寫回快取。出問題的是寫回快取那一行 `r.set(f"menu:{shop_id}", json.dumps(menu), ex=600)`：它沒有處理錯誤，Redis 一拒絕寫入，例外就一路往上拋。完整程式在「常見地雷」的〈地雷 2〉。
 
-❌ 出事的寫法：
+這張圖看的是 Redis 滿了、開始拒絕寫入以後，一個查菜單的請求在哪裡斷掉：
 
-```python
-# ❌ 錯誤示範：快取寫入失敗會讓整個請求回 500
-def get_menu(shop_id):
-    cached = r.get(f"menu:{shop_id}")
-    if cached:
-        return json.loads(cached)
-    menu = load_menu_from_db(shop_id)
-    r.set(f"menu:{shop_id}", json.dumps(menu), ex=600)  # OOM 時這裡拋例外
-    return menu
+```mermaid
+flowchart LR
+    Req["查菜單的請求"] --> G["GET 快取，沒命中"]
+    G --> DB["從資料庫查到菜單"]
+    DB --> S["SET 寫回快取"]
+    S -->|"Redis 已滿，回 OOM 錯誤"| X["例外沒人接，請求回 500"]
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class S hot
 ```
 
-這台 Redis 前後出了三次事。下表照時間順序列出每一步發生什麼、記憶體變成怎樣：
+菜單其實已經從資料庫查到了，只差寫回快取這一步失敗，使用者卻拿到錯誤頁。
+
+這台 Redis 前後出了三次事。先解釋表格裡會出現的三個詞：
+
+- **OOM killer**：記憶體超過限制時，作業系統或容器平台直接把行程殺掉。
+- **RDB 快照**：Redis 定期把記憶體資料存成的檔案，重啟時從它載回資料。
+- **`allkeys-lru`**：一種驅逐策略，滿了就刪最久沒被讀寫的 key，不管它是什麼。
+
+下表照時間順序列出每一步發生什麼、記憶體變成怎樣：
 
 | 時間 | 做了什麼／發生什麼 | Redis 記憶體 | 結果 |
 |---|---|---|---|
-| 週年慶當天 | 為了促銷，每筆菜單快取多塞了促銷資訊，單筆變大好幾倍 | 一路往上長 | `maxmemory 0` 不設限，Redis 不知道容器只有 4GB |
-| 當晚 19:00 尖峰 | 用量衝過 4GB，容器被 OOM killer 砍掉重啟（OOM killer：記憶體超過限制時，作業系統或容器平台直接把行程殺掉） | 歸零後重新載入 | 重啟時從 RDB 快照（Redis 定期把記憶體資料存成的檔案）載回資料，最後一次快照之後寫入的 session 全部不見 |
+| 週年慶當天 | 每筆菜單快取多塞促銷資訊，單筆變大好幾倍 | 一路往上長 | `maxmemory 0` 不設限，Redis 不知道容器只有 4GB |
+| 當晚 19:00 尖峰 | 用量衝過 4GB，容器被 OOM killer 砍掉重啟 | 歸零，從 RDB 快照載回 | 最後一次快照之後寫入的 session 全部不見 |
 | 接下來 20 分鐘 | 沒多久又滿、又被砍，反覆好幾次 | 反覆衝過 4GB | **第一次出事**：大量使用者被登出、訂單卡住 |
 | 事後 | 團隊加上 `maxmemory 3gb`，策略還是 `noeviction` | 上限 3GB | Redis 不會再被砍 |
-| 2 週後的尖峰 | 用量到 3GB，所有 `SET` 都被拒絕 | 停在 3GB | **第二次出事**：`get_menu` 寫快取那一行拋例外，請求回 500，菜單頁全掛；新的 session 也寫不進去，登入跟著壞 |
-| 當晚 | 值班工程師把策略改成 `allkeys-lru`（滿了就刪最久沒被讀寫的 key，不管它是什麼） | 停在 3GB，開始刪 key | OOM 錯誤馬上消失 |
-| 隔天早上 | Redis 一直在刪「最久沒被碰」的 key，不分資料種類 | 停在 3GB，`evicted_keys` 一直漲 | **第三次出事**：見下面四點 |
+| 2 週後的尖峰 | 用量到 3GB，所有 `SET` 都被拒絕 | 停在 3GB | **第二次出事**：菜單頁回 500，新 session 寫不進去，登入跟著壞 |
+| 當晚 | 值班工程師把策略改成 `allkeys-lru` | 停在 3GB，開始刪 key | OOM 錯誤馬上消失 |
+| 隔天早上 | Redis 不分資料種類，一直刪最久沒被碰的 key | 停在 3GB，`evicted_keys` 一直漲 | **第三次出事**：見下面四點 |
 
 第三次被刪掉的 key，各自造成不同的問題：
 
@@ -48,6 +83,13 @@ def get_menu(shop_id):
 - 佇列在 Redis 裡通常就是一個 list key，被刪時是整條佇列連同排隊中的工作一起消失，所以有些訂單確認信根本沒寄出。
 - 用來防止重複寄信的鎖／冪等鍵（記錄「這封信已經寄過」的 key，見[冪等性](25-冪等性.md)）也被刪了，補寄的排程重跑時以為沒寄過，又寄了一次，有人收到兩封一樣的信。
 - 速率限制的計數器被刪了，等於歸零，攻擊者可以一直打簡訊 API 燒錢。
+
+下面這張圖把三次出事照順序串起來，上方四個按鈕分別是三次出事和最後的修法：
+
+<figure class="draw-fig">
+<iframe class="draw-fig__frame" src="../figures/22-redis-eviction-three-incidents.html" title="按播放或點上方四個按鈕，看同一台混放快取、session、佇列和計數器的 Redis，在三種設定下怎麼一次次出事：先被砍掉、再拒絕寫入、最後悄悄刪掉不能丟的資料；也可以拖時間軸或按左右鍵一步步看。" loading="lazy" style="height: 560px;"></iframe>
+<figcaption>按播放或點上方四個按鈕，看同一台混放快取、session、佇列和計數器的 Redis，在三種設定下怎麼一次次出事：先被砍掉、再拒絕寫入、最後悄悄刪掉不能丟的資料；也可以拖時間軸或按左右鍵一步步看。</figcaption>
+</figure>
 
 **使用者看到的**：第一次是突然被登出、訂單卡住；第二次是菜單頁變成錯誤頁、登不進去；第三次是一直被登出、沒收到確認信或收到兩封、驗證碼可以無限重寄。
 
@@ -64,10 +106,11 @@ def get_menu(shop_id):
 ```mermaid
 flowchart LR
     U["使用者"] --> API["API 伺服器"]
-    API -- "先查快取" --> R["Redis（有記憶體上限 maxmemory）"]
-    API -- "沒命中才查" --> DB["PostgreSQL"]
-    Worker["背景工作程式"] -- "從佇列拿工作" --> R
-    API -. "寫入時記憶體已滿：刪 key 或拒絕寫入" .-> R
+    API -->|"先查快取"| R["Redis（有記憶體上限 maxmemory）"]
+    API -->|"沒命中才查"| DB["PostgreSQL"]
+    Worker["背景工作程式"] -->|"從佇列拿工作"| R
+    API e1@-->|"寫入時記憶體已滿：刪 key 或拒絕寫入"| R
+    e1@{ animate: true }
     classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
     class R hot
 ```
@@ -123,6 +166,18 @@ flowchart TD
     B -- "是 (SET、LPUSH 等)" --> E["回傳 OOM 錯誤, 命令不執行"]
 ```
 
+用 `allkeys-lru` 當例子，一步一步看用量怎麼越過上限、又被拉回來：
+
+| 步驟 | 發生什麼 | 用量和上限 |
+|---|---|---|
+| 1 | 用量剛好低於上限，送來一個 `SET` | 低於上限 |
+| 2 | 執行前檢查：沒超過，照常寫入 | 被這筆推過上限 |
+| 3 | 下一個命令送來，執行前檢查：超過了 | 超過上限 |
+| 4 | 依策略抽樣、刪 key，`evicted_keys` 往上加 | 通常刪到低於上限 |
+| 5 | 才開始執行這個命令 | 又可能推過上限，下一輪再刪 |
+
+換成 `noeviction`，第 4 步沒有 key 可以刪，`SET` 這類命令直接收到 OOM 錯誤。
+
 幾個細節：
 
 - 是「先超過、再刪」，所以用量會短暫超過上限。官方文件特別提到：一個命令一次塞進大量資料（例如把很大的集合交集存成新 key），可能讓用量瞬間超標很多。
@@ -146,6 +201,20 @@ flowchart TD
 
 **所有 `volatile-*` 策略在「沒有任何 key 帶 TTL」時，行為跟 `noeviction` 一樣。** 另外官方文件也提到，幫 key 設 TTL 本身會多吃一點記憶體，所以純快取用 `allkeys-lru` 反而比較省。
 
+這張圖把上表的「適合」欄排成選擇順序，先問這台 Redis 放了什麼：
+
+```mermaid
+flowchart TD
+    Q1{"這台 Redis 放的是什麼?"}
+    Q1 -->|"一筆都不能丟的資料，例如佇列、session"| N["noeviction"]
+    Q1 -->|"純快取"| Q2{"存取模式?"}
+    Q2 -->|"熱門資料集中在一小部分，或沒特別理由"| LRU["allkeys-lru"]
+    Q2 -->|"有長期熱門的 key，怕被一次性掃描洗掉"| LFU["allkeys-lfu"]
+    Q2 -->|"每個 key 被讀的機率差不多"| RND["allkeys-random"]
+    Q1 -->|"快取和永久資料混放"| S["首選：拆成兩台"]
+    S -->|"真的拆不了"| V["volatile-* 系列：可以丟的帶 TTL，不能丟的不帶"]
+```
+
 > 版本補充：Redis 8.6 起多了 `allkeys-lrm` 和 `volatile-lrm`（Least Recently Modified，只看最後一次「寫入」的時間，讀取不算）。比較新，先知道有這回事就好，用之前確認你的 Redis 版本有支援。
 
 ### 近似 LRU：為什麼不是真的 LRU
@@ -158,13 +227,17 @@ LRU（Least Recently Used）就是「最久沒被用到的先刪」。教科書�
 2. 要驅逐時，隨機抽 `maxmemory-samples` 個 key（預設 `5`）。
 3. 把抽到的 key 跟一個「候選池」比較（Redis 3.0 起才有這個池），留下最久沒被碰的那幾個，刪掉最該刪的。候選池是 Redis 記住的一小份名單，保存之前幾次抽樣看到、最久沒被碰的 key，所以每次比較不只看這一次抽到的 5 個。
 
-```
- 全部 key：  k1 k2 k3 k4 k5 k6 k7 k8 k9 ... k1000000
-                   │     │        │  │   │
-          隨機抽 5 個 ▼     ▼        ▼  ▼   ▼
-              k3(10秒前) k5(2小時前) k8(3分前) k9(1天前) k(…)
-                                                │
-              丟進候選池比較，刪掉最久沒碰的 ───▶ k9
+這張圖看的是一次驅逐怎麼從一百萬個 key 裡挑出要刪的那一個，括號裡是每個 key 最後一次被存取的時間：
+
+```mermaid
+flowchart LR
+    All["全部 key：k1 … k1000000"] e1@-->|"隨機抽 5 個"| S["k3（10 秒前）<br/>k5（2 小時前）<br/>k8（3 分前）<br/>k9（1 天前）<br/>k…"]
+    S e2@-->|"丟進候選池比較"| P["候選池：留下最久沒被碰的幾個"]
+    P --> D["刪掉最久沒碰的 k9"]
+    e1@{ animate: true }
+    e2@{ animate: true }
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class D hot
 ```
 
 抽樣數越大越接近真正的 LRU，但每次驅逐要花更多 CPU。官方的測試顯示，抽 10 個時已經非常接近理論上的 LRU；預設的 5 對多數應用已經夠好。真的想調，可以在正式環境用 `CONFIG SET maxmemory-samples 10` 觀察命中率有沒有變好。
@@ -179,6 +252,17 @@ LRU 有個弱點：一次性的大量掃描（例如每天凌晨跑報表，把�
 - 計數器會隨時間衰減，讓以前很熱、現在沒人用的 key 最後也能被淘汰。
 - 兩個參數：`lfu-log-factor`（預設 `10`，越大需要越多次存取才會飽和）和 `lfu-decay-time`（預設 `1`，單位分鐘，`0` 代表不衰減）。新人通常不用調。
 
+這張圖看的是一個 key 的 LFU 計數器被哪兩股力量推動，以及驅逐時怎麼用它：
+
+```mermaid
+flowchart LR
+    A["key 被存取"] -->|"機率性加一，對數成長"| C["LFU 計數器，範圍 0～255"]
+    T["時間過去，依 lfu-decay-time"] -->|"計數器衰減"| C
+    C -->|"驅逐時，存取頻率最低的先被挑"| E["被驅逐"]
+```
+
+一次性掃描只讓每個 key 多被讀一次，比不上長期熱門的 key 累積的次數，所以熱門的 key 比較不會被擠掉。
+
 ### 過期 vs 驅逐
 
 這兩個常被混為一談，但觸發條件、處理對象、監控指標都不一樣：
@@ -190,6 +274,18 @@ LRU 有個弱點：一次性的大量掃描（例如每天凌晨跑報表，把�
 | 會不會刪沒設 TTL 的 key | 不會 | `allkeys-*` 會 |
 | 怎麼清 | 被存取時發現過期就刪（被動），加上背景定期抽查有 TTL 的 key（主動） | 處理命令前發現用量超標時，抽樣挑選 |
 | 監控指標 | `INFO stats` 的 `expired_keys` | `INFO stats` 的 `evicted_keys` |
+
+這張圖看的是一個 key 被刪掉的兩條路，各自從哪裡開始、最後記在哪個計數器：
+
+```mermaid
+flowchart LR
+    T["TTL 時間到"] --> P1["被存取時發現過期，被動刪"]
+    T --> P2["背景定期抽查，主動刪"]
+    P1 --> EX["expired_keys 加 1"]
+    P2 --> EX
+    M["記憶體超過 maxmemory"] --> S["處理命令前抽樣挑 key"]
+    S --> EV["evicted_keys 加 1"]
+```
 
 設了 TTL，記憶體照樣可能滿。流量大、TTL 長、或單筆資料變大時，還沒過期的 key 就會把記憶體塞滿，這時候才輪到驅逐。
 
@@ -217,12 +313,10 @@ import redis
 r = redis.Redis(host="localhost", port=6379, decode_responses=True)
 VALUE = "x" * 1024  # 每筆約 1KB
 
-
 def stats(*fields):
     """從 INFO stats 和 INFO memory 抓出指定欄位"""
     info = {**r.info("stats"), **r.info("memory")}
     return {f: info.get(f) for f in fields}
-
 
 def fill(prefix, limit=100_000, touch_hot=False):
     """一直寫，直到收到錯誤或寫滿 limit 筆；回傳成功寫了幾筆"""
@@ -236,7 +330,6 @@ def fill(prefix, limit=100_000, touch_hot=False):
         if touch_hot and i % 100 == 0:
             r.get("cache:hot")  # 定期讀一下熱門 key，讓它保持「最近被用過」
     return limit
-
 
 r.flushall()
 r.config_set("maxmemory-policy", "noeviction")
@@ -334,7 +427,6 @@ import redis
 
 log = logging.getLogger(__name__)
 r = redis.Redis(host="localhost", port=6379, socket_timeout=0.2)
-
 
 def get_menu(shop_id):
     key = f"menu:{shop_id}"

@@ -2,37 +2,76 @@
 
 > ACID 是資料庫對[交易](03-資料庫交易.md)（用 `BEGIN` 到 `COMMIT` 綁成一包的一組 SQL）的四個承諾：一包裡的修改要嘛全做、要嘛全不做；不會寫進違反規則的資料；同時進行的交易不互相干擾；確認成功之後，就不會因為當機而消失。
 
-**難度**：★★☆　**閱讀時間**：約 20 分鐘　**前置知識**：[資料庫交易](03-資料庫交易.md)
+**難度**：★★☆　**閱讀時間**：約 20 分鐘　**前置知識**：[資料庫交易](03-資料庫交易.md)；讀過[競爭條件](01-競爭條件.md)更好
+
+## 核心問題與理念
+
+**它要解決的問題**：兌換優惠券要扣點數、發券、記點數紀錄三件事，程式卻讓每一句 SQL 送出就各自生效。部署新版時程式被砍在中間，37 位會員的點數扣了，券或點數紀錄卻缺一樣，資料庫這邊每一句都顯示成功（下面的情境會完整走一遍）。
+
+**核心理念**：該一起成功的寫入要放進同一筆交易，資料庫才會替它們守住這四個承諾。
+
+**想通的那一步**：
+
+- **卡住的地方**：要做到「說成功了就不會丟」，直覺的做法是每次 commit（確認交易生效）都把改到的資料頁寫回磁碟（資料頁是資料在磁碟上存放的單位）。可是資料頁散在磁碟各處，到處跳著寫很慢，而且一頁寫到一半斷電，那一頁就毀了。
+- **火花**：先把「改了什麼」依序接在一本日誌（WAL）的尾巴，日誌確定寫進磁碟就回報成功，資料頁之後再慢慢寫回；當機重啟時，照日誌把修改重做一遍。只往尾巴接著寫很快，安全和速度就同時顧到了。
+
+| 字母 | 解決什麼 | 核心想法 |
+|---|---|---|
+| A 原子性 | 做到一半被砍，資料停在一半 | 沒 commit 的修改，就當作沒發生 |
+| C 一致性 | 寫進違反規則的資料，例如餘額變負數 | 規則寫進 schema（建表時宣告的欄位和約束），資料庫每次寫入都幫你擋 |
+| I 隔離性 | 同時跑的交易互相看到、互相蓋掉 | 每筆交易讀自己的快照（某個時間點的資料內容），改同一列要排隊 |
+| D 持久性 | 回報成功之後當機，資料不見 | 先把修改記進磁碟上的日誌，再回報成功 |
+
+## 閱讀前推薦具備知識
+
+| 知識 | 要會到什麼程度 | 這篇哪裡會用到 | 不熟的話先看 |
+|---|---|---|---|
+| [資料庫交易](03-資料庫交易.md) | **必備**：能說出 autocommit 下每句 SQL 自己就是一個交易，要用 `BEGIN`…`COMMIT`（Python 裡是 `with conn.transaction():`）才能把幾句綁成一包 | 情境裡三句各自 commit、〈A 原子性〉、地雷 1 | 本系列第 03 篇〈自動提交（autocommit）〉 |
+| SQL 建表與約束 | **加分**：看得懂 `balance int NOT NULL CHECK (balance >= 0)` 在限制什麼 | 〈C 一致性〉，以及「動手看看」第 1、3 步 | [PostgreSQL 官方教學](https://www.postgresql.org/docs/current/tutorial.html) 第 2 章；各種約束本篇〈C 一致性〉有一張表 |
+| 記憶體和磁碟的差別 | **加分**：能說出放在記憶體裡的資料，程序被砍或斷電就沒了，寫進磁碟的才留得住 | 〈D 持久性：WAL 和 fsync〉、「動手看看」第 5 步 | 本篇〈D 持久性〉會順帶解釋 |
+| [競爭條件](01-競爭條件.md) | **加分**：知道兩個請求可以同時通過 Python 裡的 `if balance >= amount` 檢查 | 〈C 一致性〉最後一段、地雷 2 | 本系列第 01 篇 |
+| Docker 基本指令 | **加分**：會用 `docker run`、`docker exec`，知道 `docker kill` 會直接砍掉容器裡的程序 | 「動手看看」第 5 步模擬當機、第 6 步跑 pgbench | [Docker 入門](https://docs.docker.com/get-started/) |
+
+**快速自我檢查**：在 psql 裡下 `BEGIN;`，接著 `UPDATE members SET points = points - 500 WHERE id = 7;`，沒下 `COMMIT` 就把視窗關掉。重新連進來查，會員 7 的點數少了 500 嗎？如果一開始沒有下 `BEGIN` 呢？
+
+<details markdown="1"><summary>看答案</summary>
+
+有 `BEGIN` 的那次不會少：交易沒 `COMMIT` 就斷線，資料庫會把它回滾。沒下 `BEGIN` 的那次會少：psql 預設 autocommit，這句執行完就提交了，關視窗也不會退回。這篇的 ACID 都建立在「哪幾句在同一筆交易裡」這件事上。答不出來也沒關係，先看 03〈自動提交（autocommit）〉那一節。
+
+</details>
 
 ## 為什麼要在意：一個具體的情境
 
 這是一個假設情境。你負責電商的「點數兌換優惠券」功能，後端用 Python + psycopg 3，資料庫是 PostgreSQL。會員按下「用 500 點換一張券」，後端要做三件事：扣點數、發一張券、記一筆點數紀錄。
 
-專案的資料庫連線設定是 `autocommit=True`，因為之前有人嫌「忘記 commit 結果查不到資料」很煩，就整個專案打開了。autocommit 的意思是：沒有明確開交易的話，每一句 SQL 送出去就自己 commit。兌換的程式是這樣寫的：
+專案的資料庫連線設定是 `autocommit=True`，因為之前有人嫌「忘記 commit 結果查不到資料」很煩，就整個專案打開了。autocommit 的意思是：沒有明確開交易的話，每一句 SQL 送出去就自己 commit。兌換的函式 `redeem_coupon()` 裡依序寫了三行 `conn.execute(...)`，外面沒有包 `with conn.transaction():`：
 
-```python
-# ❌ 出事的寫法：連線是 autocommit=True，三句各自是一筆獨立的交易
-def redeem_coupon(conn, member_id):
-    conn.execute("UPDATE members SET points = points - 500 WHERE id = %s", (member_id,))
-    # 程序如果在這裡被砍，上面的扣點已經 commit 了
-    conn.execute("INSERT INTO coupons (member_id) VALUES (%s)", (member_id,))
-    conn.execute("INSERT INTO point_logs (member_id, delta) VALUES (%s, %s)", (member_id, -500))
-```
+1. `UPDATE members` 扣 500 點，送出後馬上 commit。
+2. `INSERT INTO coupons` 發一張券，送出後馬上 commit。
+3. `INSERT INTO point_logs` 記一筆 -500 的點數紀錄，送出後馬上 commit。
+
+同樣的錯誤寫法，在「動手看看」的〈7. Python：把多個動作包進同一筆交易〉有完整程式（`transfer_wrong()`）。
 
 平常完全沒事，測試也都會過。某天週年慶、兌換量很大的時候，團隊部署新版本。部署時舊版程式會先收到「請結束」的通知（SIGTERM），超過寬限時間（grace period）還沒結束，就被強制砍掉（SIGKILL），程式跑到哪一行就停在哪一行。這支程式沒有做[優雅關閉](48-優雅關閉.md)，也就是收到通知後沒有先把手上的請求做完，所以正在處理的兌換請求被攔腰砍斷。看其中兩個會員：
 
-| 時間 | 會員 7 的兌換請求 | 會員 8 的兌換請求 | 資料庫裡 |
-|---|---|---|---|
-| T1 | 第 1 句扣 500 點，馬上 commit | | 會員 7：點數 1200 → 700 |
-| T2 | | 第 1 句扣 500 點、第 2 句發券，各自馬上 commit | 會員 8：點數少 500，多一張券 |
-| T3 | 第 2 句還沒送出，程式被 SIGKILL 砍掉 | 第 3 句還沒送出，程式被 SIGKILL 砍掉 | |
-| T4 | 新版程式啟動，沒有人重做這個請求 | 同左 | 會員 7：點數少 500，沒有券，沒有點數紀錄；會員 8：有券，但沒有點數紀錄 |
+| 時間 | 會員 7 的兌換請求 | 會員 8 的兌換請求 | 資料庫裡的會員 7 | 資料庫裡的會員 8 |
+|---|---|---|---|---|
+| T1 | 第 1 句扣 500 點，馬上 commit | | 點數 1200 → 700 | |
+| T2 | | 第 1 句扣 500 點，馬上 commit | 點數 700 | 點數少 500 |
+| T3 | | 第 2 句發券，馬上 commit | 點數 700 | 點數少 500，多一張券 |
+| T4 | 第 2 句還沒送出，被 SIGKILL 砍掉 | 第 3 句還沒送出，被 SIGKILL 砍掉 | 點數 700，沒有券 | 點數少 500，有券 |
+| T5 | 新版程式啟動，沒人重做 | 新版程式啟動，沒人重做 | 點數少 500，沒有券，沒有點數紀錄 | 有券，但沒有點數紀錄 |
 
 **使用者看到的**：會員 7 看到點數被扣了，優惠券卻沒拿到；會員 8 拿到券了，點數紀錄裡卻查不到這次兌換。兩個人都去找客服。
 
 **工程師看到的**：資料庫這邊沒有任何一句 SQL 失敗，每一句都成功 commit 了。拿客服回報去對資料，「點數有扣、券或紀錄缺一樣」的總共 37 筆，時間全部集中在部署那 6 分鐘。
 
-**根因**：連線是 `autocommit=True`，`redeem_coupon` 裡的三行 `conn.execute(...)` 是三筆獨立的交易。程式在第 1 句和第 2 句之間（或第 2 句和第 3 句之間）被砍掉時，前面的句子早就 commit 了，資料庫沒有任何理由退回它。程式碼從頭到尾沒有告訴 PostgreSQL「這三件事要一起成功」。
+**根因**：連線是 `autocommit=True`，`redeem_coupon` 裡的三行 `conn.execute(...)` 是三筆獨立的交易。程式在第 1 句和第 2 句之間（或第 2 句和第 3 句之間）被砍掉時，前面的句子早就 commit 了，資料庫沒有任何理由退回它。程式碼從頭到尾沒有告訴 PostgreSQL「這三件事要一起成功」。這張圖看會員 8 那筆請求，每一句各自 commit 之後被砍斷的樣子：
+
+<figure class="draw-fig">
+<iframe class="draw-fig__frame" src="../figures/04-autocommit-sigkill.html" title="按播放或拖時間軸，看會員 8 的三句 SQL 怎麼各自 commit、在第 3 句前被 SIGKILL 砍斷；再切到「with conn.transaction():」，看同樣被砍時資料庫怎麼整筆當作沒發生。" loading="lazy" style="height: 560px;"></iframe>
+<figcaption>按播放或拖時間軸，看會員 8 的三句 SQL 怎麼各自 commit、在第 3 句前被 SIGKILL 砍斷；再切到「with conn.transaction():」，看同樣被砍時資料庫怎麼整筆當作沒發生。</figcaption>
+</figure>
 
 **怎麼修**：把三句包進同一個 `with conn.transaction():` 區塊，寫法跟「動手看看」第 7 步的 `transfer()` 一樣，再補上優雅關閉。包起來之後，程式在中途被砍，這筆交易還沒 commit，PostgreSQL 會把它整筆當作沒發生（「它是怎麼運作的」的「A 原子性」講為什麼做得到）。已經壞掉的那 37 筆只能寫腳本對帳，人工補券或退點，這種事後清理的成本遠高於一開始寫對。
 
@@ -45,8 +84,10 @@ ACID 是資料庫提供的能力，你得用對方式去要：多個寫入要一
 ```mermaid
 flowchart LR
     U["使用者"] --> API["API 伺服器"]
-    API -- "BEGIN、SQL、COMMIT" --> PG["PostgreSQL"]
-    PG -- "回報 COMMIT 成功前，先寫進磁碟" --> Disk["磁碟"]
+    API e1@-->|"BEGIN、SQL、COMMIT"| PG["PostgreSQL"]
+    PG e2@-->|"回報 COMMIT 成功前，先寫進磁碟"| Disk["磁碟"]
+    e1@{ animate: true }
+    e2@{ animate: true }
     API -- "ACID 管不到" --> Ext["外部服務：金流、寄信、訊息佇列"]
     classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
     class PG,Disk hot
@@ -98,7 +139,28 @@ flowchart LR
 
 這些沒人看得見的版本，加上被已 commit 的 `UPDATE`／`DELETE` 取代掉的舊版本，統稱 dead tuple，之後由 VACUUM（PostgreSQL 定期在背景跑的清理程序）清掉。
 
-MySQL InnoDB 則是原地修改，並把舊值寫進 undo log，回滾時照 undo log 把資料改回去。兩種做法都能達成原子性，只是成本落在不同地方：PostgreSQL 回滾很便宜，但要靠 VACUUM 收垃圾；InnoDB 回滾大交易可能要跑很久。
+下面這張表用一個帳戶 alice（餘額 1000）當例子，看它被一筆交易改掉、又回滾的過程。交易編號 100、200 是假設的數字。
+
+| 步驟 | 發生什麼 | 版本 1（餘額 1000） | 版本 2（餘額 700） |
+|---|---|---|---|
+| 1 | 交易 100 寫入 alice，已 commit | `xmin` = 100，大家看得見 | 還不存在 |
+| 2 | 交易 200 `UPDATE` 扣 300 | `xmax` 標成 200 | `xmin` = 200 |
+| 3 | 交易 200 回滾，`pg_xact` 把它標成已中止 | 照樣看得見 | 沒人看得見，成為 dead tuple |
+| 4 | VACUUM 跑過 | 照樣看得見 | 被清掉 |
+
+回滾時，PostgreSQL 沒有把資料改回去，變的只有交易 200 的狀態。
+
+MySQL InnoDB 則是原地修改，並把舊值寫進 undo log，回滾時照 undo log 把資料改回去。這張圖看兩邊回滾時各自做了什麼：
+
+```mermaid
+flowchart LR
+    R["交易要回滾"] --> P1["PostgreSQL：在 pg_xact 把交易標成已中止"]
+    P1 --> P2["新版本自動沒人看得見，之後由 VACUUM 清掉"]
+    R --> M1["MySQL InnoDB：照 undo log 把舊值寫回去"]
+    M1 --> M2["交易越大，回滾可能跑越久"]
+```
+
+兩種做法都能達成原子性，只是成本落在不同地方：PostgreSQL 回滾很便宜，但要靠 VACUUM 收垃圾；InnoDB 回滾大交易可能要跑很久。
 
 另一個 PostgreSQL 特有的行為：**交易裡只要有一句出錯，整筆交易就進入中止狀態（aborted）**，之後任何指令都會被拒絕，錯誤訊息是：
 
@@ -125,6 +187,20 @@ ERROR:  current transaction is aborted, commands ignored until end of transactio
 
 約束預設是**每一句執行完就檢查**。如果你需要「交易中間暫時違反、commit 前修好」，PostgreSQL 支援把 `UNIQUE`、`PRIMARY KEY`、`FOREIGN KEY` 宣告成 `DEFERRABLE INITIALLY DEFERRED`，延到 commit 時才檢查；`CHECK` 和 `NOT NULL` 則不能延後。
 
+這張圖看一句寫入碰到約束時，資料庫怎麼處理：
+
+```mermaid
+flowchart TD
+    W["一句 INSERT 或 UPDATE"] --> Q{"違反 schema 上宣告的約束嗎？"}
+    Q -->|"沒有"| OK["寫入"]
+    Q -->|"違反"| D{"這條約束宣告成 DEFERRABLE INITIALLY DEFERRED 嗎？"}
+    D -->|"沒有（預設）"| E["這句立刻報錯，SQLSTATE 見上表"]
+    D -->|"有"| L["先放行，COMMIT 時再檢查"]
+    P["只寫在 Python 裡的規則"] -.->|"資料庫不知道"| OK
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class P hot
+```
+
 資料庫提供工具（約束）與保證（不會帶著違規 commit），**規則要你自己寫進 schema**。只寫在 Python 裡的檢查，碰到 [競爭條件](01-競爭條件.md) 或有人直接連資料庫改資料時，就擋不住了。
 
 ### I 隔離性：這裡只點到為止
@@ -133,6 +209,23 @@ ERROR:  current transaction is aborted, commands ignored until end of transactio
 
 - PostgreSQL 預設：**Read Committed**
 - MySQL InnoDB 預設：**Repeatable Read**
+
+這張圖看在 PostgreSQL 預設的 Read Committed 下，兩筆交易碰到同一列：讀的時候讀快照，寫的時候排隊等列鎖。alice 原本有 1000。
+
+```mermaid
+sequenceDiagram
+    participant A as 交易 A
+    participant PG as PostgreSQL
+    participant B as 交易 B
+    A->>PG: BEGIN，alice 扣 300
+    Note over PG: A 拿到 alice 那列的列鎖
+    B->>PG: 讀 alice
+    PG-->>B: 1000（A 還沒 commit，讀到的是已 commit 的版本）
+    B->>PG: alice 扣 100
+    Note over B,PG: 等 A 的列鎖
+    A->>PG: COMMIT
+    PG-->>B: 拿到鎖，從 700 扣 100，變成 600
+```
 
 **預設的隔離等級不是「完全隔離」**。「先讀餘額、在程式裡算、再寫回去」這種寫法，在預設等級下依然可能出事。怎麼選等級、怎麼處理，請看 [隔離等級](05-隔離等級.md)、[樂觀鎖定](06-樂觀鎖定.md)、[悲觀鎖定](07-悲觀鎖定.md)。
 
@@ -184,6 +277,16 @@ sequenceDiagram
     Note over WAL,Data: 當機時從最後的 checkpoint 重播 WAL 補回資料
 ```
 
+把當機前後拉成時間軸，看一筆已 commit 的交易 X 怎麼被救回來：
+
+| 時間 | 發生什麼 | 記憶體裡的資料頁 | WAL 檔（磁碟） | 資料檔（磁碟） |
+|---|---|---|---|---|
+| T1 | 做完一次 checkpoint | 和資料檔一樣 | 從這裡往後記 | 到這裡為止都是最新的 |
+| T2 | 交易 X 送出 `UPDATE` | 改了 | | 舊的 |
+| T3 | 交易 X 送出 `COMMIT`，回傳成功 | 改了，還沒寫回 | X 的紀錄已寫進磁碟 | 舊的 |
+| T4 | 當機 | 全部消失 | X 的紀錄還在 | 舊的 |
+| T5 | 重啟，從 T1 的 checkpoint 重播 WAL | 重新套用 X 的修改 | X 的紀錄還在 | 之後寫回，X 的修改回來了 |
+
 依序附加寫入比隨機寫入快得多，所以 WAL 同時兼顧了「安全」和「效能」。WAL 也是 [讀取副本](17-讀取副本.md) 的基礎：串流複寫就是把 WAL 傳給副本重播。
 
 ### 會削弱 Durability 的設定
@@ -194,6 +297,21 @@ sequenceDiagram
 - **`synchronous_commit`**（預設 `on`）：設成 `off` 時，`COMMIT` 不等 WAL 寫進磁碟就回傳成功。代價是當機時**可能遺失最近一小段時間已回報成功的交易**（官方文件說最長延遲是 `wal_writer_delay` 的三倍，`wal_writer_delay` 預設 200ms），但**不會造成資料損毀或不一致**，資料庫重啟後會是某個一致的較早狀態。它可以針對單一交易設定（`SET LOCAL synchronous_commit = off`），適合「掉幾筆也沒關係」的資料，例如操作日誌。
 - `synchronous_commit` 還有 `local`、`remote_write`、`remote_apply` 等值，跟同步複寫有關；如果沒有設定 `synchronous_standby_names`，這幾個值的效果和 `on` 一樣。
 - **`full_page_writes`**（預設 `on`）：防止「一頁寫一半」造成的損壞，不要關。
+
+這張圖看 `synchronous_commit` 和 `fsync` 改掉之後，當機時的後果差在哪：
+
+```mermaid
+flowchart LR
+    C["COMMIT"] --> S{"synchronous_commit"}
+    S -->|"on（預設）"| W["等 WAL 寫進磁碟才回傳成功"]
+    W --> OK["fsync 保持 on 時，當機後重播 WAL，已回報成功的交易都在"]
+    S -->|"off"| N["不等 WAL 寫進磁碟就回傳成功"]
+    N --> L["當機可能遺失最近一小段交易，不會損毀"]
+    F["fsync = off"] --> X["不再確認寫進磁碟"]
+    X --> Y["作業系統當機或斷電：可能損毀到無法修復"]
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class Y hot
+```
 
 MySQL InnoDB 的對應設定是 `innodb_flush_log_at_trx_commit` 與 binlog 的 `sync_binlog`。`innodb_flush_log_at_trx_commit` 預設 `1`，每次 commit 都寫入並 flush redo log。設成 `0` 時，連 mysqld 程序當掉都可能遺失大約最後一秒的交易；設成 `2` 時，mysqld 當掉不會丟，但作業系統當機或斷電可能遺失大約最後一秒的交易。
 

@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIGTERM 卡在 sh</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2328; --muted:#5b6470; --faint:#8b949e;
+  --line:#d0d7de; --card:#f6f8fa; --card-2:#ffffff;
+  --solid:#1f6feb; --solid-fill:#ddeafe; --solid-ink:#0b3d91;
+  --amber-fill:#fde68a; --amber-line:#b45309; --amber-ink:#78350f;
+  --ok-ink:#1a7f37; --track:#eaeef2;
+  --focus:#1f6feb;
+  --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono","SFMono-Regular",Consolas,"Noto Sans Mono CJK TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e6edf3; --muted:#a3adba; --faint:#7d8794;
+    --line:#3b4252; --card:#262b35; --card-2:#1e2129;
+    --solid:#58a6ff; --solid-fill:#14294a; --solid-ink:#cfe3ff;
+    --amber-fill:#4d3409; --amber-line:#f59e0b; --amber-ink:#fde68a;
+    --ok-ink:#56d364; --track:#2d333f; --focus:#58a6ff;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e6edf3; --muted:#a3adba; --faint:#7d8794;
+  --line:#3b4252; --card:#262b35; --card-2:#1e2129;
+  --solid:#58a6ff; --solid-fill:#14294a; --solid-ink:#cfe3ff;
+  --amber-fill:#4d3409; --amber-line:#f59e0b; --amber-ink:#fde68a;
+  --ok-ink:#56d364; --track:#2d333f; --focus:#58a6ff;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+*{box-sizing:border-box;}
+code{font-family:var(--mono);font-size:.9em;}
+
+.fig{margin:0;padding:16px;container-type:inline-size;outline:none;font-size:15px;line-height:1.45;}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--focus);border-radius:8px;}
+
+/* 模式切換 */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.mode{min-height:40px;padding:6px 10px;border:1.5px solid var(--line);border-radius:8px;background:var(--card);
+  color:var(--muted);font:600 14px/1.3 var(--sans);cursor:pointer;text-align:center;}
+.mode code{font-size:13px;font-weight:700;}
+.mode[aria-pressed="true"]{border-color:var(--solid);background:var(--solid-fill);color:var(--solid-ink);}
+.mode:focus-visible,.play:focus-visible,.themebtn:focus-visible,.scrub:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}
+
+/* 根因那一行 */
+.root{margin-top:10px;font-size:13px;color:var(--muted);line-height:1.6;overflow-wrap:anywhere;}
+.root code{font-size:12.5px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:4px;padding:1px 5px;}
+.root .miss{display:inline-block;margin-left:6px;font-size:12px;font-weight:700;color:var(--amber-ink);background:var(--amber-fill);
+  border:1.5px solid var(--amber-line);border-radius:999px;padding:0 8px;line-height:18px;}
+.root mark{background:var(--solid-fill);color:var(--solid-ink);font-weight:700;border-radius:3px;padding:0 2px;}
+
+/* 卡片共用 */
+.node{border:1.5px solid var(--line);border-radius:8px;background:var(--card-2);padding:8px 12px;display:flex;flex-direction:column;gap:3px;min-width:0;position:relative;}
+.node .name{font-size:14px;font-weight:700;color:var(--ink);}
+.node .name code{font-size:13px;}
+.node .sub{font-size:12px;color:var(--muted);}
+.node .st{font-size:13px;color:var(--ink);font-weight:600;}
+.node.on{border-color:var(--solid);}
+.node.done{border-color:var(--ok-ink);}
+.node.done .st{color:var(--ok-ink);}
+.node.killed{opacity:.5;border-style:dashed;}
+.hot{background:var(--amber-fill)!important;border-color:var(--amber-line)!important;}
+.hot .name,.hot .sub,.hot .st,.hot .k{color:var(--amber-ink)!important;}
+.k{font-size:12px;font-weight:700;color:var(--muted);}
+
+/* 上排：Ingress｜請求 */
+.edge{margin-top:12px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;}
+
+/* 訊號鏈 */
+.chain{margin-top:12px;display:grid;grid-template-columns:minmax(0,1fr) 76px minmax(0,2.3fr);align-items:stretch;}
+.chain > .node{align-self:center;}
+.pod{border:1.5px dashed var(--muted);border-radius:10px;padding:8px;display:grid;grid-template-columns:minmax(0,1fr) 76px minmax(0,1fr);
+  grid-template-rows:auto auto;row-gap:8px;align-items:center;min-width:0;}
+.pod .podhead{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font-size:12px;font-weight:700;color:var(--muted);}
+.chip{font-size:12px;font-weight:700;line-height:18px;padding:0 8px;border-radius:999px;border:1.5px solid var(--line);color:var(--muted);background:var(--card);white-space:nowrap;}
+.chip.term{border-color:var(--amber-line);color:var(--amber-ink);}
+.chip.gone{border-color:var(--ink);color:var(--ink);}
+.chip.ok{border-color:var(--ok-ink);color:var(--ok-ink);}
+.fig.fixed .chain{grid-template-columns:minmax(0,1fr) 76px minmax(0,1.2fr);}
+.fig.fixed .pod{grid-template-columns:minmax(0,1fr);}
+.fig.fixed .l2,.fig.fixed .child{display:none;}
+
+/* 走道（水平） */
+.lane{position:relative;min-height:56px;--p:0;}
+.lane .ln{position:absolute;left:6px;right:8px;top:50%;height:0;border-top:2px solid var(--line);}
+.lane .ln::after{content:"";position:absolute;right:-8px;top:-6px;border:5px solid transparent;border-left:8px solid var(--line);border-right:0;}
+.lane.dash .ln{border-top-style:dashed;}
+.lane.on .ln{border-top-color:var(--solid);}
+.lane.on .ln::after{border-left-color:var(--solid);}
+.lane.kill .ln{border-top-color:var(--amber-line);}
+.lane.kill .ln::after{border-left-color:var(--amber-line);}
+.lane .lbl{position:absolute;left:0;right:0;bottom:calc(50% + 6px);text-align:center;font:700 12px/1.2 var(--mono);color:var(--muted);white-space:nowrap;}
+.lane.on .lbl{color:var(--solid-ink);}
+.lane.kill .lbl{color:var(--amber-ink);}
+.lane .lbl.cjk{font-family:var(--sans);}
+.lane .pk{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:var(--solid);top:50%;
+  left:calc(6px + var(--p) * (100% - 14px));opacity:0;}
+.lane.kill .pk{background:var(--amber-line);border-radius:2px;}
+.lane .x{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:50%;
+  background:var(--amber-fill);border:1.5px solid var(--amber-line);color:var(--amber-ink);font:700 12px/17px var(--sans);text-align:center;opacity:0;}
+.lane.cut .x{opacity:1;}
+.lane .note{position:absolute;left:0;right:0;top:calc(50% + 12px);text-align:center;font:600 12px/1.2 var(--sans);color:var(--amber-ink);opacity:0;white-space:nowrap;}
+.lane.cut .note{opacity:1;}
+
+/* 寬限時間 */
+.grace{margin-top:14px;}
+.ghead{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;font-size:13px;}
+.ghead .gt{font-weight:700;}
+.ghead .gr{color:var(--muted);font-variant-numeric:tabular-nums;}
+.ghead .gr b{color:var(--ink);}
+.gwrap{position:relative;margin-top:22px;margin-bottom:22px;}
+.track{position:relative;height:12px;border-radius:6px;background:var(--track);overflow:hidden;}
+.track .pre{position:absolute;left:0;top:0;bottom:0;background:repeating-linear-gradient(135deg,transparent 0 4px,var(--line) 4px 6px);}
+.track .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--muted);}
+.fig.fixed .track .fill{background:var(--solid);}
+.track .fill.hot{background:var(--amber-line)!important;}
+.tick{position:absolute;top:-4px;width:2px;height:20px;margin-left:-1px;background:var(--ink);}
+.tick.hot{background:var(--amber-line);}
+.tl{position:absolute;font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap;line-height:16px;}
+.tl.below{top:18px;}
+.tl.above{bottom:18px;}
+.tl.l{transform:none;}
+.tl.r{transform:translateX(-100%);}
+.tl.c{transform:translateX(-50%);}
+.tl.hot{color:var(--amber-ink);background:var(--amber-fill);border:1px solid var(--amber-line);border-radius:4px;padding:0 4px;}
+.tl code{font-size:12px;}
+
+/* readout */
+.readout{margin-top:4px;display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:var(--card);
+  border:1.5px solid var(--line);font-size:15px;}
+.readout .beat{flex:none;font:700 12px/20px var(--sans);color:var(--muted);border:1.5px solid var(--line);border-radius:999px;padding:0 8px;margin-top:1px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.readout.final{border-color:var(--ink);}
+
+/* 控制列 */
+.controls{margin-top:12px;display:flex;align-items:center;gap:10px;}
+.play{flex:none;width:40px;height:40px;border-radius:50%;border:1.5px solid var(--solid);background:var(--solid);color:var(--bg);cursor:pointer;
+  display:grid;place-items:center;padding:0;}
+.play svg{width:16px;height:16px;fill:currentColor;}
+.scrub{flex:1;min-width:0;height:40px;margin:0;accent-color:var(--solid);cursor:pointer;}
+.themebtn{flex:none;width:32px;height:32px;border-radius:8px;border:1.5px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;padding:0;font-size:14px;}
+.embedded .themebtn{display:none;}
+
+/* 窄版：訊號鏈改成由上往下 */
+@container (max-width: 560px){
+  .fig{font-size:14px;}
+  .chain,.fig.fixed .chain{grid-template-columns:minmax(0,1fr);}
+  .pod{grid-template-columns:minmax(0,1fr);}
+  .lane{min-height:48px;}
+  .lane .ln{left:28px;right:auto;top:4px;bottom:10px;height:auto;width:0;border-top:0;border-left:2px solid var(--line);}
+  .lane .ln::after{right:auto;left:-7px;top:auto;bottom:-8px;border:5px solid transparent;border-top:8px solid var(--line);border-bottom:0;}
+  .lane.dash .ln{border-left-style:dashed;}
+  .lane.on .ln{border-left-color:var(--solid);}
+  .lane.on .ln::after{border-top-color:var(--solid);border-left-color:transparent;}
+  .lane.kill .ln{border-left-color:var(--amber-line);}
+  .lane.kill .ln::after{border-top-color:var(--amber-line);border-left-color:transparent;}
+  .lane .lbl{left:46px;right:auto;bottom:auto;top:50%;transform:translateY(-50%);text-align:left;}
+  .lane .pk{left:29px;top:calc(4px + var(--p) * (100% - 14px));}
+  .lane .x{left:29px;}
+  .lane .note{left:auto;right:0;top:50%;transform:translateY(-50%);text-align:right;}
+  .node{padding:8px 10px;}
+  .node .st{font-size:13px;}
+  .readout{flex-direction:column;gap:6px;font-size:14px;}
+  .mode{font-size:13px;padding:6px 8px;}
+  .mode code{font-size:12px;}
+}
+@media (prefers-reduced-motion: no-preference){
+  .node,.chip,.lane .ln,.lane .x,.lane .note{transition:background-color .25s,border-color .25s,color .25s,opacity .25s;}
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="sigterm-stuck-at-sh" data-dur="32" data-rest="15" tabindex="0"
+  aria-label="動畫：滾動更新刪掉舊 Pod 時，Kubernetes 把 SIGTERM 送給容器的 PID 1。原本 PID 1 是跑 start.sh 的 /bin/sh，它忽略訊號、也不轉送，gunicorn 一直不知道要關，30 秒寬限時間到被 SIGKILL 砍掉，進行中的請求拿到 502。切到修好模式：start.sh 加上 exec、preStop 先睡 5 秒、寬限時間 45 秒，gunicorn 自己收到 SIGTERM，排空請求、收尾，第 28 秒以 0 結束。">
+  <div class="modes" role="group" aria-label="切換情境">
+    <button type="button" class="mode" data-mode="broken" aria-pressed="true">原本：少了 <code>exec</code></button>
+    <button type="button" class="mode" data-mode="fixed" aria-pressed="false">修好：加 <code>exec</code>＋preStop</button>
+  </div>
+
+  <div class="root" id="root"></div>
+
+  <div class="edge">
+    <div class="node" id="nIng"><span class="k">Ingress 轉發清單</span><span class="st" id="sIng"></span></div>
+    <div class="node" id="nReq"><span class="k">這個 Pod 手上的請求</span><span class="st" id="sReq"></span></div>
+  </div>
+
+  <div class="chain">
+    <div class="node" id="nK"><span class="name">Kubernetes</span><span class="sub">kubelet</span><span class="st" id="sK"></span></div>
+    <div class="lane" id="l1" aria-hidden="true"><i class="ln"></i><span class="lbl" id="l1lbl"></span><i class="pk"></i></div>
+    <div class="pod">
+      <div class="podhead"><span>舊 Pod 的容器</span><span class="chip" id="podChip"></span></div>
+      <div class="node" id="nP1"><span class="name" id="p1name"></span><span class="sub" id="p1sub"></span><span class="st" id="sP1"></span></div>
+      <div class="lane dash l2" id="l2" aria-hidden="true"><i class="ln"></i><span class="lbl cjk" id="l2lbl">子行程</span><i class="x">✕</i><span class="note">不轉送</span></div>
+      <div class="node child" id="nG"><span class="name">gunicorn</span><span class="sub">sh 底下的子行程</span><span class="st" id="sG"></span></div>
+    </div>
+  </div>
+
+  <div class="grace">
+    <div class="ghead"><span class="gt" id="gTitle"></span><span class="gr" id="gRem"></span></div>
+    <div class="gwrap" id="gwrap">
+      <div class="track"><i class="pre" id="gPre"></i><i class="fill" id="gFill"></i></div>
+      <div id="gMarks"></div>
+    </div>
+  </div>
+
+  <div class="readout" id="readout" aria-live="polite"><span class="beat" id="beat"></span><span class="txt" id="rtxt"></span></div>
+
+  <div class="controls">
+    <button type="button" class="play" id="play" aria-label="播放"><svg viewBox="0 0 16 16" id="playIco"><path d="M4 2.5v11l9-5.5z"/></svg></button>
+    <input type="range" class="scrub" id="scrub" min="0" max="320" step="1" value="150" aria-label="時間軸：拖動看舊 Pod 從被刪到消失的每一秒">
+    <button type="button" class="themebtn" id="themebtn" aria-label="切換深淺色">◐</button>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var fig = document.getElementById('fig');
+  var $ = function(id){ return document.getElementById(id); };
+  try { if (window.self !== window.top) document.documentElement.classList.add('embedded'); } catch(e){ document.documentElement.classList.add('embedded'); }
+  var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var reduce = !!(mq && mq.matches);
+
+  var CFG = {
+    broken: { dur: 32, rest: 15, grace: 30, keys: [0.4, 1.2, 15, 30.3, 32] },
+    fixed:  { dur: 30, rest: 30, grace: 45, keys: [2.5, 5.4, 15, 26, 30] }
+  };
+  var mode = 'broken', t = CFG.broken.rest, playing = false, visible = true, raf = 0, last = 0, keyIdx = 0, keyAt = 0;
+
+  // 播放速度：Pod 秒數／真實秒數（關鍵的前幾秒放慢，中間空等快轉）
+  function rate(m, x){
+    if (m === 'broken') return x < 3 ? 1.1 : (x < 29 ? 7 : 1.2);
+    return x < 4.5 ? 2 : (x < 6.5 ? 1.1 : (x < 24 ? 7 : 2));
+  }
+
+  function setCls(el, base, extra){ var c = base + (extra ? ' ' + extra : ''); if (el.className !== c) el.className = c; }
+  function setTxt(el, s){ if (el.textContent !== s) el.textContent = s; }
+  function setHtml(el, s){ if (el._h !== s){ el.innerHTML = s; el._h = s; } }
+  function fmt(x){ return String(Math.round(x)); }
+
+  var ROOT = {
+    broken: '<code>start.sh</code> 最後一行：<code>gunicorn app:app -c gunicorn.conf.py</code><span class="miss">少了 exec</span>',
+    fixed: '<code>start.sh</code> 最後一行：<code><mark>exec</mark> gunicorn app:app -c gunicorn.conf.py</code>；preStop 先睡 5 秒、寬限時間 45 秒'
+  };
+  var MARKS = {
+    broken: '<i class="tick" style="left:0%"></i><span class="tl below l" style="left:0%">0 秒 <code>SIGTERM</code></span>' +
+            '<i class="tick" id="killTick" style="left:100%"></i><span class="tl below r" id="killLbl" style="left:100%">30 秒 <code>SIGKILL</code></span>',
+    fixed:  '<i class="tick" style="left:11.11%"></i><span class="tl below l" style="left:11.11%">5 秒 <code>SIGTERM</code></span>' +
+            '<i class="tick" id="exitTick" style="left:62.22%"></i><span class="tl above c" id="exitLbl" style="left:62.22%">28 秒 以 0 結束</span>' +
+            '<i class="tick" style="left:100%"></i><span class="tl below r" style="left:100%">45 秒 <code>SIGKILL</code></span>' +
+            '<span class="tl above l" style="left:0%">preStop</span>'
+  };
+
+  function paintBroken(){
+    var sent = t >= 0.8, kill = t >= 30, killArrived = t >= 30.6;
+    setHtml($('root'), ROOT.broken);
+    // Ingress
+    setTxt($('sIng'), t < 0.3 ? '這個 Pod：還在清單中' : (t < 2 ? '收到通知，更新清單中（約 1–2 秒）' : '已移出：新請求改送新 Pod'));
+    setCls($('nIng'), 'node', t >= 2 ? 'done' : (t >= 0.3 ? 'on' : ''));
+    // 請求
+    setTxt($('sReq'), kill ? '直接斷線，使用者拿到 502' : '照常處理中，使用者正常');
+    setCls($('nReq'), 'node', kill ? 'hot' : '');
+    // kubelet
+    setTxt($('sK'), t < 0.8 ? '開始刪 Pod，送出 SIGTERM' : (kill ? '寬限時間到，送 SIGKILL' : '等 PID 1 自己結束'));
+    setCls($('nK'), 'node', (t < 0.8 || kill) ? 'on' : '');
+    // 走道 1
+    var l1 = $('l1'), pk = l1.querySelector('.pk');
+    if (kill){
+      setCls(l1, 'lane', 'kill'); setTxt($('l1lbl'), 'SIGKILL');
+      l1.style.setProperty('--p', Math.min(1, (t - 30) / 0.6).toFixed(3)); pk.style.opacity = killArrived ? 0 : 1;
+    } else {
+      setCls(l1, 'lane', 'on'); setTxt($('l1lbl'), 'SIGTERM');
+      l1.style.setProperty('--p', Math.min(1, t / 0.8).toFixed(3)); pk.style.opacity = 1;
+    }
+    // PID 1 = /bin/sh
+    setTxt($('p1name'), 'PID 1：/bin/sh');
+    setTxt($('p1sub'), '跑 start.sh');
+    var p1st = !sent ? '執行中' : (killArrived ? '被 SIGKILL 砍掉' : '收到 SIGTERM：沒設處理器，直接忽略；等 gunicorn 結束');
+    setTxt($('sP1'), p1st);
+    setCls($('nP1'), 'node', killArrived ? 'killed' : (sent ? 'hot' : ''));
+    // 走道 2：sh → gunicorn
+    setCls($('l2'), 'lane dash l2', sent && !killArrived ? 'cut' : '');
+    // gunicorn
+    setTxt($('sG'), killArrived ? '被砍，進行中的請求斷線' : (sent ? '完全不知道要關，照常處理請求' : '照常處理請求'));
+    setCls($('nG'), 'node child', killArrived ? 'killed' : '');
+    // Pod
+    var chip = $('podChip');
+    if (killArrived){ setCls(chip, 'chip', 'gone'); setTxt(chip, '已砍掉・結束碼 137'); }
+    else if (t >= 0.3){ setCls(chip, 'chip', 'term'); setTxt(chip, t >= 2 ? '卡在關閉中' : '關閉中'); }
+    else { setCls(chip, 'chip', ''); setTxt(chip, '執行中'); }
+    // 寬限時間
+    var el = Math.min(t, 30);
+    setTxt($('gTitle'), '寬限時間 30 秒');
+    setHtml($('gRem'), '第 <b>' + fmt(Math.min(t, 32)) + '</b> 秒・剩 <b>' + fmt(30 - el) + '</b> 秒');
+    $('gPre').style.width = '0%';
+    var fill = $('gFill'); fill.style.width = (el / 30 * 100).toFixed(2) + '%';
+    fill.classList.toggle('hot', kill);
+    var kt = $('killTick'), kl = $('killLbl');
+    if (kt){ kt.classList.toggle('hot', kill); kl.classList.toggle('hot', kill); }
+    // readout
+    var txt, final = false;
+    if (t < 0.8) txt = 'Kubernetes 開始刪舊 Pod：通知 Ingress 把它移出轉發清單，<b>同時</b>送 <code>SIGTERM</code> 給容器的 PID 1。寬限時間 30 秒開始倒數。';
+    else if (t < 2) txt = 'PID 1 是跑 <code>start.sh</code> 的 <code>/bin/sh</code>。它沒設處理器、又是 PID 1，<code>SIGTERM</code> 直接被忽略，也不會轉送給 gunicorn。';
+    else if (t < 30) txt = 'Ingress 已改送新 Pod。Kubernetes 等 PID 1 結束，sh 等 gunicorn 結束，gunicorn 根本不知道要關，舊 Pod 就一直卡在關閉中。';
+    else { txt = '寬限時間到，送 <code>SIGKILL</code>：sh 和 gunicorn 被砍，當下還在處理的請求直接斷線，使用者拿到 <code>502</code>。結束碼 137，gunicorn 日誌裡沒有任何開始關閉的紀錄。'; final = t >= 30.6; }
+    return { txt: txt, final: final };
+  }
+
+  function paintFixed(){
+    var sent = t >= 5.8, exited = t >= 28;
+    setHtml($('root'), ROOT.fixed);
+    setTxt($('sIng'), t < 0.3 ? '這個 Pod：還在清單中' : (t < 5 ? '同時在摘掉這個 Pod' : '已移出：新請求改送新 Pod'));
+    setCls($('nIng'), 'node', t >= 5 ? 'done' : (t >= 0.3 ? 'on' : ''));
+    var req = t < 5.8 ? '照常服務，使用者正常' : (t < 25 ? '排空中：做完手上的請求（最多 20 秒）' : '都做完了，沒有 502');
+    setTxt($('sReq'), req);
+    setCls($('nReq'), 'node', t >= 25 ? 'done' : (t >= 5.8 ? 'on' : ''));
+    setTxt($('sK'), t < 5 ? '執行 preStop：sleep 5' : (t < 5.8 ? 'preStop 結束，送出 SIGTERM' : (exited ? 'Pod 已結束，不用 SIGKILL' : '等 PID 1 自己結束')));
+    setCls($('nK'), 'node', (t >= 5 && t < 5.8) ? 'on' : (exited ? 'done' : ''));
+    var l1 = $('l1'), pk = l1.querySelector('.pk');
+    if (t < 5){ setCls(l1, 'lane', 'dash'); setTxt($('l1lbl'), 'preStop'); pk.style.opacity = 0; l1.style.setProperty('--p', '0'); }
+    else { setCls(l1, 'lane', 'on'); setTxt($('l1lbl'), 'SIGTERM'); l1.style.setProperty('--p', Math.min(1, (t - 5) / 0.8).toFixed(3)); pk.style.opacity = sent ? 0 : 1; }
+    setTxt($('p1name'), 'PID 1：gunicorn');
+    setTxt($('p1sub'), 'exec 讓它取代了 sh');
+    var st = t < 5.8 ? '照常服務' : (t < 25 ? '收到 SIGTERM：停止接新連線，排空請求' : (t < 28 ? '關連線池、flush 日誌' : '以 0 結束'));
+    setTxt($('sP1'), st);
+    setCls($('nP1'), 'node', exited ? 'hot' : (sent ? 'on' : ''));
+    var chip = $('podChip');
+    if (exited){ setCls(chip, 'chip', 'ok'); setTxt(chip, '自己結束・結束碼 0'); }
+    else if (t >= 0.3){ setCls(chip, 'chip', 'term'); setTxt(chip, '關閉中'); }
+    else { setCls(chip, 'chip', ''); setTxt(chip, '執行中'); }
+    var el = Math.min(t, 28);
+    setTxt($('gTitle'), '寬限時間 45 秒（含 preStop）');
+    setHtml($('gRem'), '第 <b>' + fmt(t) + '</b> 秒・剩 <b>' + fmt(45 - el) + '</b> 秒' + (exited ? '沒用到' : ''));
+    $('gPre').style.width = (5 / 45 * 100).toFixed(2) + '%';
+    var fill = $('gFill'); fill.style.width = (el / 45 * 100).toFixed(2) + '%'; fill.classList.remove('hot');
+    var et = $('exitTick'), elb = $('exitLbl');
+    if (et){ et.classList.toggle('hot', exited); elb.classList.toggle('hot', exited); }
+    var txt;
+    if (t < 5) txt = '刪除 Pod，寬限時間 45 秒開始算。kubelet 先跑 preStop <code>sleep 5</code>：這 5 秒程式照常服務，負載平衡器同時在摘掉這個 Pod。';
+    else if (t < 25) txt = 'preStop 結束，kubelet 送 <code>SIGTERM</code>。加了 <code>exec</code>，gunicorn 就是 PID 1，自己收到訊號，開始排空進行中的請求（最多 20 秒）。';
+    else if (t < 28) txt = '請求都做完了，接著關連線池、flush 日誌。';
+    else txt = '第 28 秒以 0 結束，寬限時間還留 17 秒，<code>SIGKILL</code> 用不上。部署不再冒出 <code>502</code>。';
+    return { txt: txt, final: exited };
+  }
+
+  // 一格畫面：完全由 (mode, t) 決定
+  function paint(){
+    var fixed = mode === 'fixed';
+    fig.classList.toggle('fixed', fixed);
+    var gm = $('gMarks'); if (gm._m !== mode){ gm.innerHTML = MARKS[mode]; gm._m = mode; }
+    var r = fixed ? paintFixed() : paintBroken();
+    setTxt($('beat'), '第 ' + Math.floor(t) + ' 秒');
+    setHtml($('rtxt'), r.txt);
+    $('readout').classList.toggle('final', r.final);
+    var sv = String(Math.round(t * 10)); if ($('scrub').value !== sv) $('scrub').value = sv;
+  }
+
+  function dur(){ return CFG[mode].dur; }
+  function setPlaying(p){
+    playing = p;
+    var btn = $('play');
+    btn.setAttribute('aria-label', p ? '暫停' : '播放');
+    $('playIco').innerHTML = p ? '<path d="M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z"/>' : '<path d="M4 2.5v11l9-5.5z"/>';
+    if (p) arm(); else stop();
+  }
+  function arm(){ if (!raf && playing && visible){ last = 0; raf = requestAnimationFrame(tick); } }
+  function stop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    if (reduce){
+      // 減少動態：不連續移動，每 1.8 秒跳到下一個關鍵格
+      if (!keyAt) keyAt = now;
+      if (now - keyAt >= 1800){ keyAt = now; keyIdx++; var ks = CFG[mode].keys; if (keyIdx >= ks.length){ setPlaying(false); return; } t = ks[keyIdx]; paint(); }
+    } else {
+      if (last){ var dt = Math.min(0.1, (now - last) / 1000); t = Math.min(dur(), t + dt * rate(mode, t)); }
+      last = now;
+      paint();
+      if (t >= dur()){ setPlaying(false); return; }
+    }
+    raf = requestAnimationFrame(tick);
+  }
+
+  function seek(x){ t = Math.max(0, Math.min(dur(), +x || 0)); setPlaying(false); paint(); }
+  function setMode(m){
+    mode = m === 'fixed' ? 'fixed' : 'broken';
+    fig.dataset.dur = CFG[mode].dur; fig.dataset.rest = CFG[mode].rest;
+    $('scrub').max = String(CFG[mode].dur * 10);
+    window.DUR = CFG[mode].dur;
+    var bs = fig.querySelectorAll('.mode');
+    for (var i = 0; i < bs.length; i++) bs[i].setAttribute('aria-pressed', bs[i].dataset.mode === mode ? 'true' : 'false');
+    setPlaying(false); t = CFG[mode].rest; paint();
+  }
+  window.seek = seek; window.setMode = setMode; window.DUR = CFG.broken.dur;
+
+  fig.querySelector('.modes').addEventListener('click', function(e){
+    var btn = e.target.closest('.mode'); if (btn) setMode(btn.dataset.mode);
+  });
+  $('play').addEventListener('click', function(){
+    if (playing){ setPlaying(false); return; }
+    if (reduce){ keyIdx = 0; keyAt = 0; t = CFG[mode].keys[0]; }
+    else if (t >= dur()) t = 0;
+    paint(); setPlaying(true);
+  });
+  $('scrub').addEventListener('input', function(){ seek(this.value / 10); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target.closest('.scrub,.mode,.play,.themebtn')) return;
+    if (e.key === 'ArrowRight'){ e.preventDefault(); seek(Math.floor(t) + 1); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(Math.ceil(t) - 1); }
+    else if (e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); $('play').click(); }
+  });
+  $('themebtn').addEventListener('click', function(){
+    var r = document.documentElement, cur = r.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    r.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); else stop(); },
+      { rootMargin: '120px' }).observe(fig);
+  }
+  if (mq){
+    var onRM = function(){ reduce = mq.matches; if (playing) setPlaying(false); };
+    if (mq.addEventListener) mq.addEventListener('change', onRM); else if (mq.addListener) mq.addListener(onRM);
+  }
+  // 預設停在最能說明重點的一格：SIGTERM 卡在 sh、寬限時間倒數中；不自動播放
+  setMode('broken');
+})();
+</script>
+</body>
+</html>

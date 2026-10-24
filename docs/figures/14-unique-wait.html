@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>唯一約束：後到的交易在等</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2328; --muted:#57606a; --line:#d0d7de; --panel:#f6f8fa; --chip:#ffffff;
+  --a:#2563eb; --b:#7c3aed; --ok:#15803d; --err:#b91c1c;
+  --hot-fill:#fde68a; --hot-line:#b45309; --hot-ink:#111111;
+  --focus:#2563eb;
+  --sans:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Noto Sans TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e6e8eb; --muted:#9aa4b2; --line:#3d4450; --panel:#262a33; --chip:#1e2129;
+    --a:#60a5fa; --b:#a78bfa; --ok:#4ade80; --err:#f87171;
+    --hot-fill:#4a3510; --hot-line:#f59e0b; --hot-ink:#fde68a;
+    --focus:#60a5fa; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e6e8eb; --muted:#9aa4b2; --line:#3d4450; --panel:#262a33; --chip:#1e2129;
+  --a:#60a5fa; --b:#a78bfa; --ok:#4ade80; --err:#f87171;
+  --hot-fill:#4a3510; --hot-line:#f59e0b; --hot-ink:#fde68a;
+  --focus:#60a5fa; color-scheme:dark;
+}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+body{padding:8px 16px 12px;}
+*{box-sizing:border-box;}
+.fig{margin:0;max-width:760px;margin-inline:auto;outline:none;}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--focus);border-radius:8px;}
+button{font:inherit;color:inherit;}
+button:focus-visible,input:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}
+
+/* scenario tabs */
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+.tab{flex:1 1 auto;min-height:36px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);font-size:13px;cursor:pointer;}
+.tab[aria-selected="true"]{border-color:var(--ink);background:var(--panel);font-weight:600;}
+
+/* stage */
+.stage{position:relative;}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.card{border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-height:84px;background:var(--bg);transition:none;}
+.who{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;font-size:14px;font-weight:600;}
+.who small{font-size:12px;font-weight:400;color:var(--muted);}
+.badge{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:4px;color:#fff;font-size:12px;font-weight:700;align-self:center;}
+.badge.a{background:var(--a);} .badge.b{background:var(--b);}
+:root[data-theme="dark"] .badge{color:#111;}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .badge{color:#111;}}
+.status{margin-top:6px;font-size:13px;line-height:1.45;color:var(--muted);}
+.status.ok{color:var(--ok);font-weight:600;}
+.status.err{color:var(--err);font-weight:600;}
+.status.wait{color:var(--hot-line);font-weight:600;}
+.status.act{color:var(--ink);}
+.card.wait{border-color:var(--hot-line);border-style:dashed;}
+.card.err{border-color:var(--err);}
+.card.ok{border-color:var(--ok);}
+
+.wires{position:relative;height:76px;}
+.wires svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
+.wires line{stroke:var(--line);stroke-width:2;}
+.pkt{position:absolute;top:0;left:25%;max-width:calc(50% - 8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  padding:3px 8px;border-radius:12px;border:1.5px solid var(--a);background:var(--chip);font-family:var(--mono);font-size:12px;line-height:16px;
+  transform:translate(-50%,0);visibility:hidden;will-change:transform;}
+.pkt.b{left:75%;border-color:var(--b);}
+.pkt.ok{border-color:var(--ok);color:var(--ok);}
+.pkt.err{border-color:var(--err);color:var(--err);font-weight:700;}
+.pkt.park{border-color:var(--hot-line);background:var(--hot-fill);color:var(--hot-ink);font-family:var(--sans);font-weight:600;}
+.pkt.park::after{content:"";position:absolute;inset:-5px;border-radius:16px;border:2px solid var(--hot-line);opacity:.0;animation:pulse 1.4s ease-out infinite;}
+@keyframes pulse{0%{opacity:.7;transform:scale(.92);}100%{opacity:0;transform:scale(1.12);}}
+
+.db{border:1.5px solid var(--ink);border-radius:8px;padding:8px 10px 10px;background:var(--panel);}
+.dbhead{font-size:13px;font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.dbhead span{font-weight:400;color:var(--muted);font-size:12px;}
+.dbgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.box{border:1px solid var(--line);border-radius:6px;padding:8px;background:var(--bg);min-height:96px;}
+.box .lbl{font-size:12px;color:var(--muted);margin-bottom:6px;}
+.box.hot{background:var(--hot-fill);border:2px solid var(--hot-line);color:var(--hot-ink);}
+.box.hot .lbl{color:var(--hot-ink);font-weight:600;}
+.box.none{border-style:dashed;}
+.rows,.ents{display:flex;flex-direction:column;gap:4px;}
+.chip{display:flex;flex-wrap:wrap;align-items:center;gap:4px;border:1px solid var(--line);border-radius:4px;padding:2px 6px;background:var(--chip);font-size:12px;line-height:18px;color:var(--ink);}
+.chip code{font-family:var(--mono);font-size:12px;}
+.chip .tag{font-size:12px;color:var(--muted);}
+.chip.pending{border-style:dashed;}
+.chip.dup{background:var(--hot-fill);border:2px solid var(--hot-line);color:var(--hot-ink);}
+.chip.dup .tag{color:var(--hot-ink);}
+.chip .who-a{color:var(--a);font-weight:700;} .chip .who-b{color:var(--b);font-weight:700;}
+.box.hot .chip{border-color:var(--hot-line);}
+.empty{font-size:12px;color:var(--muted);}
+.box.hot .empty{color:var(--hot-ink);}
+.note{margin-top:6px;font-size:12px;line-height:1.45;font-weight:600;}
+.count{margin-top:8px;font-size:13px;}
+.count b{font-size:16px;}
+.count.bad b{color:var(--err);}
+
+/* rail + controls */
+.ctrl{display:flex;align-items:center;gap:6px;margin-top:12px;}
+.btn{min-width:36px;min-height:36px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:pointer;font-size:14px;display:inline-grid;place-items:center;padding:0 8px;}
+.btn.play{min-width:64px;font-weight:600;}
+.scrub{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.scrub input{width:100%;margin:0;accent-color:var(--hot-line);height:24px;}
+.ticks{display:flex;justify-content:space-between;}
+.tick{border:0;background:none;padding:0 2px;font-size:12px;color:var(--muted);cursor:pointer;min-height:20px;font-family:var(--mono);}
+.tick.done{color:var(--ink);font-weight:700;}
+.cap{margin-top:8px;min-height:3em;font-size:13px;line-height:1.55;border-left:3px solid var(--hot-line);padding:2px 0 2px 10px;}
+.cap b{font-family:var(--mono);}
+@media (max-width:420px){ .btn.theme{display:none;} }
+@media (prefers-reduced-motion: reduce){ .pkt.park::after{animation:none;opacity:.6;} }
+@media print{ .ctrl,.tabs{display:none;} .pkt.park::after{animation:none;} }
+</style>
+</head>
+<body>
+<figure class="fig" id="uw" data-fig="unique-wait" data-dur="7.2" data-rest="3.6" tabindex="0"
+  aria-label="同一個 email bob@x.com 的兩個註冊請求 A 和 B 同時送進 PostgreSQL。沒有唯一約束時兩筆都寫進去；有唯一約束時，後到的 B 在唯一索引前等待 A 結束，A COMMIT 後 B 收到 ERROR 23505，A ROLLBACK 則 B 寫入成功。">
+  <div class="tabs" role="tablist" aria-label="情境">
+    <button class="tab" role="tab" data-s="0" aria-selected="false">沒有唯一約束</button>
+    <button class="tab" role="tab" data-s="1" aria-selected="true">有唯一約束：A COMMIT</button>
+    <button class="tab" role="tab" data-s="2" aria-selected="false">有唯一約束：A ROLLBACK</button>
+  </div>
+
+  <div class="stage">
+    <div class="cards">
+      <div class="card" id="cardA">
+        <div class="who"><span class="badge a">A</span>請求 A<small>第一次按註冊</small></div>
+        <div class="status" id="stA">準備註冊 bob@x.com</div>
+      </div>
+      <div class="card" id="cardB">
+        <div class="who"><span class="badge b">B</span>請求 B<small>多按一下送出的第二次</small></div>
+        <div class="status" id="stB">準備註冊 bob@x.com</div>
+      </div>
+    </div>
+
+    <div class="wires">
+      <svg role="img" aria-labelledby="uw-title uw-desc">
+        <title id="uw-title">兩個請求與 PostgreSQL 之間的連線</title>
+        <desc id="uw-desc">左邊是請求 A 的連線，右邊是請求 B 的連線；SQL 往下送進資料庫，結果往上回到請求。</desc>
+        <line x1="25%" y1="0" x2="25%" y2="76"/>
+        <line x1="75%" y1="0" x2="75%" y2="76"/>
+      </svg>
+      <div class="pkt" id="pA1" aria-hidden="true"></div>
+      <div class="pkt b" id="pB1" aria-hidden="true"></div>
+      <div class="pkt b park" id="pBpark" aria-hidden="true">INSERT 等待中…</div>
+    </div>
+
+    <div class="db">
+      <div class="dbhead">PostgreSQL<span id="dbmode">email 上有唯一索引</span></div>
+      <div class="dbgrid">
+        <div class="box" id="tbl">
+          <div class="lbl">users 表</div>
+          <div class="rows" id="rows"></div>
+          <div class="count" id="count">bob@x.com：<b>0</b> 筆</div>
+        </div>
+        <div class="box hot" id="idx">
+          <div class="lbl" id="idxLbl">email 上的唯一索引</div>
+          <div class="ents" id="ents"></div>
+          <div class="note" id="idxNote"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ctrl">
+    <button class="btn play" id="play" aria-label="播放">▶ 播放</button>
+    <button class="btn" id="prev" aria-label="上一步">◀</button>
+    <button class="btn" id="next" aria-label="下一步">▶</button>
+    <div class="scrub">
+      <input type="range" id="range" min="0" max="7.2" step="0.01" value="3.6" aria-label="時間軸">
+      <div class="ticks" id="ticks"></div>
+    </div>
+    <button class="btn theme" id="theme" aria-label="切換深淺色">◐</button>
+  </div>
+  <div class="cap" id="cap" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript><div class="cap">有唯一約束時：A 先 INSERT bob@x.com 還沒 commit，B 再 INSERT 同一個值時會等待；A COMMIT 後 B 收到 ERROR 23505，A ROLLBACK 則 B 寫入成功。</div></noscript>
+</figure>
+
+<script>
+(function(){
+  'use strict';
+  var STEP = 1.8;            // seconds per T step
+  var DOWN = [0.04, 0.48];   // packet travel phase inside a step (request goes down)
+  var UP   = [0.52, 0.94];   // response goes up
+  var MID = 0.5, END = 0.96; // when the step's database change / card change lands
+
+  // ---- scenarios: facts from docs/14-唯一約束.md only ----
+  var INIT = { A:{t:'準備註冊 bob@x.com',c:''}, B:{t:'準備註冊 bob@x.com',c:''}, rows:[], ents:[], wait:false, note:'' };
+  var S = [
+    { name:'沒有唯一約束', cons:false, rest:5, steps:[
+      { msgs:[['A','down','SELECT bob@x.com',''],['A','up','查無資料','']],
+        end:{A:{t:'查無資料，準備寫入',c:'act'}},
+        cap:'<b>T1</b>｜A 用 <code>SELECT</code> 查 bob@x.com，查無資料。' },
+      { msgs:[['B','down','SELECT bob@x.com',''],['B','up','查無資料','']],
+        end:{B:{t:'查無資料，準備寫入',c:'act'}},
+        cap:'<b>T2</b>｜B 也 <code>SELECT</code> 查 bob@x.com，也查無資料：A 還沒寫入。' },
+      { msgs:[['A','down','INSERT bob@x.com','']],
+        mid:{rows:[{w:'A'}], A:{t:'INSERT，發 200 元',c:'act'}},
+        cap:'<b>T3</b>｜A <code>INSERT</code> bob@x.com，發 200 元。' },
+      { msgs:[['B','down','INSERT bob@x.com','']],
+        mid:{rows:[{w:'A'},{w:'B',dup:true}], B:{t:'INSERT，發 200 元',c:'act'}},
+        cap:'<b>T4</b>｜B 也 <code>INSERT</code> bob@x.com，發 200 元：資料庫沒有規則擋它。' },
+      { msgs:[['A','up','成功','ok'],['B','up','成功','ok']],
+        end:{A:{t:'回「成功」',c:'ok'}, B:{t:'回「成功」',c:'ok'}},
+        cap:'<b>T5</b>｜兩邊都回「成功」，users 表裡 bob@x.com 有 2 筆。' }
+    ]},
+    { name:'有唯一約束：A COMMIT', cons:true, rest:2, steps:[
+      { msgs:[['A','down','INSERT bob@x.com','']],
+        mid:{rows:[{w:'A',pending:true}], ents:[{w:'A',tag:'A 還沒 commit',pending:true}], A:{t:'INSERT 完，還沒 COMMIT',c:'act'}},
+        cap:'<b>T1</b>｜A <code>INSERT</code> bob@x.com，還沒 commit。唯一索引裡有 1 筆，A 還沒 commit。' },
+      { msgs:[['B','down','INSERT bob@x.com','']],
+        mid:{wait:true, note:'B 發現同值、A 還沒結束 → B 等待', B:{t:'等待中…（等 A 的交易結束）',c:'wait'}},
+        cap:'<b>T2</b>｜B <code>INSERT</code> 同一個 email，發現同值、A 還沒結束，開始等待。「等待」應用層做不到：只有資料庫看得到所有交易進行中的寫入。' },
+      { msgs:[['A','down','COMMIT','']],
+        mid:{rows:[{w:'A'}], ents:[{w:'A',tag:'已 commit'}], note:'B 還在等', A:{t:'COMMIT',c:'act'}},
+        cap:'<b>T3</b>｜A <code>COMMIT</code>。索引裡那 1 筆變成已 commit，B 還在等。' },
+      { msgs:[['A','up','成功','ok'],['B','up','ERROR 23505','err']],
+        mid:{wait:false, note:''},
+        end:{A:{t:'回「成功」',c:'ok'}, B:{t:'收到 ERROR 23505，回「這個 email 已經註冊過了」',c:'err'}},
+        cap:'<b>T4</b>｜A 回「成功」；B 收到 <code>ERROR 23505</code>，回「這個 email 已經註冊過了」。表裡只有 1 筆。' }
+    ]},
+    { name:'有唯一約束：A ROLLBACK', cons:true, rest:3, steps:null }
+  ];
+  // ROLLBACK shares T1–T2 with COMMIT, then diverges (article: 「如果 T3 的 A 改成 ROLLBACK，B 就會寫入成功，索引裡還是只有 1 筆」)
+  S[2].steps = [S[1].steps[0], S[1].steps[1], {
+    msgs:[['A','down','ROLLBACK',''],['B','up','寫入成功','ok']],
+    mid:{wait:false, note:'', rows:[{w:'B'}], ents:[{w:'B',tag:'B 寫入'}], A:{t:'ROLLBACK',c:'act'}},
+    end:{B:{t:'寫入成功',c:'ok'}},
+    cap:'<b>T3</b>｜A 改成 <code>ROLLBACK</code>：A 那筆撤掉，B 不用再等，寫入成功。索引裡還是只有 1 筆。' }];
+
+  // precompute the state at the end of every step (seek never depends on history)
+  function merge(a,b){ var o={},k; for(k in a) o[k]=a[k]; if(b) for(k in b) o[k]=b[k]; return o; }
+  S.forEach(function(sc){
+    var st = INIT; sc.ends=[];
+    sc.steps.forEach(function(s){ st = merge(merge(st, s.mid), s.end); sc.ends.push(st); });
+  });
+
+  var $ = function(id){ return document.getElementById(id); };
+  var fig=$('uw'), el={ stA:$('stA'), stB:$('stB'), cardA:$('cardA'), cardB:$('cardB'), pA:$('pA1'), pB:$('pB1'), park:$('pBpark'),
+    rows:$('rows'), ents:$('ents'), note:$('idxNote'), idx:$('idx'), idxLbl:$('idxLbl'), count:$('count'), dbmode:$('dbmode'),
+    range:$('range'), ticks:$('ticks'), cap:$('cap'), play:$('play') };
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var sc = 1, t = S[1].rest*STEP, playing=false, fresh=true, visible=true, raf=0, last=0;
+  var WIRE_H = 76, PKT_H = 24; // cached sizes (CSS fixed)
+  var lastKey = {};
+
+  function dur(){ return S[sc].steps.length*STEP; }
+  function ease(q){ return q<.5 ? 4*q*q*q : 1-Math.pow(-2*q+2,3)/2; }
+  function clamp(x){ return x<0?0:x>1?1:x; }
+
+  function stateAt(k,p){
+    var s = S[sc].steps[k], base = k>0 ? S[sc].ends[k-1] : INIT;
+    var st = base;
+    if (p>=MID) st = merge(st, s.mid);
+    if (p>=END) st = merge(st, s.end);
+    return st;
+  }
+  function setOnce(node, key, html){ if(lastKey[key]!==html){ lastKey[key]=html; node.innerHTML=html; } }
+  function chipRow(r){
+    var who = '<span class="who-'+r.w.toLowerCase()+'">'+r.w+'</span>';
+    var cls = 'chip'+(r.pending?' pending':'')+(r.dup?' dup':'');
+    var tag = r.pending ? '<span class="tag">未 commit</span>' : (r.dup ? '<span class="tag">重複！</span>' : '');
+    return '<div class="'+cls+'"><code>bob@x.com</code>'+who+tag+'</div>';
+  }
+  function chipEnt(e){
+    return '<div class="chip'+(e.pending?' pending':'')+'"><code>bob@x.com</code><span class="tag">'+e.tag+'</span></div>';
+  }
+
+  // D(g, t, C): paint frame t of scenario g. Colours come from CSS tokens (classes), so theme follows :root.
+  function D(g, time){
+    var n = S[g].steps.length, x = Math.max(0, Math.min(time, n*STEP)) / STEP;
+    var k = Math.min(n-1, Math.floor(x)), p = x - k;
+    if (time >= n*STEP) { k = n-1; p = 1; }
+    if (p < 1e-6 && k > 0) { k -= 1; p = 1; } // a step boundary shows the finished step
+    if (reduce) p = p > 0 ? 1 : 0; // no tween under reduced motion: whole steps only
+    var st = stateAt(k,p), s = S[g].steps[k];
+
+    // cards
+    ['A','B'].forEach(function(w){
+      var c = st[w], stEl = el['st'+w], card = el['card'+w];
+      setOnce(stEl, 'st'+w, c.t);
+      var cls = 'status' + (c.c ? ' '+c.c : ''); if (stEl.className!==cls) stEl.className = cls;
+      var ccls = 'card' + (c.c==='wait'||c.c==='err'||c.c==='ok' ? ' '+c.c : ''); if (card.className!==ccls) card.className = ccls;
+    });
+
+    // packets: at most one moving per side in any step
+    var shown = {A:null,B:null};
+    s.msgs.forEach(function(m){
+      var r = m[1]==='down' ? DOWN : UP, q = clamp((p - r[0])/(r[1]-r[0]));
+      if (q>0 && q<1) shown[m[0]] = {m:m, q:ease(q)};
+    });
+    ['A','B'].forEach(function(w){
+      var node = w==='A'?el.pA:el.pB, v = shown[w];
+      if (!v){ if(node.style.visibility!=='hidden') node.style.visibility='hidden'; return; }
+      var y = (WIRE_H-PKT_H) * (v.m[1]==='down' ? v.q : 1-v.q);
+      var arrow = v.m[1]==='down' ? '↓ ' : '↑ ';
+      if (node.textContent !== arrow+v.m[2]) node.textContent = arrow+v.m[2];
+      var cls = 'pkt' + (w==='B'?' b':'') + (v.m[3]?' '+v.m[3]:'');
+      if (node.className!==cls) node.className = cls;
+      node.style.transform = 'translate(-50%,'+y.toFixed(1)+'px)';
+      node.style.visibility = 'visible';
+    });
+    var parkVis = st.wait && !shown.B ? 'visible' : 'hidden';
+    if (el.park.style.visibility!==parkVis){ el.park.style.visibility = parkVis; el.park.style.transform='translate(-50%,'+(WIRE_H-PKT_H)+'px)'; }
+
+    // database
+    var cons = S[g].cons;
+    setOnce(el.rows, 'rows', st.rows.length ? st.rows.map(chipRow).join('') : '<div class="empty">還沒有 bob@x.com</div>');
+    var nRows = st.rows.length;
+    setOnce(el.count, 'count', 'bob@x.com：<b>'+nRows+'</b> 筆');
+    var ccls = 'count'+(nRows>1?' bad':''); if (el.count.className!==ccls) el.count.className=ccls;
+    if (cons){
+      setOnce(el.idxLbl, 'lbl', 'email 上的唯一索引');
+      setOnce(el.ents, 'ents', st.ents.length ? st.ents.map(chipEnt).join('') : '<div class="empty">還沒有 bob@x.com</div>');
+      setOnce(el.note, 'note', st.note);
+      setOnce(el.dbmode, 'mode', '寫入索引時比對有沒有相同的值');
+      if (el.idx.className!=='box hot') el.idx.className='box hot';
+    } else {
+      setOnce(el.idxLbl, 'lbl', '沒有唯一約束');
+      setOnce(el.ents, 'ents', '<div class="empty">email 只有一般索引，不檢查重複</div>');
+      setOnce(el.note, 'note', '');
+      setOnce(el.dbmode, 'mode', '照單全收');
+      if (el.idx.className!=='box none') el.idx.className='box none';
+    }
+
+    // caption + ticks (step-level, announced politely)
+    setOnce(el.cap, 'cap', (time<=0 && p===0 && k===0) ? '按「播放」或拖時間軸，看 A、B 兩個請求一步步發生什麼事。' : s.cap);
+    var done = (time>=n*STEP) ? n : (p>=END ? k+1 : k);
+    var tk = el.ticks.children;
+    for (var i=0;i<tk.length;i++){ var on = i<done; if (tk[i].classList.contains('done')!==on) tk[i].classList.toggle('done', on); }
+    var rv = time.toFixed(2); if (el.range.value!==rv) el.range.value = rv;
+  }
+
+  function paint(){ D(sc, t); }
+  function setPlaying(on){
+    playing = on;
+    el.play.textContent = on ? '❚❚ 暫停' : '▶ 播放';
+    el.play.setAttribute('aria-label', on ? '暫停' : '播放');
+    if (on && visible && !raf){ last = 0; raf = requestAnimationFrame(tick); }
+  }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    if (last) t += Math.min(0.1, (now-last)/1000);
+    last = now;
+    if (t >= dur()){ t = dur(); paint(); setPlaying(false); return; }
+    paint();
+    raf = requestAnimationFrame(tick);
+  }
+  function seek(time){ setPlaying(false); fresh=false; t = Math.max(0, Math.min(dur(), +time||0)); paint(); }
+  function buildTicks(){
+    var n = S[sc].steps.length, h='';
+    for (var i=0;i<n;i++) h += '<button class="tick" data-k="'+i+'" aria-label="跳到 T'+(i+1)+'">T'+(i+1)+'</button>';
+    el.ticks.innerHTML = h; lastKey={};
+    el.range.max = String(dur());
+    fig.setAttribute('data-dur', String(dur()));
+    fig.setAttribute('data-rest', String(S[sc].rest*STEP));
+  }
+  function stepTo(dir){
+    var n=S[sc].steps.length, cur = Math.round(t/STEP*1000)/1000;
+    var k = dir>0 ? Math.floor(cur)+1 : Math.ceil(cur)-1;
+    seek(Math.max(0, Math.min(n, k))*STEP);
+  }
+  function selectScenario(g, autoplay){
+    sc = g;
+    [].forEach.call(document.querySelectorAll('.tab'), function(b){ b.setAttribute('aria-selected', String(+b.dataset.s===g)); });
+    buildTicks();
+    if (autoplay && !reduce){ t = 0; fresh=false; paint(); setPlaying(true); }
+    else { seek(S[g].rest*STEP); }
+  }
+
+  // inputs
+  document.querySelectorAll('.tab').forEach(function(b){ b.addEventListener('click', function(){ selectScenario(+b.dataset.s, true); }); });
+  el.play.addEventListener('click', function(){
+    if (playing){ setPlaying(false); return; }
+    if (fresh || t >= dur()) t = 0;
+    fresh = false;
+    if (reduce){ // whole steps, no tween
+      stepTo(1); return;
+    }
+    setPlaying(true);
+  });
+  $('prev').addEventListener('click', function(){ stepTo(-1); });
+  $('next').addEventListener('click', function(){ stepTo(1); });
+  el.range.addEventListener('input', function(){ seek(parseFloat(el.range.value)); });
+  el.ticks.addEventListener('click', function(e){ var b = e.target.closest('.tick'); if (b) seek((+b.dataset.k+1)*STEP); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target!==fig) return;
+    if (e.key==='ArrowRight'){ stepTo(1); e.preventDefault(); }
+    else if (e.key==='ArrowLeft'){ stepTo(-1); e.preventDefault(); }
+    else if (e.key===' '||e.key==='Enter'){ el.play.click(); e.preventDefault(); }
+  });
+  $('theme').addEventListener('click', function(){
+    var root=document.documentElement, cur=root.getAttribute('data-theme');
+    var dark = cur ? cur==='dark' : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+
+  // visible-only loop
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible && playing && !raf){ last=0; raf=requestAnimationFrame(tick); }
+    }, {rootMargin:'120px'}).observe(fig);
+  }
+
+  window.seek = seek;
+  window.timeline = function(){ return dur(); };
+  Object.defineProperty(window, 'DUR', { get: function(){ return dur(); } });
+  window.scenario = function(g){ selectScenario(g, false); };
+
+  buildTicks();
+  seek(S[sc].rest*STEP); fresh = true;
+})();
+</script>
+</body>
+</html>

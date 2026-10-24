@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>交易內送出工作</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#5f6774; --rule:#d7dbe2;
+  --panel:#f6f8fb; --panel-2:#eceff4; --code-bg:rgba(31,41,55,.07);
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111;
+  --ok-fill:#d1fae5; --ok-stroke:#047857; --ok-ink:#065f46;
+  --ticket:#ffffff; --track:#d7dbe2; --accent-ink:#1f2937;
+  --sans:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Noto Sans Mono CJK TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e5e7eb; --muted:#cbd2dc; --soft:#a3abb8; --rule:#3c4250;
+    --panel:#252a34; --panel-2:#2d3340; --code-bg:rgba(229,231,235,.10);
+    --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+    --ok-fill:#0f3d32; --ok-stroke:#34d399; --ok-ink:#a7f3d0;
+    --ticket:#2d3340; --track:#3c4250; --accent-ink:#e5e7eb;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e5e7eb; --muted:#cbd2dc; --soft:#a3abb8; --rule:#3c4250;
+  --panel:#252a34; --panel-2:#2d3340; --code-bg:rgba(229,231,235,.10);
+  --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+  --ok-fill:#0f3d32; --ok-stroke:#34d399; --ok-ink:#a7f3d0;
+  --ticket:#2d3340; --track:#3c4250; --accent-ink:#e5e7eb;
+  color-scheme:dark;
+}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+body{padding:12px 16px;}
+*{box-sizing:border-box;}
+code{font-family:var(--mono);font-size:12.5px;background:var(--code-bg);padding:1px 4px;border-radius:4px;word-break:break-all;}
+
+.fig{margin:0;max-width:960px;outline:none;}
+.fig:focus-visible{outline:2px solid var(--hot-stroke);outline-offset:4px;border-radius:8px;}
+
+/* controls */
+.ctl{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.btn{min-width:36px;height:36px;padding:0 10px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);color:var(--ink);
+  font:600 14px/1 var(--sans);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
+.btn:hover{background:var(--panel-2);}
+.btn:focus-visible{outline:2px solid var(--hot-stroke);outline-offset:2px;}
+.btn svg{width:14px;height:14px;fill:currentColor;}
+.ctl .spacer{flex:1;}
+.btn.play{min-width:88px;}
+
+/* timeline */
+.tl{margin-bottom:12px;}
+.ticks,.marks{display:grid;grid-template-columns:repeat(7,1fr);}
+.tick{height:32px;border:0;background:none;color:var(--soft);font:600 13px/1 var(--sans);cursor:pointer;border-radius:6px;}
+.tick[aria-current="step"]{color:var(--bg);background:var(--ink);}
+.tick:focus-visible{outline:2px solid var(--hot-stroke);outline-offset:-2px;}
+.marks{height:24px;margin-top:4px;position:relative;}
+.mark{font:500 12px/20px var(--sans);text-align:center;border-radius:4px;white-space:nowrap;}
+.mark.q{grid-column:4 / span 2;background:var(--hot-fill);color:var(--hot-ink);border:1px solid var(--hot-stroke);margin:0 2px;}
+.mark.c{grid-column:6 / span 1;background:var(--ok-fill);color:var(--ok-ink);border:1px solid var(--ok-stroke);margin:0 2px;}
+.range{width:100%;margin:6px 0 0;height:24px;accent-color:var(--hot-stroke);cursor:pointer;}
+
+/* lanes */
+.lanes{position:relative;border-top:1px solid var(--rule);}
+.lane{display:grid;grid-template-columns:136px 176px minmax(0,1fr);gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid var(--rule);}
+.lane-label{font:600 13px/1.4 var(--sans);color:var(--muted);}
+.lane-label small{display:block;font:400 12px/1.4 var(--sans);color:var(--soft);}
+.status{font:400 14px/1.6 var(--sans);color:var(--ink);padding:8px 12px;border-radius:8px;border:1px solid transparent;}
+.status.hot{background:var(--hot-fill);color:var(--hot-ink);border-color:var(--hot-stroke);}
+.status.hot code{background:rgba(0,0,0,.08);}
+
+.slot{width:176px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);padding:8px 12px;position:relative;}
+.slot-h{font:600 12px/16px var(--sans);color:var(--soft);display:flex;justify-content:space-between;align-items:center;gap:4px;margin-bottom:4px;}
+.badge{font:600 12px/16px var(--sans);padding:0 6px;border-radius:4px;border:1px dashed var(--hot-stroke);color:var(--hot-ink);background:var(--hot-fill);white-space:nowrap;}
+.badge.ok{border-style:solid;border-color:var(--ok-stroke);background:var(--ok-fill);color:var(--ok-ink);}
+.todo{list-style:none;margin:0;padding:0;}
+.todo li{font:400 12px/20px var(--sans);color:var(--soft);white-space:nowrap;}
+.todo li.done{color:var(--muted);}
+.todo li.done::before{content:"✓ ";color:var(--ok-stroke);}
+.todo li.now{color:var(--ink);font-weight:700;}
+.todo li.now::before{content:"▸ ";}
+.todo li:not(.done):not(.now)::before{content:"· ";}
+.spot{height:40px;border:1px dashed var(--rule);border-radius:6px;display:flex;align-items:center;justify-content:center;font:400 12px/1 var(--sans);color:var(--soft);}
+.slot.db .row{height:40px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;font:600 12px/1 var(--sans);
+  border:1px dashed var(--soft);color:var(--soft);background:transparent;}
+.slot.db .row.ok{border-style:solid;border-color:var(--ok-stroke);color:var(--ok-ink);background:var(--ok-fill);}
+.seen{display:inline-flex;align-items:center;gap:6px;font-weight:700;}
+.seen .dot{width:10px;height:10px;border-radius:50%;background:var(--soft);}
+.seen.ok .dot{background:var(--ok-stroke);}
+
+/* ticket */
+.ticket{position:absolute;left:0;top:0;width:152px;height:40px;border-radius:6px;border:1.5px solid var(--ink);background:var(--ticket);color:var(--ink);
+  font:600 12px/1.25 var(--sans);display:flex;align-items:center;gap:6px;padding:0 8px;pointer-events:none;will-change:transform,opacity;z-index:3;
+  box-shadow:0 2px 6px rgba(0,0,0,.12);}
+.ticket .ic{flex:none;width:18px;height:14px;border:1.5px solid currentColor;border-radius:2px;position:relative;}
+.ticket .ic::after{content:"";position:absolute;left:1px;right:1px;top:1px;height:6px;border-bottom:1.5px solid currentColor;transform:skewY(0);
+  clip-path:polygon(0 0,50% 100%,100% 0);background:currentColor;opacity:.35;}
+.ticket.fail{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink);}
+.ticket.used{opacity:.6;border-style:dashed;border-color:var(--soft);color:var(--soft);box-shadow:none;}
+.ticket.used .tx{text-decoration:line-through;}
+
+.overlay{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:2;}
+.overlay line{stroke:var(--hot-stroke);stroke-width:2;stroke-dasharray:5 4;}
+.overlay polygon{fill:var(--hot-stroke);}
+.qlabel{position:absolute;z-index:4;font:600 12px/16px var(--sans);padding:2px 6px;border-radius:4px;background:var(--hot-fill);color:var(--hot-ink);border:1px solid var(--hot-stroke);white-space:nowrap;pointer-events:none;}
+
+/* readout + legend */
+.readout{margin-top:12px;min-height:72px;padding:12px;border-radius:8px;background:var(--panel);font:400 15px/1.7 var(--sans);color:var(--ink);}
+.readout b{font-weight:700;}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;font:400 12px/20px var(--sans);color:var(--soft);}
+.legend span{display:inline-flex;align-items:center;gap:6px;}
+.sw{width:12px;height:12px;border-radius:2px;display:inline-block;}
+.sw.hot{background:var(--hot-fill);border:1px solid var(--hot-stroke);}
+.sw.ok{background:var(--ok-fill);border:1px solid var(--ok-stroke);}
+.sw.open{border:1px dashed var(--soft);}
+
+@media (max-width:559px){
+  .lane{grid-template-columns:176px minmax(0,1fr);gap:8px 12px;}
+  .lane-label{grid-column:1 / -1;}
+  .lane-label small{display:inline;margin-left:6px;}
+}
+@media (max-width:419px){
+  .lane{grid-template-columns:minmax(0,1fr);}
+  .status{padding:6px 10px;}
+  .btn.play{min-width:72px;}
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="enqueue-before-commit" data-dur="14" data-rest="9.2" tabindex="0"
+  aria-label="時間軸動畫：下單 API 在交易還沒 COMMIT 前就把寄信工作單放進 Redis 佇列；worker 幾毫秒內取走工作單去查訂單 42，因為還沒提交而查回 0 筆、丟出 Order.DoesNotExist，工作失敗；之後 API 才 COMMIT，但工作單已經用掉，確認信沒寄出。">
+  <div class="ctl">
+    <button class="btn play" type="button" id="play" aria-label="播放">
+      <svg viewBox="0 0 14 14" aria-hidden="true"><path id="playIcon" d="M3 1.5v11l9-5.5z"/></svg><span id="playTx">播放</span>
+    </button>
+    <button class="btn" type="button" id="prev" aria-label="上一格"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M10 2v10L3 7z"/></svg></button>
+    <button class="btn" type="button" id="next" aria-label="下一格"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M4 2v10l7-5z"/></svg></button>
+    <span class="spacer"></span>
+    <button class="btn" type="button" id="theme" aria-label="切換深淺色"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1a6 6 0 1 0 0 12A6 6 0 0 0 7 1zm0 1.5v9a4.5 4.5 0 0 1 0-9z"/></svg></button>
+  </div>
+
+  <div class="tl">
+    <div class="ticks" id="ticks"></div>
+    <div class="marks" aria-hidden="true"><div class="mark q">worker 查詢</div><div class="mark c">COMMIT</div></div>
+    <input class="range" id="range" type="range" min="0" max="13.99" step="0.01" value="9.2" aria-label="時間軸">
+  </div>
+
+  <div class="lanes" id="lanes">
+    <div class="lane">
+      <div class="lane-label">API<small>下單請求的交易</small></div>
+      <div class="slot api">
+        <div class="slot-h"><span>交易</span><span class="badge" id="txBadge">未提交</span></div>
+        <ol class="todo" id="todo">
+          <li>① 建立訂單</li><li>② 建立品項</li><li id="todo3">③ 送出寄信工作</li><li>④ 扣庫存</li><li>⑤ COMMIT</li>
+        </ol>
+      </div>
+      <div class="status" id="sApi"></div>
+    </div>
+    <div class="lane">
+      <div class="lane-label">Redis 佇列<small>待辦清單</small></div>
+      <div class="slot"><div class="spot" id="spotQ">空</div></div>
+      <div class="status" id="sQ"></div>
+    </div>
+    <div class="lane">
+      <div class="lane-label">Worker<small>另一支程式</small></div>
+      <div class="slot"><div class="slot-h"><span>手上的工作</span></div><div class="spot" id="spotW">閒著</div></div>
+      <div class="status" id="sW"></div>
+    </div>
+    <div class="lane">
+      <div class="lane-label">別的連線<small>查得到訂單 42 嗎</small></div>
+      <div class="slot db"><div class="slot-h"><span>PostgreSQL</span></div><div class="row" id="dbRow"><span>訂單 42</span><span id="dbTag">未提交</span></div></div>
+      <div class="status"><span class="seen" id="seen"><span class="dot"></span><span id="sDb"></span></span></div>
+    </div>
+    <svg class="overlay" id="ov" aria-hidden="true"><line id="qLine" x1="0" y1="0" x2="0" y2="0"/><polygon id="qHead" points="0,0 0,0 0,0"/></svg>
+    <div class="qlabel" id="qLabel" aria-hidden="true">查訂單 42</div>
+    <div class="ticket" id="ticket" aria-hidden="true"><span class="ic"></span><span class="tx" id="ticketTx">工作單：寄信給訂單 42</span></div>
+  </div>
+
+  <div class="readout" id="readout" aria-live="polite"></div>
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw hot"></i>事情發生在這裡</span>
+    <span><i class="sw open"></i>還沒提交，只有 API 自己的交易看得到</span>
+    <span><i class="sw ok"></i>已提交</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var DUR = 14, STEP = 2, TR = 0.7, REST = 9.2;
+  var API = ['交易開始，<code>INSERT</code> 訂單 42','<code>INSERT</code> 十幾筆 <code>OrderItem</code>','呼叫 <code>send_order_email.delay(42)</code>','進入 <code>reserve_inventory()</code>，等庫存的鎖','還在等鎖','扣完庫存，<code>COMMIT</code>，回傳 <code>201</code>','結束'];
+  var Q   = ['空','空','多一張工作單：寄信給訂單 42','工作單被 worker 取走','空','空','空'];
+  var W   = ['閒著','閒著','閒著','幾毫秒內拿到工作單，去查訂單 42','查詢回來 0 筆，丟出 <code>Order.DoesNotExist</code>，工作失敗','閒著','工作單已經用掉了，沒有人會再寄這封信'];
+  var DB  = ['查不到（還沒提交）','查不到','查不到','查不到','查不到','查得到','查得到'];
+  var R = [
+    '<b>T1</b>　交易開始。訂單 42 寫進去了，但只有 API 自己的交易看得到。',
+    '<b>T2</b>　又寫了十幾筆品項，交易還開著，還沒 <code>COMMIT</code>。',
+    '<b>T3</b>　交易還沒結束，寄信的工作單就已經放進 Redis 佇列。',
+    '<b>T4</b>　worker 幾毫秒內就拿到工作單去查訂單 42；API 這邊還卡在等庫存的鎖。',
+    '<b>T5</b>　查詢回來 0 筆，工作失敗。訂單 42 其實在，只是還沒提交，worker 看不到。',
+    '<b>T6</b>　這時才 <code>COMMIT</code>、回傳 <code>201</code>，別的連線終於查得到訂單 42，但工作早就失敗了。',
+    '<b>T7</b>　工作單已經用掉，沒人會再寄這封信。尖峰時等鎖更久，T3 到 T6 拉得更長，所以約 2～3% 的訂單沒寄出確認信。修法：<code>COMMIT</code> 之後才送工作（<code>transaction.on_commit</code>）。'
+  ];
+  var HOT_API = {2:1}, HOT_W = {4:1};
+  var TODO_NOW = [0,1,2,3,3,4,-1];
+
+  var $ = function(id){ return document.getElementById(id); };
+  var fig = document.querySelector('.fig'), lanes = $('lanes'), ticket = $('ticket'), range = $('range');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var wide = window.matchMedia('(min-width: 560px)');
+  var t = REST, playing = false, visible = true, raf = 0, last = 0, touched = false, lastK = -1;
+  var P = null; // cached positions
+
+  var ticks = $('ticks');
+  for (var i = 0; i < 7; i++) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'tick'; b.textContent = 'T' + (i + 1);
+    b.setAttribute('aria-label', '跳到 T' + (i + 1));
+    b.addEventListener('click', (function(k){ return function(){ jump(k); }; })(i));
+    ticks.appendChild(b);
+  }
+
+  function rel(el){
+    var a = el.getBoundingClientRect(), o = lanes.getBoundingClientRect();
+    return { x: a.left - o.left, y: a.top - o.top, w: a.width, h: a.height };
+  }
+  function measure(){
+    var s3 = rel($('todo3')), q = rel($('spotQ')), w = rel($('spotW')), d = rel($('dbRow'));
+    var tw = 152, th = 40;
+    P = {
+      a: { x: s3.x, y: s3.y + s3.h / 2 - th / 2 },
+      q: { x: q.x + (q.w - tw) / 2, y: q.y + (q.h - th) / 2 },
+      w: { x: w.x + (w.w - tw) / 2, y: w.y + (w.h - th) / 2 },
+      lx: w.x + w.w - 4, ly1: w.y + w.h, ly2: d.y
+    };
+    var ov = $('ov'); ov.setAttribute('width', lanes.clientWidth); ov.setAttribute('height', lanes.clientHeight);
+  }
+  function ease(p){ return p < 0.5 ? 4*p*p*p : 1 - Math.pow(-2*p + 2, 3) / 2; }
+  function lerp(a, b, p){ return { x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p }; }
+
+  function render(){
+    if (!P) measure();
+    var k = Math.min(6, Math.floor(t / STEP));
+    var p = reduce.matches ? 1 : ease(Math.max(0, Math.min(1, (t - k * STEP) / TR)));
+    if (k !== lastK) {
+      $('sApi').innerHTML = API[k]; $('sApi').classList.toggle('hot', !!HOT_API[k]);
+      $('sQ').innerHTML = Q[k];
+      $('sW').innerHTML = W[k]; $('sW').classList.toggle('hot', !!HOT_W[k]);
+      $('sDb').textContent = DB[k]; $('seen').classList.toggle('ok', k >= 5);
+      $('readout').innerHTML = R[k];
+      var items = $('todo').children;
+      for (var i = 0; i < items.length; i++) {
+        var n = TODO_NOW[k];
+        items[i].className = (n === -1 || i < n) ? 'done' : (i === n ? 'now' : '');
+        if (i === 4 && k >= 5) items[i].className = 'done';
+      }
+      var committed = k >= 5;
+      $('txBadge').textContent = committed ? '已 COMMIT' : '未提交';
+      $('txBadge').classList.toggle('ok', committed);
+      $('dbRow').classList.toggle('ok', committed);
+      $('dbTag').textContent = committed ? '已提交' : '未提交';
+      $('spotQ').textContent = (k === 2) ? '' : '空';
+      $('spotW').textContent = (k >= 3 && k <= 4) ? '' : (k >= 5 ? '' : '閒著');
+      var tb = ticks.children;
+      for (var j = 0; j < 7; j++) { if (j === k) tb[j].setAttribute('aria-current', 'step'); else tb[j].removeAttribute('aria-current'); }
+      lastK = k;
+    }
+    // ticket
+    var pos, op = 1, cls = '';
+    if (k < 2) { pos = P.a; op = 0; }
+    else if (k === 2) { pos = lerp(P.a, P.q, p); op = Math.min(1, p * 3); }
+    else if (k === 3) { pos = lerp(P.q, P.w, p); }
+    else { pos = P.w; cls = (k === 4) ? 'fail' : 'used'; }
+    ticket.style.transform = 'translate(' + pos.x.toFixed(1) + 'px,' + pos.y.toFixed(1) + 'px)';
+    ticket.style.opacity = op;
+    ticket.className = 'ticket' + (cls ? ' ' + cls : '');
+    $('ticketTx').textContent = k === 4 ? '失敗：查不到訂單 42' : (k >= 5 ? '工作單已用掉' : '工作單：寄信給訂單 42');
+    // query arrow worker -> db (T4 draws in, T5 holds with "0 筆")
+    var line = $('qLine'), head = $('qHead'), lab = $('qLabel');
+    var show = (k === 3 || k === 4) && wide.matches;
+    var grow = k === 3 ? Math.max(0, Math.min(1, reduce.matches ? 1 : (t - k * STEP - TR) / 0.5)) : 1;
+    if (show && grow > 0) {
+      var x = P.lx, y1 = P.ly1 + 2, y2 = P.ly2 - 2, ye = y1 + (y2 - y1) * grow;
+      line.setAttribute('x1', x); line.setAttribute('x2', x); line.setAttribute('y1', y1); line.setAttribute('y2', ye - 6);
+      head.setAttribute('points', (x - 5) + ',' + (ye - 8) + ' ' + (x + 5) + ',' + (ye - 8) + ' ' + x + ',' + ye);
+      line.style.display = head.style.display = '';
+      lab.style.display = '';
+      lab.textContent = k === 3 ? '查訂單 42' : '0 筆';
+      lab.style.transform = 'translate(' + (x + 8) + 'px,' + ((y1 + y2) / 2 - 10) + 'px)';
+      lab.style.left = '0px'; lab.style.top = '0px';
+    } else {
+      line.style.display = head.style.display = 'none'; lab.style.display = 'none';
+    }
+    range.value = Math.min(13.99, t).toFixed(2);
+  }
+
+  function setPlaying(v){
+    playing = v;
+    $('playTx').textContent = v ? '暫停' : '播放';
+    $('play').setAttribute('aria-label', v ? '暫停' : '播放');
+    $('playIcon').setAttribute('d', v ? 'M3 1.5h3v11H3zM8 1.5h3v11H8z' : 'M3 1.5v11l9-5.5z');
+    if (v) arm();
+  }
+  function arm(){ if (!raf && playing && visible) { last = 0; raf = requestAnimationFrame(frame); } }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0; last = now;
+    if (reduce.matches) {
+      // step-wise: hold each frame STEP seconds, no travel
+      t = Math.min(DUR - 0.001, t + dt);
+    } else t = Math.min(DUR - 0.001, t + dt);
+    render();
+    if (t >= DUR - 0.001) { setPlaying(false); return; }
+    raf = requestAnimationFrame(frame);
+  }
+  function seek(v){ t = Math.max(0, Math.min(DUR - 0.001, +v || 0)); setPlaying(false); render(); }
+  function jump(k){ touched = true; seek(k * STEP + TR + 0.6); }
+  window.seek = seek; window.DUR = DUR;
+
+  $('play').addEventListener('click', function(){
+    if (playing) { setPlaying(false); return; }
+    if (!touched || t >= DUR - 0.01) t = 0;
+    touched = true; setPlaying(true);
+  });
+  $('prev').addEventListener('click', function(){ jump(Math.max(0, Math.floor(t / STEP) - 1)); });
+  $('next').addEventListener('click', function(){ jump(Math.min(6, Math.floor(t / STEP) + 1)); });
+  range.addEventListener('input', function(){ touched = true; seek(range.value); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target === range) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); $('next').click(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); $('prev').click(); }
+    else if (e.key === ' ' && e.target === fig) { e.preventDefault(); $('play').click(); }
+  });
+  $('theme').addEventListener('click', function(){
+    var r = document.documentElement, cur = r.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    r.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); }, { rootMargin: '120px' }).observe(fig);
+  }
+  if ('ResizeObserver' in window) {
+    new ResizeObserver(function(){ P = null; render(); }).observe(lanes);
+  } else window.addEventListener('resize', function(){ P = null; render(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ P = null; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

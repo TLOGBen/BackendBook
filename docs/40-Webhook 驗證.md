@@ -4,23 +4,44 @@
 
 **難度**：★★☆　**閱讀時間**：約 20 分鐘　**前置知識**：[冪等性](25-冪等性.md)、[背景工作者](37-背景工作者.md)
 
+## 核心問題與理念
+
+**它要解決的問題**：收付款通知的網址（webhook endpoint）誰送來都照單全收，有人照外流的範例自己捏一包「付款成功」送進來，沒付錢的訂單就出貨了。修補時加上了簽章檢查，卻把收到的 JSON 重新排版過才去驗，結果連真正的付款通知都全部被擋掉（下面的情境會完整走一遍）。
+
+**核心理念**：證明要跟內容綁在一起：只認用金鑰對原始內容算出的簽章，網址藏得再好都不算數。
+
+**想通的那一步**：
+
+- **卡住的地方**：直覺的做法是把網址藏好，或在標頭帶一組固定的通關密碼。可是網址和密碼都會從文件、日誌、分享的檔案外流，而且密碼跟內容沒有綁在一起，攻擊者拿到後可以配上任何內容送進來。
+- **火花**：讓每一包的證明都不一樣。對方用金鑰把整包內容算成一串簽章，金鑰本身從不出現在請求裡；內容改一個字，簽章就完全不同，所以攻擊者看到簽章也沒辦法拿去配別的內容。也因為簽章是對那一串原始 bytes 算的，驗的時候一定要用收到的原始內容，重新排版過就對不上了。
+
+## 閱讀前推薦具備知識
+
+| 知識 | 要會到什麼程度 | 這篇哪裡會用到 | 不熟的話先看 |
+|---|---|---|---|
+| HTTP 請求的組成與狀態碼 | **必備**：能說出一個 `POST` 請求的標頭（header）和 body 各放什麼，看到 200、401、500 知道各代表「成功」「沒通過驗證」「伺服器自己出錯」 | 情境的 `POST https://shop.example.com/webhooks/payment`、簽章放在標頭裡、「快速回 2xx，再非同步處理」的回應碼規則 | [MDN：HTTP 概觀](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview)、[MDN：HTTP 狀態碼](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status) |
+| Python 的 `bytes` 與 `str` | **必備**：分得出 `b'{"id":1}'` 是 `bytes`、`'{"id":1}'` 是 `str`，知道兩者用 `.encode()`／`.decode()` 互轉 | 情境的第二次出事、「為什麼一定要用原始 body」、`receiver.py` 的 `request.get_data()` 和 `.encode()` | [Python 官方教學（中文）](https://docs.python.org/zh-tw/3/tutorial/index.html) |
+| 雜湊與 HMAC | **加分**：知道雜湊是把任意長度的資料算成一串固定長度的值，輸入改一個字，算出來的值就完全不同 | 「HMAC-SHA256：雙方共享一把金鑰」整節 | [MDN：HMAC](https://developer.mozilla.org/en-US/docs/Glossary/HMAC)；本篇〈HMAC-SHA256〉一節也會順帶解釋 |
+| [冪等性](25-冪等性.md) | **加分**：知道用事件 ID 去重，同一個事件送來兩次只處理一次 | 重放時間表的 T2、T5、`receiver.py` 的 `ON CONFLICT (event_id) DO NOTHING` | 本系列第 25 篇 |
+| [背景工作者](37-背景工作者.md) | **加分**：知道慢的工作可以先存起來，交給另一個程式從資料表或佇列撈出來做 | 「快速回 2xx，再非同步處理」、全貌圖的收件匣資料表與背景工作者 | 本系列第 37 篇 |
+
+**快速自我檢查**：在 Flask 裡，`request.headers.get("X-Demo-Signature")` 拿到的標頭值是 `str` 還是 `bytes`？`request.get_data()` 拿到的原始 body 呢？如果要把標頭值拿去跟一串 `bytes` 比對，要先做什麼？
+
+<details markdown="1"><summary>看答案</summary>
+
+標頭值是 `str`，`request.get_data()` 是 `bytes`。兩種型別不能直接比，要先把標頭值 `.encode()` 成 `bytes`。`receiver.py` 裡的 `sig.encode()` 就是在做這件事。
+
+答不出來也沒關係，先看上表「Python 的 `bytes` 與 `str`」那一列。這篇反覆強調「簽章是對 bytes 算的」，分不清這兩種型別，第二次出事的情境會很難看懂。
+
+</details>
+
 ## 為什麼要在意：一個具體的情境
 
 假設你負責一個電商的付款通知 API。使用者在第三方金流的頁面付款，金流商確認付款成功後，會打 `POST https://shop.example.com/webhooks/payment` 通知你，body 是一包 JSON，`type` 是 `payment.succeeded`，裡面帶著 `order_id`。你的程式收到後把訂單改成「已付款」，倉庫看到「已付款」就出貨。這個收通知的網址就叫 webhook endpoint。
 
 ### 第一次出事：沒驗簽章
 
-當初寫這支 endpoint 的工程師覺得「這個網址又沒公開，誰會知道」，所以收到 JSON 就照著 `order_id` 改狀態：
-
-```python
-# ❌ 出事的寫法：沒有任何驗證，誰送來都照單全收
-@app.post("/webhooks/payment")
-def receive():
-    event = request.get_json()
-    if event["type"] == "payment.succeeded":
-        mark_order_paid(event["data"]["order_id"])  # 把訂單改成「已付款」
-    return {"received": True}, 200
-```
+當初寫這支 endpoint 的工程師覺得「這個網址又沒公開，誰會知道」，所以沒做任何驗證：收到請求就用 `event = request.get_json()` 把 body 轉成 dict，看到 `type` 是 `payment.succeeded`，就照著裡面的 `order_id` 呼叫 `mark_order_paid()` 把訂單改成「已付款」，再回 `200`。誰送來都照單全收。
 
 半年後，有人在一個外包團隊公開的 Postman collection 裡看到了這個網址和一包範例 payload（請求 body 裡帶的資料）。接下來發生的事：
 
@@ -38,14 +59,7 @@ def receive():
 
 ### 第二次出事：修補時驗錯了 bytes
 
-緊急修補時，工程師加了簽章驗證：金流商會用金鑰對 body 算出一串簽章放在標頭裡，你用同一把金鑰再算一次，對得上才處理（算法叫 HMAC，下面「HMAC-SHA256」一節會講）。但他是這樣算的：
-
-```python
-# ❌ 錯誤示範：拿 parse 後的 JSON 重新序列化來算簽章
-payload = request.get_json()
-body = json.dumps(payload)                  # 跟對方送來的 bytes 不一樣
-expected = hmac.new(SECRET, body.encode(), hashlib.sha256).hexdigest()
-```
+緊急修補時，工程師加了簽章驗證：金流商會用金鑰對 body 算出一串簽章放在標頭裡，你用同一把金鑰再算一次，對得上才處理（算法叫 HMAC，下面「HMAC-SHA256」一節會講）。但他先用 `request.get_json()` 把 body 轉成 dict，再用 `body = json.dumps(payload)` 轉回字串，拿這串重新產生的字串去算簽章，對方送來的原始 bytes 反而沒用到。
 
 本機測試會過，因為測試用的「假金流」剛好也是用 Python 的 `json.dumps` 產生 body。一上線，真正的金流商送來的是另一種排法的 JSON：
 
@@ -66,14 +80,16 @@ expected = hmac.new(SECRET, body.encode(), hashlib.sha256).hexdigest()
 
 ## 全貌：它在系統裡的位置
 
-下面這張圖畫的是一筆付款通知從金流商進到你系統的路線。收件匣資料表是一張先把收到的通知原樣存下來、之後再慢慢處理的表：
+下面這張圖畫的是一筆付款通知從金流商進到你系統的路線，會動的箭頭是合法通知走的路。收件匣資料表是一張先把收到的通知原樣存下來、之後再慢慢處理的表：
 
 ```mermaid
 flowchart LR
     U["使用者"] -->|"在金流頁付款"| P["金流商 (webhook 提供方)"]
-    P -->|"POST 通知並附上簽章"| RP["反向代理 (HTTPS)"]
+    P e1@-->|"POST 通知並附上簽章"| RP["反向代理 (HTTPS)"]
     A["攻擊者"] -.->|"偽造或重放請求"| RP
-    RP --> E["你的 webhook endpoint"]
+    RP e2@--> E["你的 webhook endpoint"]
+    e1@{ animate: true }
+    e2@{ animate: true }
     E -->|"驗過才寫入"| IN[("收件匣資料表")]
     IN --> W["背景工作者"]
     W --> O[("訂單資料表")]
@@ -106,6 +122,23 @@ webhook 收端要面對三種攻擊：
 | 重放（replay） | 把一包**合法、簽章正確**的舊請求原封不動再送一次 | 時間戳＋時間窗，加上事件 ID 去重 |
 
 重放的請求簽章是**完全正確**的，因為它本來就是對方簽的。所以只驗簽章擋不住第三種攻擊。
+
+下面這張圖看三種攻擊打到一個「只驗簽章」的 endpoint 會怎樣：
+
+```mermaid
+sequenceDiagram
+    participant P as 金流商
+    participant A as 攻擊者
+    participant R as 你的 endpoint
+    P->>R: 合法通知 (簽章正確)
+    A->>A: 攔下並錄下這包請求
+    A->>R: 偽造 (自己捏的 body，沒有金鑰算不出簽章)
+    R-->>A: 401
+    A->>R: 竄改 (把金額改掉，簽章對不上)
+    R-->>A: 401
+    A->>R: 重放 (原封不動送出錄下的那包)
+    R-->>A: 簽章正確，照樣收下
+```
 
 ### HMAC-SHA256：雙方共享一把金鑰
 
@@ -178,10 +211,10 @@ sequenceDiagram
 
 HMAC 算的是 **bytes**。下面兩段 JSON 語意一模一樣，但 bytes 不同，簽章就不同：
 
-```text
-{"id":"evt_1","amount":1990}
-{"id": "evt_1", "amount": 1990}
-```
+| 哪一串 | 實際的 bytes |
+|---|---|
+| 對方送來、拿去簽的原始 body | `{"id":"evt_1","amount":1990}` |
+| parse 之後再 `json.dumps` 的結果 | `{"id": "evt_1", "amount": 1990}` |
 
 parse 再序列化會改變的東西包括：空白與換行、key 的順序、數字格式（`1.0` 變 `1`）、Unicode 跳脫（`"中"` 變成 `"\u4e2d"` 或反過來，Python 的 `json.dumps` 預設就會這樣轉）、尾端換行。所以正確的順序永遠是下圖這樣（圖裡的 2xx 指 200 到 299 之間的成功狀態碼）：
 
@@ -208,14 +241,31 @@ flowchart LR
 
 一般的字串比較是「從第一個字元開始比，一遇到不同就立刻回傳 False」。這代表「前面對了越多個字元，比較花的時間就越長」。攻擊者如果能大量送請求、精準量回應時間，理論上可以一個字元一個字元猜出正確簽章，這叫時序攻擊（timing attack）。
 
-透過網路要量出這種奈秒級差異很難，但不是不可能，而且防禦成本幾乎是零：
+用一個簡化的例子一步一步看攻擊者怎麼猜。假設正確簽章的開頭是 `a7`：
 
-```python
-import hmac
+| 步驟 | 攻擊者送出的簽章開頭 | 跟正確簽章相同的前綴 | `==` 比較花的時間 | 攻擊者學到什麼 |
+|---|---|---|---|---|
+| 1 | `0…` | 0 個字元 | 最短 | 第 1 個字元不是 `0` |
+| 2 | `a…` | 1 個字元 | 稍微長一點 | 第 1 個字元是 `a` |
+| 3 | `a0…` | 1 個字元 | 跟步驟 2 差不多 | 第 2 個字元不是 `0` |
+| 4 | `a7…` | 2 個字元 | 又長一點 | 第 2 個字元是 `7` |
+| 5 | 往下一個字元一個字元重複 | | | 最後拼出整串簽章 |
 
-# ✅ 不管在哪裡出現差異，花的時間都一樣
-hmac.compare_digest(expected_bytes, received_bytes)
+下面這張圖對照兩種比較方式在哪裡停下來：
+
+```mermaid
+flowchart TD
+    IN["收到的簽章 vs 算出來的簽章"] --> EQ["用 == 比"]
+    IN --> CD["用 hmac.compare_digest 比"]
+    EQ --> E1["從第 1 個字元開始比"]
+    E1 -->|"遇到不同的字元"| E2["立刻回 False<br/>前面對越多，花越久"]
+    CD --> C1["每個字元都比完"]
+    C1 --> C2["不管差在哪裡，花的時間都一樣"]
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class E2 hot
 ```
+
+透過網路要量出這種奈秒級差異很難，但不是不可能，而且防禦成本幾乎是零：把 `==` 換成 `hmac.compare_digest(expected_bytes, received_bytes)` 就好。
 
 `hmac.compare_digest` 只接受兩個 `bytes`，或兩個**只含 ASCII 的** `str`。標頭值如果混了非 ASCII 字元，傳 `str` 進去會丟 `TypeError`，變成 500。所以實務上兩邊都先 `.encode()` 成 bytes 再比。
 
@@ -226,9 +276,26 @@ hmac.compare_digest(expected_bytes, received_bytes)
 1. 用標頭裡的時間戳和 body 一起重算簽章。因為時間戳被簽進去了，攻擊者改時間戳，簽章就對不上。
 2. 檢查 `|現在時間 - 時間戳|` 是否在容許範圍內，常見設定是 300 秒。
 
+加上最後一道事件 ID 去重（下面會講），一個請求要依序通過三關：
+
+<figure class="draw-fig">
+<iframe class="draw-fig__frame" src="../figures/40-webhook-replay-gates.html" title="按播放看同一個 evt_1 送了五次，每一包依序過三關、在哪一關被擋下；也可以拖時間軸或按下方 T1–T5 直接跳到該次的結果，注意 T2 的重放簽章和時間窗都過了，最後是靠事件 ID 擋下。" loading="lazy" style="height: 400px;"></iframe>
+<figcaption>按播放看同一個 evt_1 送了五次，每一包依序過三關、在哪一關被擋下；也可以拖時間軸或按下方 T1–T5 直接跳到該次的結果，注意 T2 的重放簽章和時間窗都過了，最後是靠事件 ID 擋下。</figcaption>
+</figure>
+
 提供方的正常重送不會被時間窗擋掉。以 Stripe 為例，每一次重送都會用當下的時間戳重新簽一次，所以就算隔一小時才重送，合法的重送也一定落在時間窗內；被擋下的只有「別人把舊請求原封不動再送一次」。
 
 時間窗不能太小：雙方伺服器時鐘會有誤差（伺服器要開 NTP，讓系統自動跟時間伺服器對時）、網路會有延遲，太嚴格會把合法請求擋掉。也不能太大：時間窗就是攻擊者能重放的期限。**時間窗內的重放還是擋不住**，所以最後一道防線是用事件 ID 去重（存到有唯一約束的欄位），這也剛好處理了對方「正常重送」造成的重複，詳見 [冪等性](25-冪等性.md)。
+
+一步一步看同一個事件 `evt_1` 在一小時內被送了好幾次，時間窗設 300 秒：
+
+| 時間 | 現在時刻 | 誰送的 | 簽進去的時間戳 | 收端看到什麼 | 結果 |
+|---|---|---|---|---|---|
+| T1 | 10:00:00 | 金流商送出 `evt_1` | 10:00:00 | 簽章對，相差 0 秒 | 存進收件匣，回 2xx |
+| T2 | 10:02:00 | 攻擊者重放 T1 那包 | 10:00:00 | 簽章對，相差 120 秒 | 時間窗擋不住；事件 ID 存過，回 2xx，不再處理 |
+| T3 | 10:30:00 | 攻擊者又重放一次 | 10:00:00 | 相差 1800 秒，超過 300 秒 | 回 401 |
+| T4 | 10:31:00 | 攻擊者把時間戳改成 10:31:00 | 10:31:00 | 時間戳變了，簽章對不上 | 回 401 |
+| T5 | 11:00:00 | 金流商重送 `evt_1`（例如沒收到 T1 的回應），用當下時間重新簽 | 11:00:00 | 簽章對，相差 0 秒 | 事件 ID 存過，回 2xx，不再處理 |
 
 ### 金鑰輪替（secret rotation）
 
@@ -244,7 +311,14 @@ flowchart LR
     S4 --> S5["階段五<br/>收端移除舊金鑰"]
 ```
 
-**先讓收端能接受新金鑰，再去提供方那邊切換**。順序反過來的話，從提供方切換到收端部署完成之間，webhook 都會驗不過。
+**先讓收端能接受新金鑰，再去提供方那邊切換**。順序反過來的話，從提供方切換到收端部署完成之間，webhook 都會驗不過：
+
+| 步驟 | 收端認得的金鑰 | 提供方用哪把簽 | 結果 |
+|---|---|---|---|
+| 1 | 舊 | 舊 | 通過 |
+| 2 | 舊 | 新（先去提供方後台換了） | 驗不過，回 401 |
+| 3 | 舊（新版還在部署） | 新 | 還是 401 |
+| 4 | 新 | 新 | 恢復通過，但步驟 2、3 之間的通知都失敗了 |
 
 Stripe 在後台「輪替（roll）」endpoint 金鑰時，可以讓舊金鑰延後一段時間（最多 24 小時）才失效，這段期間 `Stripe-Signature` 標頭會帶多個 `v1` 簽章（新舊金鑰各一個），收端只要任一個對上就算通過。GitHub 的 webhook 只能設一把金鑰，所以要靠收端自己做「新舊都認」的過渡期。
 
@@ -261,30 +335,28 @@ Stripe 在後台「輪替（roll）」endpoint 金鑰時，可以讓舊金鑰延
 
 GitHub 另外還會送舊的 `X-Hub-Signature`（HMAC-SHA1），那是為了相容舊系統保留的，新程式一律驗 `X-Hub-Signature-256`。
 
-有官方 SDK 時，優先用 SDK 的驗證函式，例如 Stripe：
+下面這張圖看兩家各拿什麼去算簽章、算完放進哪個標頭：
 
-```python
-import stripe
-
-# raw 是原始 bytes，sig_header 是 Stripe-Signature 標頭
-try:
-    event = stripe.Webhook.construct_event(
-        payload=raw, sig_header=sig_header, secret=endpoint_secret
-    )  # 內建檢查時間戳，預設容許 300 秒
-except ValueError:
-    ...  # body 不是合法 JSON
-except stripe.error.SignatureVerificationError:
-    ...  # 簽章不對（新版 SDK 也可寫 stripe.SignatureVerificationError，依版本而異）
+```mermaid
+flowchart LR
+    subgraph GH["GitHub"]
+        G1["原始 body"] --> G2["HMAC-SHA256"]
+        G2 --> G3["X-Hub-Signature-256 標頭<br/>sha256=簽章"]
+    end
+    subgraph ST["Stripe"]
+        S0["時間戳 t"] --> S1["t 加上句點再接原始 body"]
+        SB["原始 body"] --> S1
+        S1 --> S2["HMAC-SHA256"]
+        S2 --> S3["Stripe-Signature 標頭<br/>t=時間戳,v1=簽章"]
+    end
 ```
 
-GitHub 沒有官方 Python 驗證函式（Node.js 可以用 `@octokit/webhooks` 的 `verify`），自己寫也很短：
+有官方 SDK 時，優先用 SDK 的驗證函式。以 Stripe 為例，把原始 bytes `raw` 和 `Stripe-Signature` 標頭交給 `stripe.Webhook.construct_event(payload=raw, sig_header=sig_header, secret=endpoint_secret)`，它內建檢查時間戳，預設容許 300 秒。驗不過時它會丟例外：body 不是合法 JSON 丟 `ValueError`；簽章不對丟 `stripe.error.SignatureVerificationError`（新版 SDK 也可寫 `stripe.SignatureVerificationError`，依版本而異）。
+
+GitHub 沒有官方 Python 驗證函式（Node.js 可以用 `@octokit/webhooks` 的 `verify`），自己寫也很短，關鍵就這幾行（需要 `import hashlib, hmac`）：
 
 ```python
-import hashlib
-import hmac
-
 def verify_github(raw: bytes, secret: bytes, header: str | None) -> bool:
-    """驗證 GitHub 的 X-Hub-Signature-256 標頭"""
     if not header or not header.startswith("sha256="):
         return False  # 沒帶簽章一律拒絕，不要「沒帶就略過」
     expected = "sha256=" + hmac.new(secret, raw, hashlib.sha256).hexdigest()
@@ -293,7 +365,21 @@ def verify_github(raw: bytes, secret: bytes, header: str | None) -> bool:
 
 ### HTTPS：簽章不能取代加密
 
-簽章保證的是「真實性」和「完整性」，不保證「機密性」。webhook 的 payload 裡常常有使用者 email、地址、訂單內容，走 HTTP 就是明文在網路上跑。另外，被動竊聽到的合法請求，攻擊者在時間窗內就能拿去重放。所以：
+簽章保證的是「真實性」和「完整性」，不保證「機密性」。webhook 的 payload 裡常常有使用者 email、地址、訂單內容，走 HTTP 就是明文在網路上跑。另外，被動竊聽到的合法請求，攻擊者在時間窗內就能拿去重放。
+
+下面這張圖看一個 webhook 請求從提供方到你的服務會經過哪幾層（TLS 和 API gateway 在圖下面的清單裡解釋），黃色的兩層都要確認不會改寫 body：
+
+```mermaid
+flowchart LR
+    P["提供方"] -->|"HTTPS 加密傳送"| RP["反向代理 (在這裡解開 TLS)"]
+    P -.->|"如果走 HTTP"| EV["竊聽者看得到明文 payload，還能拿去重放"]
+    RP -->|"解密後的請求"| GW["API gateway"]
+    GW -->|"body 必須原封不動"| S["你的 webhook endpoint"]
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class RP,GW hot
+```
+
+所以：
 
 - endpoint 一律用 HTTPS，憑證要是正常簽發的。
 - 提供方後台如果有「停用 SSL 驗證」之類的選項，不要開。
@@ -301,12 +387,33 @@ def verify_github(raw: bytes, secret: bytes, header: str | None) -> bool:
 
 ### 快速回 2xx，再非同步處理
 
-提供方送出 webhook 後只會等幾秒，GitHub 文件要求 10 秒內回 2xx，超過就算失敗。如果你在 webhook handler 裡同步做「改訂單、寄信、呼叫物流 API」，任何一個下游慢一點就逾時，對方以為失敗就重送，結果同一件事被做好幾次。
+提供方送出 webhook 後只會等幾秒，GitHub 文件要求 10 秒內回 2xx，超過就算失敗。如果你在 webhook handler 裡同步做「改訂單、寄信、呼叫物流 API」，任何一個下游慢一點就逾時，對方以為失敗就重送，結果同一件事被做好幾次：
+
+| 時間 | 提供方 | 你的 handler | 物流 API |
+|---|---|---|---|
+| T1 | 送出 webhook，開始計時 | 收到，改訂單狀態 | |
+| T2 | | 寄確認信 | |
+| T3 | | 呼叫物流 API，開始等 | 很慢，遲遲沒回 |
+| T4 | 超過時限（GitHub 是 10 秒），判定失敗 | 還在等物流 API | |
+| T5 | 重送同一個 webhook | 又改一次訂單、又寄一次信 | |
 
 正確分工：
 
 - **handler 只做三件事**：驗簽章、把事件存進收件匣（inbox）資料表、回 2xx。
 - **背景工作者**從收件匣撈事件出來執行商業邏輯，失敗就自己重試，不依賴對方重送。見 [背景工作者](37-背景工作者.md)、[訊息佇列](35-訊息佇列.md)。
+
+下面這張圖是分工之後的路線，會動的箭頭是事件存進收件匣、再被背景工作者取走的那段：
+
+```mermaid
+flowchart LR
+    P["提供方"] --> H["handler：驗簽章"]
+    H -->|"存成功就回 2xx"| P
+    H e1@-->|"寫入"| IN[("收件匣資料表")]
+    IN e2@-->|"撈出未處理的事件"| W["背景工作者"]
+    W --> J["改訂單、寄信、呼叫物流 API"]
+    e1@{ animate: true }
+    e2@{ animate: true }
+```
 
 回應碼也有講究。4xx 表示「送來的請求有問題」，5xx 表示「收端自己出了問題」。驗不過回 4xx（401 或 400）；**已經收過的重複事件也回 2xx**，否則對方會一直重送；只有你自己真的出問題（資料庫掛了）才回 5xx，讓對方重送。不過不少提供方（例如 Stripe）只要不是 2xx 就會重送，4xx 也一樣，所以回應碼的分類主要是讓雙方的投遞紀錄、日誌和監控看得懂「是誰的問題」，不要期待回 4xx 就能讓對方停止重送。對方怎麼重送、多久重送一次，見 [Webhook 重試](41-Webhook%20重試.md)。
 
@@ -349,7 +456,6 @@ SECRETS = [s.encode() for s in os.environ["WEBHOOK_SECRETS"].split(",")]
 TOLERANCE_SECONDS = 300
 DSN = "postgresql://postgres:pw@localhost:5432/postgres"
 
-
 def parse_signature_header(header: str) -> tuple[str | None, list[str]]:
     """把 't=170000,v1=abc,v1=def' 拆成時間戳和簽章清單"""
     ts, sigs = None, []
@@ -360,7 +466,6 @@ def parse_signature_header(header: str) -> tuple[str | None, list[str]]:
         elif key == "v1":
             sigs.append(value)
     return ts, sigs
-
 
 def verify(raw: bytes, header: str | None) -> bool:
     if not header:
@@ -378,7 +483,6 @@ def verify(raw: bytes, header: str | None) -> bool:
             if hmac.compare_digest(expected, sig.encode()):  # 常數時間比較
                 return True
     return False
-
 
 @app.post("/webhooks/demo")
 def receive():
@@ -419,11 +523,9 @@ import urllib.request
 
 URL = "http://127.0.0.1:5000/webhooks/demo"
 
-
 def sign(raw: bytes, ts: int, secret: bytes) -> str:
     sig = hmac.new(secret, str(ts).encode() + b"." + raw, hashlib.sha256).hexdigest()
     return f"t={ts},v1={sig}"
-
 
 def post(raw: bytes, header: str) -> None:
     req = urllib.request.Request(
@@ -435,7 +537,6 @@ def post(raw: bytes, header: str) -> None:
             print(resp.status, resp.read().decode())
     except urllib.error.HTTPError as e:
         print(e.code, "被拒絕")
-
 
 event = {"id": "evt_001", "type": "order.paid", "data": {"order_id": 42, "amount": 1990}}
 raw = json.dumps(event, separators=(",", ":")).encode()  # 送出去的就是這串 bytes

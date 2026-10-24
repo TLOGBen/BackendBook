@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>事件迴圈被卡住</title>
+<style>
+:root{
+  --bg:#ffffff; --panel:#f4f5f7; --chip:#ffffff;
+  --ink:#1f2937; --muted:#4b5563; --soft:#5f6673; --rule:#d1d5db;
+  --run:#2e5aa8; --run-tint:#e8eefa;
+  --queue:#9ca3af; --queue-tint:#eceef1;
+  --amber-fill:#fde68a; --amber-stroke:#b45309; --amber-ink:#111111;
+  --ok:#166534;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --panel:#272b35; --chip:#2b303b;
+    --ink:#e5e7eb; --muted:#b4bac6; --soft:#a3aab7; --rule:#3d4351;
+    --run:#86abe8; --run-tint:#25324a;
+    --queue:#7b8394; --queue-tint:#323744;
+    --amber-fill:#4a3512; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+    --ok:#86efac;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --panel:#272b35; --chip:#2b303b;
+  --ink:#e5e7eb; --muted:#b4bac6; --soft:#a3aab7; --rule:#3d4351;
+  --run:#86abe8; --run-tint:#25324a;
+  --queue:#7b8394; --queue-tint:#323744;
+  --amber-fill:#4a3512; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+  --ok:#86efac;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);}
+body{font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,sans-serif;font-size:13px;line-height:1.45;-webkit-text-size-adjust:100%;}
+.elb{box-sizing:border-box;margin:0 auto;max-width:960px;padding:8px 16px 12px;outline:none;}
+.elb *{box-sizing:border-box;}
+.elb:focus-visible{box-shadow:inset 0 0 0 2px var(--run);border-radius:8px;}
+.elb .mono{font-family:ui-monospace,"Cascadia Mono",Consolas,"SFMono-Regular",Menlo,"Noto Sans TC","Microsoft JhengHei",monospace;}
+.elb button{font:inherit;color:inherit;cursor:pointer;}
+
+/* top: mode switch */
+.elb-top{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+.elb-mode{display:flex;flex:1 1 auto;min-width:0;border:1px solid var(--rule);border-radius:8px;overflow:hidden;background:var(--panel);}
+.elb-mode button{flex:1 1 50%;min-height:36px;padding:6px 8px;border:0;background:transparent;font-size:13px;line-height:1.3;color:var(--muted);}
+.elb-mode button+button{border-left:1px solid var(--rule);}
+.elb-mode button[aria-checked="true"]{background:var(--bg);color:var(--ink);font-weight:700;box-shadow:inset 0 -3px 0 var(--amber-stroke);}
+.elb-theme{flex:0 0 auto;width:36px;height:36px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);font-size:16px;}
+.elb-theme[hidden]{display:none;}
+
+/* stage: queue → loop ⇄ logistics */
+.elb-stage{display:grid;grid-template-columns:minmax(0,1fr) 20px minmax(0,1.35fr) 20px minmax(0,1.15fr);align-items:stretch;gap:0;}
+.elb-arrow{display:flex;align-items:center;justify-content:center;color:var(--soft);font-size:14px;}
+.elb-box{min-width:0;min-height:132px;padding:8px 10px;border:1.5px solid var(--rule);border-radius:8px;background:var(--panel);}
+.elb-hd{font-size:13px;font-weight:700;}
+.elb-sub{font-size:12px;color:var(--soft);}
+.elb-q .elb-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+.elb-none{font-size:12px;color:var(--soft);margin-top:8px;}
+.elb-chip{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 8px;border:1.5px solid var(--muted);border-radius:6px;background:var(--chip);font-size:13px;font-weight:700;white-space:nowrap;}
+.elb-chip .k{font-weight:400;font-size:12px;color:var(--muted);}
+.elb-chip.queued{border-style:dashed;border-color:var(--queue);}
+.elb-loop{position:relative;}
+.elb-loop.blocked{border:2px solid var(--amber-stroke);background:var(--amber-fill);color:var(--amber-ink);}
+.elb-loop.blocked .elb-sub{color:var(--amber-ink);opacity:.85;}
+.elb-loop.busy{border-color:var(--run);background:var(--run-tint);}
+.elb-slot{display:flex;align-items:center;gap:8px;min-height:36px;margin-top:8px;}
+.elb-slot .elb-chip{background:var(--bg);}
+.elb-loop.blocked .elb-slot .elb-chip{border-color:var(--amber-stroke);color:var(--amber-ink);background:transparent;}
+.elb-loop.busy .elb-slot .elb-chip{border-color:var(--run);color:var(--run);}
+.elb-st{margin-top:6px;font-size:13px;line-height:1.4;}
+.elb-loop.blocked .elb-st{font-weight:700;}
+.elb-ext .elb-calls{margin-top:8px;display:flex;flex-direction:column;gap:8px;}
+.elb-call{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 8px;align-items:center;}
+.elb-call .who{font-size:13px;font-weight:700;}
+.elb-call .bar{height:8px;border-radius:4px;background:var(--bg);border:1px solid var(--rule);overflow:hidden;}
+.elb-call .bar i{display:block;height:100%;width:0;background:var(--muted);}
+.elb-call .tag{grid-column:1 / -1;font-size:12px;color:var(--soft);}
+.elb-call.block .bar i{background:var(--amber-stroke);}
+.elb-call.block .tag{color:var(--ink);}
+.elb-call.await .bar i{background:transparent;background-image:repeating-linear-gradient(90deg,var(--muted) 0 6px,transparent 6px 10px);}
+
+.elb-done{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-height:32px;margin-top:8px;font-size:12px;color:var(--soft);}
+.elb-done .elb-chip{height:26px;border-color:var(--ok);color:var(--ok);font-size:12px;}
+
+/* meters */
+.elb-meters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px;}
+.elb-m{padding:6px 10px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);min-width:0;}
+.elb-ml{font-size:12px;color:var(--soft);}
+.elb-mv{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.elb-mv.hot{color:var(--amber-stroke);}
+.elb-mn{font-size:12px;color:var(--soft);}
+
+/* gantt */
+.elb-gantt{display:grid;grid-template-columns:28px minmax(0,1fr) 84px;gap:0 8px;margin-top:14px;}
+.elb-gl,.elb-gw{display:flex;flex-direction:column;}
+.elb-gl div,.elb-gw div{height:28px;margin-bottom:6px;display:flex;align-items:center;font-size:13px;font-weight:700;}
+.elb-gw div{font-size:12px;font-weight:400;color:var(--soft);white-space:nowrap;}
+.elb-gw div.fin{color:var(--ink);font-weight:700;}
+.elb-gt{position:relative;}
+.elb-row{position:relative;height:28px;margin-bottom:6px;border-radius:4px;background:repeating-linear-gradient(90deg,transparent 0 calc(23.8% - 1px),var(--rule) calc(23.8% - 1px) 23.8%);}
+.elb-seg{position:absolute;top:4px;bottom:4px;min-width:3px;border-radius:3px;}
+.elb-seg.queue{background:var(--queue-tint);border:1.5px dashed var(--queue);}
+.elb-seg.block{background:var(--amber-fill);border:1.5px solid var(--amber-stroke);}
+.elb-seg.await{background:transparent;border:1.5px dashed var(--muted);}
+.elb-seg.run{background:var(--run);border:1.5px solid var(--run);}
+.elb-mask{position:absolute;top:0;bottom:0;right:0;background:var(--bg);opacity:.72;}
+.elb-axis{position:relative;height:18px;font-size:12px;color:var(--soft);}
+.elb-axis span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;}
+.elb-axis span:first-child{transform:none;}
+.elb-head{position:absolute;top:-4px;bottom:16px;width:2px;margin-left:-1px;background:var(--ink);pointer-events:none;}
+
+.elb-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:12px;color:var(--soft);}
+.elb-legend span{display:inline-flex;align-items:center;gap:6px;}
+.elb-sw{display:inline-block;width:16px;height:12px;border-radius:3px;}
+.elb-sw.queue{background:var(--queue-tint);border:1.5px dashed var(--queue);}
+.elb-sw.block{background:var(--amber-fill);border:1.5px solid var(--amber-stroke);}
+.elb-sw.await{border:1.5px dashed var(--muted);}
+.elb-sw.run{background:var(--run);}
+
+/* controls */
+.elb-ctrl{display:flex;align-items:center;gap:8px;margin-top:12px;}
+.elb-play{min-width:72px;height:36px;padding:0 12px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);font-size:13px;font-weight:700;}
+.elb-ctrl input{flex:1 1 auto;min-width:0;height:28px;margin:0;accent-color:var(--amber-stroke);}
+.elb-keys{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin-top:8px;}
+.elb-keys button{min-height:36px;padding:2px 2px;border:1px solid var(--rule);border-radius:6px;background:var(--panel);font-size:12px;line-height:1.25;color:var(--soft);}
+.elb-keys button b{display:block;font-size:12px;color:var(--ink);}
+.elb-keys button.on{border-color:var(--amber-stroke);color:var(--ink);box-shadow:inset 0 -3px 0 var(--amber-stroke);}
+.elb-cap{margin:10px 0 0;min-height:4.5em;font-size:14px;line-height:1.6;}
+.elb-cap b{display:inline-block;margin-right:6px;padding:0 6px;border-radius:4px;background:var(--amber-fill);color:var(--amber-ink);border:1px solid var(--amber-stroke);font-size:12px;}
+
+@media (max-width:560px){
+  .elb-stage{grid-template-columns:minmax(0,1fr);}
+  .elb-arrow{height:18px;transform:rotate(90deg);}
+  .elb-box{min-height:0;}
+  .elb-q{min-height:72px;}
+  .elb-loop{min-height:108px;}
+  .elb-ext{min-height:96px;}
+  .elb-gantt{grid-template-columns:20px minmax(0,1fr) 76px;gap:0 6px;}
+  .elb-mv{font-size:16px;}
+  .elb-meters{gap:6px;}
+  .elb-m{padding:6px 8px;}
+}
+</style>
+</head>
+<body>
+<figure class="elb" data-fig="event-loop-blocked" data-dur="4.2" data-rest="1" tabindex="0"
+  aria-label="動畫：一個 uvicorn 行程裡只有一條執行緒跑事件迴圈。請求 A 在 async def 裡呼叫 requests.get 等物流服務 2 秒，整段時間佔住執行緒；B、C 在 0.1 秒進來只能排隊。2 秒時換 B 卡住 2 秒，4 秒時才輪到只需要 10 毫秒的 C，C 一共等了 3.9 秒。可切換成 await httpx 對照：等待時讓出執行緒，C 馬上被處理。">
+  <div class="elb-top">
+    <div class="elb-mode" role="radiogroup" aria-label="寫法">
+      <button type="button" role="radio" aria-checked="true" data-mode="bad"><span class="mono">requests.get</span>（卡住）</button>
+      <button type="button" role="radio" aria-checked="false" data-mode="good"><span class="mono">await httpx</span>（讓出）</button>
+    </div>
+    <button type="button" class="elb-theme" aria-label="切換深淺色">◐</button>
+  </div>
+
+  <div class="elb-stage">
+    <section class="elb-box elb-q">
+      <div class="elb-hd">排隊等執行緒</div>
+      <div class="elb-list"></div>
+      <div class="elb-none">沒有人在排隊</div>
+    </section>
+    <div class="elb-arrow" aria-hidden="true">→</div>
+    <section class="elb-box elb-loop">
+      <div class="elb-hd">事件迴圈</div>
+      <div class="elb-sub">1 個 uvicorn 行程裡唯一的一條執行緒</div>
+      <div class="elb-slot"></div>
+      <div class="elb-st"></div>
+    </section>
+    <div class="elb-arrow" aria-hidden="true">⇄</div>
+    <section class="elb-box elb-ext">
+      <div class="elb-hd">物流服務</div>
+      <div class="elb-sub">今天變慢，每次 2 秒才回應</div>
+      <div class="elb-calls"></div>
+    </section>
+  </div>
+  <div class="elb-done"></div>
+
+  <div class="elb-meters">
+    <div class="elb-m"><div class="elb-ml">時鐘</div><div class="elb-mv elb-clock">0.00 秒</div></div>
+    <div class="elb-m"><div class="elb-ml">C（只要 10 毫秒）已經等了</div><div class="elb-mv elb-cw">—</div></div>
+    <div class="elb-m"><div class="elb-ml">CPU 使用率</div><div class="elb-mv">≈ 0%</div><div class="elb-mn">在等網路，不是在算</div></div>
+  </div>
+
+  <div class="elb-gantt" aria-hidden="true">
+    <div class="elb-gl"><div>A</div><div>B</div><div>C</div></div>
+    <div class="elb-gt">
+      <div class="elb-row" data-r="A"></div>
+      <div class="elb-row" data-r="B"></div>
+      <div class="elb-row" data-r="C"></div>
+      <div class="elb-axis"><span style="left:0">0</span><span style="left:23.81%">1</span><span style="left:47.62%">2</span><span style="left:71.43%">3</span><span style="left:95.24%">4 秒</span></div>
+      <div class="elb-head"></div>
+    </div>
+    <div class="elb-gw"><div data-w="A"></div><div data-w="B"></div><div data-w="C"></div></div>
+  </div>
+  <div class="elb-legend">
+    <span><i class="elb-sw queue"></i>排隊</span>
+    <span><i class="elb-sw block"></i>佔住執行緒等物流</span>
+    <span><i class="elb-sw await"></i>讓出執行緒等物流</span>
+    <span><i class="elb-sw run"></i>在執行緒上做事</span>
+  </div>
+
+  <div class="elb-ctrl">
+    <button type="button" class="elb-play" aria-label="播放">▶ 播放</button>
+    <input type="range" min="0" max="4200" step="10" value="1000" aria-label="時間軸（毫秒）">
+  </div>
+  <div class="elb-keys"></div>
+  <p class="elb-cap" aria-live="polite"></p>
+</figure>
+
+<script>
+(function(){
+  var fig = document.querySelector('.elb');
+  var $ = function(s){ return fig.querySelector(s); };
+  var DUR = 4.2, REST = 1, SPEED = 1/1.6; /* sim seconds per real second */
+  var NAMES = { A:'運費', B:'運費', C:'商品列表' };
+
+  /* model: every request as segments on one time axis (facts from the article) */
+  var M = {
+    bad: {
+      A:{ arrive:0,   segs:[[0,2,'block']],               done:2,    waited:'等了 2 秒' },
+      B:{ arrive:0.1, segs:[[0.1,2,'queue'],[2,4,'block']], done:4,    waited:'等了 3.9 秒' },
+      C:{ arrive:0.1, segs:[[0.1,4,'queue'],[4,4.01,'run']], done:4.01, waited:'等了 3.9 秒' },
+      calls:{ A:0, B:2 },
+      keys:[[0,'T1','0 秒'],[0.1,'T2','0.1 秒'],[2,'T3','2 秒'],[4,'T4','4 秒'],[4.01,'T5','4.01 秒']]
+    },
+    good: {
+      A:{ arrive:0,   segs:[[0,2,'await']],                done:2,    waited:'約 2 秒' },
+      B:{ arrive:0.1, segs:[[0.1,2.1,'await']],            done:2.1,  waited:'約 2 秒' },
+      C:{ arrive:0.1, segs:[[0.1,0.11,'run']],             done:0.11, waited:'10 毫秒' },
+      calls:{ A:0, B:0.1 },
+      keys:[[0,'0 秒','A 送出'],[0.1,'0.1 秒','B、C 進來'],[0.11,'0.11 秒','C 回應'],[2,'2 秒','A 回應'],[2.1,'2.1 秒','B 回應']]
+    }
+  };
+
+  function caption(mode, t){
+    if (mode === 'bad'){
+      if (t < 0.1)  return ['T1','A 進來，呼叫 requests.get 開始等物流服務。這行沒有 await，事件迴圈這條執行緒就跟著停在這裡。'];
+      if (t < 2)    return ['T2','B、C 在 0.1 秒進來，可是唯一的執行緒還卡在 A，沒空理它們。CPU 幾乎是 0%：執行緒只是在等網路。'];
+      if (t < 4)    return ['T3','A 等了 2 秒拿到運費、回應。輪到 B，它也呼叫 requests.get，執行緒換卡在 B。C 繼續排隊。'];
+      if (t < 4.01) return ['T4','B 回應，等了 3.9 秒。終於輪到 C，從記憶體回資料只花 10 毫秒。'];
+      return ['T5','C 回應：它自己只要 10 毫秒，卻排了 3.9 秒，因為前面兩個請求各佔住執行緒 2 秒。'];
+    }
+    if (t < 0.1)  return ['讓出','A 送出請求後遇到 await，把執行緒讓回事件迴圈，自己在旁邊等物流服務。'];
+    if (t < 2)    return ['讓出','B 一樣送出就讓出；C 進來馬上被處理，10 毫秒就回應。A、B 還在等物流服務，但執行緒空著，可以接別人。'];
+    if (t < 2.1)  return ['回來','A 的回應到了，事件迴圈回到 await 那一行繼續，A 回應（約 2 秒）。'];
+    return ['完成','B 也回應了。兩次 2 秒的等待疊在一起，沒有人被別人卡住。'];
+  }
+
+  var S = { mode:'bad', t:REST, playing:false, fresh:true, last:0, raf:0 };
+
+  var el = {
+    modeBtns: fig.querySelectorAll('.elb-mode button'), theme: $('.elb-theme'),
+    qList: $('.elb-q .elb-list'), qNone: $('.elb-q .elb-none'),
+    loop: $('.elb-loop'), slot: $('.elb-slot'), st: $('.elb-st'),
+    calls: $('.elb-calls'), done: $('.elb-done'),
+    clock: $('.elb-clock'), cw: $('.elb-cw'),
+    rows: {}, waits: {}, head: $('.elb-head'),
+    play: $('.elb-play'), range: $('.elb-ctrl input'), keys: $('.elb-keys'), cap: $('.elb-cap')
+  };
+  ['A','B','C'].forEach(function(k){
+    el.rows[k] = fig.querySelector('.elb-row[data-r="'+k+'"]');
+    el.waits[k] = fig.querySelector('.elb-gw [data-w="'+k+'"]');
+  });
+
+  function pct(x){ return (x / DUR * 100) + '%'; }
+  function chip(k, cls){
+    return '<span class="elb-chip'+(cls?' '+cls:'')+'">'+k+'<span class="k">'+NAMES[k]+'</span></span>';
+  }
+  function stateOf(r, t){
+    if (t < r.arrive) return null;
+    if (t >= r.done) return 'done';
+    for (var i=0;i<r.segs.length;i++){ var s=r.segs[i]; if (t>=s[0] && t<s[1]) return s[2]; }
+    return 'done';
+  }
+
+  /* gantt bars are built once per mode; the mask reveals them up to t */
+  var masks = {};
+  function buildGantt(){
+    var m = M[S.mode];
+    ['A','B','C'].forEach(function(k){
+      var h = '';
+      m[k].segs.forEach(function(s){
+        h += '<i class="elb-seg '+s[2]+'" style="left:'+pct(s[0])+';width:'+pct(s[1]-s[0])+'"></i>';
+      });
+      h += '<i class="elb-mask"></i>';
+      el.rows[k].innerHTML = h;
+      masks[k] = el.rows[k].querySelector('.elb-mask');
+    });
+    var kh = '';
+    m.keys.forEach(function(kk, i){
+      kh += '<button type="button" data-i="'+i+'"><b>'+kk[1]+'</b>'+kk[2]+'</button>';
+    });
+    el.keys.innerHTML = kh;
+  }
+
+  var lastSig = '';
+  function render(){
+    var t = S.t, m = M[S.mode];
+    var st = { A:stateOf(m.A,t), B:stateOf(m.B,t), C:stateOf(m.C,t) };
+
+    var sig = S.mode + '|' + st.A + st.B + st.C;
+    if (sig !== lastSig){
+      lastSig = sig;
+      /* queue */
+      var q = ['A','B','C'].filter(function(k){ return st[k]==='queue'; });
+      el.qList.innerHTML = q.map(function(k){ return chip(k,'queued'); }).join('');
+      el.qNone.style.display = q.length ? 'none' : '';
+      /* loop slot */
+      var inLoop = ['A','B','C'].filter(function(k){ return st[k]==='block' || st[k]==='run'; })[0];
+      el.loop.classList.toggle('blocked', !!inLoop && st[inLoop]==='block');
+      el.loop.classList.toggle('busy', !!inLoop && st[inLoop]==='run');
+      el.slot.innerHTML = inLoop ? chip(inLoop) : '<span class="elb-sub">（空著）</span>';
+      var awaiting = ['A','B','C'].filter(function(k){ return st[k]==='await'; });
+      var msg;
+      if (inLoop && st[inLoop]==='block') msg = '卡在 '+inLoop+' 的 requests.get，陪著等物流服務';
+      else if (inLoop) msg = '處理 '+inLoop+'：從記憶體回資料，10 毫秒';
+      else if (awaiting.length) msg = awaiting.join('、')+' 在 await，執行緒已讓出，可以接別的請求';
+      else msg = '空下來了';
+      el.st.textContent = msg;
+      /* done strip */
+      var d = ['A','B','C'].filter(function(k){ return st[k]==='done'; });
+      d.sort(function(a,b){ return m[a].done - m[b].done; });
+      el.done.innerHTML = d.length ? '已回應：' + d.map(function(k){ return chip(k) + ' ' + m[k].waited; }).join('　') : '';
+      /* waits column */
+      ['A','B','C'].forEach(function(k){
+        var w = el.waits[k];
+        if (st[k]==='done'){ w.textContent = m[k].waited; w.className = 'fin'; }
+        else if (st[k]){ w.textContent = '等待中…'; w.className = ''; }
+        else { w.textContent = ''; w.className = ''; }
+      });
+    }
+
+    /* logistics calls: progress bars */
+    var ch = '';
+    ['A','B'].forEach(function(k){
+      var s = st[k];
+      if (s==='block' || s==='await'){
+        var start = m.calls[k], p = Math.max(0, Math.min(1, (t - start) / 2));
+        ch += '<div class="elb-call '+s+'"><span class="who">'+k+' 的請求</span><span class="bar"><i style="width:'+(p*100).toFixed(1)+'%"></i></span>'
+            + '<span class="tag">'+(t-start).toFixed(1)+' / 2 秒・'+(s==='block'?'執行緒停在這裡陪等':'已讓出執行緒')+'</span></div>';
+      }
+    });
+    if (!ch) ch = '<div class="elb-none">沒有進行中的請求</div>';
+    el.calls.innerHTML = ch;
+
+    /* meters */
+    el.clock.textContent = t.toFixed(2) + ' 秒';
+    if (t < m.C.arrive){ el.cw.textContent = '還沒進來'; el.cw.classList.remove('hot'); }
+    else {
+      var cw = Math.min(t, m.C.done) - m.C.arrive;
+      el.cw.textContent = (t >= m.C.done && S.mode==='good') ? '10 毫秒' : cw.toFixed(2) + ' 秒';
+      el.cw.classList.toggle('hot', cw > 0.5);
+    }
+
+    /* gantt reveal + playhead */
+    ['A','B','C'].forEach(function(k){ masks[k].style.left = pct(Math.min(DUR, t)); });
+    el.head.style.left = pct(t);
+
+    /* controls */
+    el.range.value = String(Math.round(t*1000));
+    var on = -1;
+    m.keys.forEach(function(kk,i){ if (t >= kk[0] - 1e-9) on = i; });
+    var kb = el.keys.children;
+    for (var i=0;i<kb.length;i++) kb[i].classList.toggle('on', i===on);
+    var c = caption(S.mode, t);
+    var capHTML = '<b>'+c[0]+'</b>'+c[1];
+    if (el.cap.innerHTML !== capHTML) el.cap.innerHTML = capHTML;
+    el.play.textContent = S.playing ? '❚❚ 暫停' : '▶ 播放';
+    el.play.setAttribute('aria-label', S.playing ? '暫停' : '播放');
+  }
+
+  function seek(t){ S.t = Math.max(0, Math.min(DUR, t)); render(); }
+
+  function frame(now){
+    if (!S.playing) return;
+    var dt = (now - S.last) / 1000; S.last = now;
+    var t = S.t + Math.min(dt, 0.1) * SPEED;
+    if (t >= DUR){ t = DUR; S.playing = false; }
+    seek(t);
+    if (S.playing) S.raf = requestAnimationFrame(frame);
+  }
+  function play(){
+    if (S.fresh || S.t >= DUR - 1e-6) S.t = 0;
+    S.fresh = false; S.playing = true; S.last = performance.now();
+    cancelAnimationFrame(S.raf); S.raf = requestAnimationFrame(frame); render();
+  }
+  function pause(){ S.playing = false; cancelAnimationFrame(S.raf); render(); }
+
+  el.play.addEventListener('click', function(){ S.playing ? pause() : play(); });
+  el.range.addEventListener('input', function(){ S.fresh = false; pause(); seek(Number(el.range.value)/1000); });
+  el.keys.addEventListener('click', function(e){
+    var b = e.target.closest('button'); if (!b) return;
+    S.fresh = false; pause(); seek(M[S.mode].keys[Number(b.getAttribute('data-i'))][0]);
+  });
+  el.modeBtns.forEach(function(b){
+    b.addEventListener('click', function(){
+      S.mode = b.getAttribute('data-mode');
+      el.modeBtns.forEach(function(x){ x.setAttribute('aria-checked', String(x===b)); });
+      lastSig = ''; buildGantt(); render();
+    });
+  });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    if (e.key === ' ' || e.key === 'k'){ e.preventDefault(); S.playing ? pause() : play(); }
+    else if (e.key === 'ArrowRight'){ e.preventDefault(); S.fresh=false; pause(); seek(S.t + 0.1); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); S.fresh=false; pause(); seek(S.t - 0.1); }
+  });
+
+  /* theme switch: hidden when the host page (iframe parent) owns the theme */
+  var inFrame = false; try { inFrame = window.self !== window.top; } catch(e){ inFrame = true; }
+  if (inFrame) el.theme.hidden = true;
+  el.theme.addEventListener('click', function(){
+    var root = document.documentElement, cur = root.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+
+  /* pause when off screen; the loop only runs while playing */
+  if (window.IntersectionObserver){
+    new IntersectionObserver(function(es){
+      es.forEach(function(en){ if (!en.isIntersecting && S.playing) pause(); });
+    }).observe(fig);
+  }
+
+  /* no autoplay: every visitor (reduced motion or not) starts paused at data-rest (T2: A holds the thread, B and C queue) */
+  window.seek = function(t){ S.fresh = false; pause(); seek(t); };
+  window.setMode = function(m){ var b = fig.querySelector('.elb-mode [data-mode="'+m+'"]'); if (b) b.click(); };
+  buildGantt();
+  seek(REST);
+})();
+</script>
+</body>
+</html>

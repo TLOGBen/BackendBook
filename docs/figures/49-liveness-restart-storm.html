@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>liveness 重啟風暴</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280; --line:#c7ccd4;
+  --panel:#f8fafc; --panel2:#eef1f5;
+  --amber-fill:#fde68a; --amber-stroke:#b45309; --amber-ink:#111111;
+  --err:#b91c1c; --err-fill:#fee2e2; --err-ink:#7f1d1d;
+  --ok:#15803d; --ok-fill:#dcfce7; --ok-ink:#14532d;
+  --boot:#4338ca; --boot-fill:#e0e7ff; --boot-ink:#312e81;
+  --bar:#64748b;
+  --focus:#2563eb;
+  --sans:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,"PingFang TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e5e7eb; --muted:#b9bfca; --soft:#9aa2b0; --line:#454c5c;
+    --panel:#262a34; --panel2:#2f3440;
+    --amber-fill:#5b3c0c; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+    --err:#f87171; --err-fill:#451a1a; --err-ink:#fecaca;
+    --ok:#4ade80; --ok-fill:#14361f; --ok-ink:#bbf7d0;
+    --boot:#a5b4fc; --boot-fill:#25235a; --boot-ink:#e0e7ff;
+    --bar:#94a3b8;
+    --focus:#7aa2f7; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e5e7eb; --muted:#b9bfca; --soft:#9aa2b0; --line:#454c5c;
+  --panel:#262a34; --panel2:#2f3440;
+  --amber-fill:#5b3c0c; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+  --err:#f87171; --err-fill:#451a1a; --err-ink:#fecaca;
+  --ok:#4ade80; --ok-fill:#14361f; --ok-ink:#bbf7d0;
+  --boot:#a5b4fc; --boot-fill:#25235a; --boot-ink:#e0e7ff;
+  --bar:#94a3b8;
+  --focus:#7aa2f7; color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans)}
+.fig{margin:0;padding:8px 16px 12px;box-sizing:border-box;width:100%;outline:none}
+.fig:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;border-radius:6px}
+.fig .stage{width:100%;margin:0 auto;max-width:960px}
+.fig .stage.narrow{max-width:480px}
+.fig svg{display:block;width:100%;height:auto;font-family:var(--sans)}
+.fig .cap{display:flex;gap:8px;align-items:baseline;min-height:3.2em;margin:10px auto 6px;font-size:15px;line-height:1.6;max-width:960px}
+.fig .cap .step{flex:none;font-weight:700;color:var(--amber-stroke);white-space:nowrap}
+.fig .ctrl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:960px;margin:0 auto}
+.fig .ctrl.top{margin-bottom:8px}
+.fig button{font:inherit;font-size:14px;min-height:36px;min-width:36px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.fig button:hover{border-color:var(--muted)}
+.fig button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.fig button.play{font-weight:700;min-width:88px}
+.fig button.on{background:var(--amber-fill);border-color:var(--amber-stroke);color:var(--amber-ink);font-weight:700}
+.fig .seg{display:inline-flex;gap:0}
+.fig .seg button{border-radius:0}
+.fig .seg button:first-child{border-radius:8px 0 0 8px}
+.fig .seg button:last-child{border-radius:0 8px 8px 0;border-left:none}
+.fig input[type=range]{flex:1 1 160px;min-width:0;height:36px;margin:0;accent-color:var(--amber-stroke)}
+.fig .theme{margin-left:auto}
+.fig .legend{display:flex;flex-wrap:wrap;gap:6px 14px;max-width:960px;margin:10px auto 0;font-size:13px;color:var(--muted)}
+.fig .legend span{display:inline-flex;align-items:center;gap:6px}
+.fig .legend i{display:inline-block;width:14px;height:14px;border-radius:3px;border:1.5px solid}
+.lg-ok{background:var(--ok-fill);border-color:var(--ok)!important}
+.lg-out{background:var(--panel2);border-color:var(--soft)!important;border-style:dashed!important}
+.lg-rst{background:var(--amber-fill);border-color:var(--amber-stroke)!important}
+.lg-boot{background:var(--boot-fill);border-color:var(--boot)!important}
+.lg-crash{background:var(--err-fill);border-color:var(--err)!important}
+/* svg parts */
+.box{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.box.hot{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5}
+.box.fail{fill:var(--err-fill);stroke:var(--err);stroke-width:2}
+.box.good{fill:var(--ok-fill);stroke:var(--ok);stroke-width:2}
+.t{fill:var(--ink)}
+.t.b{font-weight:700}
+.t.m{fill:var(--muted)}
+.t.mono{font-family:var(--mono)}
+.t.on-hot{fill:var(--amber-ink)}
+.t.on-fail{fill:var(--err-ink);font-weight:700}
+.t.on-good{fill:var(--ok-ink);font-weight:700}
+.wire{stroke:var(--soft);stroke-width:1.5;fill:none}
+.ah{fill:var(--soft)}
+.mask{fill:var(--bg)}
+.pulse{fill:none;stroke-width:3}
+.pulse.bad{stroke:var(--err)}
+.pulse.okp{stroke:var(--ok)}
+.pod rect{stroke-width:1.5}
+.pod.ok rect{fill:var(--ok-fill);stroke:var(--ok)}
+.pod.ok text{fill:var(--ok-ink)}
+.pod.out rect{fill:var(--panel2);stroke:var(--soft);stroke-dasharray:4 3}
+.pod.out text{fill:var(--muted)}
+.pod.rst rect{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5}
+.pod.rst text{fill:var(--amber-ink);font-weight:700}
+.pod.boot rect{fill:var(--boot-fill);stroke:var(--boot)}
+.pod.boot text{fill:var(--boot-ink)}
+.pod.crash rect{fill:var(--err-fill);stroke:var(--err);stroke-width:2}
+.pod.crash text{fill:var(--err-ink);font-weight:700}
+.track{fill:var(--panel2);stroke:var(--line);stroke-width:1}
+.segA{fill:var(--bar)}
+.segA.hot{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2}
+.segB{fill:var(--err)}
+.limit{stroke:var(--err);stroke-width:2.5}
+.fatal{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5}
+.tile{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.tile.hot{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5}
+.tile.good{fill:var(--ok-fill);stroke:var(--ok);stroke-width:2}
+.tv{fill:var(--ink);font-weight:700}
+.tv.on-hot{fill:var(--amber-ink)}
+.tv.on-good{fill:var(--ok-ink)}
+@media (prefers-reduced-motion: reduce){ .fig *{transition:none!important} }
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="liveness-restart-storm" data-dur="18" data-rest="12" tabindex="0"
+  aria-label="互動時間軸：PostgreSQL 主從切換時，liveness 和 readiness 共用會檢查資料庫的 /health，30 個 Pod 被同時重啟、冷開機一口氣開 300 條連線、超過 max_connections 400，原本約 40 秒的中斷拖成 26 分鐘；切到修之後，拆成 /livez 和 /readyz，同一次切換只有約 40 秒錯誤、沒有 Pod 被重啟。">
+  <div class="ctrl top">
+    <div class="seg" role="group" aria-label="對照">
+      <button type="button" class="m-before on" aria-pressed="true">修之前：共用 /health</button>
+      <button type="button" class="m-after" aria-pressed="false">修之後：/livez＋/readyz</button>
+    </div>
+    <button type="button" class="theme" aria-label="切換深淺色">深／淺</button>
+  </div>
+  <div class="stage"></div>
+  <div class="cap" aria-live="polite"><span class="step"></span><span class="txt"></span></div>
+  <div class="ctrl">
+    <button type="button" class="prev" aria-label="上一個時間點">◀</button>
+    <button type="button" class="play" aria-label="播放">▶ 播放</button>
+    <button type="button" class="next" aria-label="下一個時間點">▶</button>
+    <input type="range" class="scrub" min="0" max="18" step="0.05" value="12" aria-label="時間軸">
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span><i class="lg-ok"></i>接請求</span>
+    <span><i class="lg-out"></i>移出 endpoint（不重啟）</span>
+    <span><i class="lg-rst"></i>被 kubelet 重啟</span>
+    <span><i class="lg-boot"></i>冷開機中</span>
+    <span><i class="lg-crash"></i>CrashLoopBackOff（退避等待）</span>
+  </div>
+</figure>
+<script>
+(function(){
+  'use strict';
+  var fig = document.querySelector('.fig');
+  var stage = fig.querySelector('.stage');
+  var capStep = fig.querySelector('.cap .step');
+  var capTxt = fig.querySelector('.cap .txt');
+  var range = fig.querySelector('.scrub');
+  var playBtn = fig.querySelector('.play');
+  var btnB = fig.querySelector('.m-before');
+  var btnA = fig.querySelector('.m-after');
+  var DUR = 18, REST = 12;
+  var KT = [0, 2, 4, 6, 8, 10, 13, 16];
+  var LABEL = ['切換前', '21:03:00', '21:03:10', '21:03:20', '21:03:30', '21:03:40', '之後幾分鐘', '21:29'];
+  var CAP = {
+    before: [
+      '平常：30 個 Pod 都在接請求，每個連線池開 10 條，共 300 條，離 max_connections 400 還有空間。liveness 和 readiness 都打同一個 /health。',
+      'DBA 開始主從切換。SELECT 1 失敗，/health 回 500：readiness 全失敗，30 個 Pod 全被移出 endpoint，Service 沒有 Pod 可轉送。',
+      'liveness 第 1 次失敗（1/3）。Pod 還沒重啟，也不接請求。',
+      'liveness 第 2 次失敗（2/3）。資料庫還在切換中。',
+      'liveness 連續失敗 3 次（10 秒 × 3）：kubelet 同時重啟 30 個 Pod。可是重啟修不好資料庫。',
+      '資料庫切換完成，但 30 個 Pod 同時冷開機，每個開 10 條，一口氣 300 條新連線，加上其他服務也在重連，超過 400：FATAL: sorry, too many clients already。',
+      '開機中的 Pod 拿不到連線，/health 又失敗、又被殺，進入 CrashLoopBackOff，指數退避把等待拉長到好幾分鐘。庫存服務也被重試打爆、回應超過 1 秒，連資料庫早就正常的 Pod 也被判失敗。',
+      'Pod 才陸續穩定下來。原本預計約 40 秒的中斷，使用者看到下單連續失敗 26 分鐘（503）。'
+    ],
+    after: [
+      '修之後：liveness 打 /livez（只回 200、不碰任何外部資源），readiness 打 /readyz（只查 PostgreSQL），再加 startupProbe 給冷開機 60 秒緩衝。',
+      '同一次主從切換。/readyz 的 SELECT 1 失敗，30 個 Pod 被移出 endpoint；/livez 照樣回 200，liveness 不會失敗。',
+      'liveness 照樣通過（0/3）。Pod 只是先不接請求，沒有被重啟。',
+      'liveness 依然 0/3，資料庫還在切換中。',
+      '修之前，這一刻 30 個 Pod 會被同時重啟；現在 RESTARTS 還是 0。',
+      '資料庫切換完成，/readyz 回 200，Pod 加回 endpoint。沒有冷開機，就不會一口氣多出 300 條新連線。',
+      '沒有任何 Pod 被重啟，也沒有 CrashLoopBackOff。Redis 和庫存服務改成只回報降級，不會把 Pod 判死。',
+      '使用者只看到大約 40 秒的錯誤；修之前，同一件事拖了 26 分鐘。'
+    ]
+  };
+  var POD_TXT = {ok:'接請求', out:'移出', rst:'重啟', boot:'開機中', crash:'退避'};
+
+  // ---------- geometry ----------
+  var GEO = {
+    wide: {
+      W:960, H:416, fs:16, fsB:18, fsV:24, fsMono:16,
+      pb: {
+        lp:[0,4,176,36], rp:[0,52,176,36], ep:[224,28,128,40],
+        chips:[[400,28,112,40,'SELECT 1'],[528,28,80,40,'PING'],[624,28,192,40,'庫存服務 /health']],
+        res:[848,28,112,40],
+        wires:'M176 22 H200 V48 M176 70 H200 V48 H216 M352 48 H400 M512 48 H528 M608 48 H624 M816 48 H840',
+        arrows:[[224,48],[848,48]]
+      },
+      pa: {
+        lp:[0,4,176,36], rp:[0,52,176,36],
+        ep1:[224,4,208,36,'/livez：只回 200'], ep2:[224,52,128,36,'/readyz'],
+        chip:[400,52,112,36,'SELECT 1'],
+        res1:[848,4,112,36], res2:[848,52,112,36],
+        note1:[480,22,'不碰資料庫、Redis、別的服務'], note2:[528,70,'Redis、庫存服務只回報降級'],
+        wires:'M176 22 H216 M432 22 H840 M176 70 H216 M352 70 H392 M512 70 H840',
+        masks:[[472,10,232,24],[520,58,216,24]],
+        arrows:[[224,22],[848,22],[224,70],[400,70],[848,70]]
+      },
+      grid:{x:0,y:148,cw:80,ch:44,gap:8,hx:0,hy:132},
+      db:[568,120,392,64],
+      g:{x:568,y:228,w:392,h:28,ty:216,vy:282},
+      fatal:[568,292,392,36],
+      tiles:[[568,344,124,64],[702,344,124,64],[836,344,124,64]]
+    },
+    narrow: {
+      W:360, H:676, fs:15, fsB:16, fsV:22, fsMono:15,
+      pb: {
+        lp:[0,0,172,36], rp:[188,0,172,36], ep:[104,56,152,40],
+        chips:[[0,112,104,36,'SELECT 1'],[116,112,72,36,'PING'],[200,112,160,36,'庫存服務 /health']],
+        res:[272,56,88,40],
+        wires:'M86 36 V46 H180 V48 M274 36 V46 H180 M256 76 H264 M180 96 V104 M52 104 H280 M52 104 V112 M152 104 V112 M280 104 V112',
+        arrows:[[180,56,'d'],[272,76]]
+      },
+      pa: {
+        lp:[0,0,136,36], rp:[0,52,136,52],
+        ep1:[152,0,136,36,'/livez 只回 200'], ep2:[152,52,136,52,'/readyz'],
+        chip:null, ep2sub:'只查 SELECT 1',
+        res1:[304,0,56,36], res2:[304,60,56,36],
+        note1:null, note2:[0,136,'不碰外部；Redis、庫存服務只回報降級'],
+        wires:'M136 18 H144 M288 18 H296 M136 78 H144 M288 78 H296',
+        masks:[],
+        arrows:[[152,18],[304,18],[152,78],[304,78]]
+      },
+      grid:{x:4,y:196,cw:52,ch:36,gap:8,hx:0,hy:180},
+      db:[0,424,360,56],
+      g:{x:0,y:516,w:360,h:24,ty:504,vy:562},
+      fatal:[0,572,360,32],
+      tiles:[[0,616,112,60],[124,616,112,60],[248,616,112,60]]
+    }
+  };
+
+  var NS = 'http://www.w3.org/2000/svg';
+  var E = {}, layoutName = '', G = null, mode = 'before', curT = REST;
+
+  function el(tag, attrs, parent, text){
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function boxT(parent, r, label, cls, fs, bold){
+    var g = el('g', {}, parent);
+    var rect = el('rect', {x:r[0], y:r[1], width:r[2], height:r[3], rx:6, 'class':'box ' + (cls||'')}, g);
+    var t = el('text', {x:r[0] + r[2]/2, y:r[1] + r[3]/2 + fs*0.36, 'text-anchor':'middle', 'font-size':fs, 'class':'t' + (bold?' b':'')}, g, label);
+    return {g:g, rect:rect, text:t};
+  }
+  function arrow(parent, x, y, dir){
+    var d = dir === 'd' ? 'M' + x + ' ' + y + ' l-5 -8 h10 z' : 'M' + x + ' ' + y + ' l-8 -5 v10 z';
+    el('path', {d:d, 'class':'ah'}, parent);
+  }
+
+  function build(name){
+    layoutName = name; G = GEO[name];
+    stage.className = 'stage' + (name === 'narrow' ? ' narrow' : '');
+    stage.textContent = '';
+    var svg = el('svg', {viewBox:'0 0 ' + G.W + ' ' + G.H, role:'img', 'aria-labelledby':'lrs-title lrs-desc'}, stage);
+    el('title', {id:'lrs-title'}, svg, 'liveness 共用 /health 造成的重啟風暴');
+    el('desc', {id:'lrs-desc'}, svg, '上方是探針打的端點與檢查項，左邊（窄螢幕在中間）是 30 個 Pod 的狀態，右邊是 PostgreSQL、連線數量表（上限 400）與三個讀數。');
+    var fs = G.fs;
+    E = {};
+
+    // probe strip: before
+    var pb = G.pb, gB = el('g', {}, svg); E.gB = gB;
+    el('path', {d:pb.wires, 'class':'wire'}, gB);
+    pb.arrows.forEach(function(a){ arrow(gB, a[0], a[1], a[2]); });
+    E.bLp = boxT(gB, pb.lp, 'livenessProbe', '', fs, true);
+    E.bRp = boxT(gB, pb.rp, 'readinessProbe', '', fs, true);
+    E.bEp = boxT(gB, pb.ep, '/health', 'hot', fs, true);
+    E.bEp.text.setAttribute('class', 't b on-hot');
+    E.bChips = pb.chips.map(function(c){ return boxT(gB, c, c[4], '', fs, false); });
+    E.bRes = boxT(gB, pb.res, '回 200', 'good', fs, true);
+    E.bPl = el('rect', {x:pb.lp[0]-3, y:pb.lp[1]-3, width:pb.lp[2]+6, height:pb.lp[3]+6, rx:8, 'class':'pulse bad', opacity:0}, gB);
+    E.bPr = el('rect', {x:pb.rp[0]-3, y:pb.rp[1]-3, width:pb.rp[2]+6, height:pb.rp[3]+6, rx:8, 'class':'pulse bad', opacity:0}, gB);
+
+    // probe strip: after
+    var pa = G.pa, gA = el('g', {}, svg); E.gA = gA;
+    el('path', {d:pa.wires, 'class':'wire'}, gA);
+    pa.masks.forEach(function(m){ el('rect', {x:m[0], y:m[1], width:m[2], height:m[3], 'class':'mask'}, gA); });
+    pa.arrows.forEach(function(a){ arrow(gA, a[0], a[1]); });
+    E.aLp = boxT(gA, pa.lp, 'livenessProbe', '', fs, true);
+    E.aRp = boxT(gA, pa.rp, 'readinessProbe', '', fs, true);
+    E.aEp1 = boxT(gA, pa.ep1, pa.ep1[4], '', fs, true);
+    E.aEp2 = boxT(gA, pa.ep2, pa.ep2[4], '', fs, true);
+    if (pa.ep2sub){
+      E.aEp2.text.setAttribute('y', pa.ep2[1] + 22);
+      el('text', {x:pa.ep2[0] + pa.ep2[2]/2, y:pa.ep2[1] + 42, 'text-anchor':'middle', 'font-size':fs, 'class':'t m'}, gA, pa.ep2sub);
+    }
+    E.aChip = pa.chip ? boxT(gA, pa.chip, pa.chip[4], '', fs, false) : null;
+    E.aRes1 = boxT(gA, pa.res1, '200', 'good', fs, true);
+    E.aRes2 = boxT(gA, pa.res2, '200', 'good', fs, true);
+    if (pa.note1) el('text', {x:pa.note1[0], y:pa.note1[1] + fs*0.36, 'font-size':fs, 'class':'t m'}, gA, pa.note1[2]);
+    if (pa.note2) el('text', {x:pa.note2[0], y:pa.note2[1] + fs*0.36, 'font-size':fs, 'class':'t m'}, gA, pa.note2[2]);
+    E.aPl = el('rect', {x:pa.lp[0]-3, y:pa.lp[1]-3, width:pa.lp[2]+6, height:pa.lp[3]+6, rx:8, 'class':'pulse okp', opacity:0}, gA);
+    E.aPr = el('rect', {x:pa.rp[0]-3, y:pa.rp[1]-3, width:pa.rp[2]+6, height:pa.rp[3]+6, rx:8, 'class':'pulse bad', opacity:0}, gA);
+
+    // pod grid
+    var gr = G.grid;
+    E.gridHead = el('text', {x:gr.hx, y:gr.hy, 'font-size':fs, 'class':'t b'}, svg);
+    E.pods = [];
+    for (var i = 0; i < 30; i++){
+      var c = i % 6, r = Math.floor(i / 6);
+      var x = gr.x + c * (gr.cw + gr.gap), y = gr.y + r * (gr.ch + gr.gap);
+      var g = el('g', {'class':'pod ok'}, svg);
+      el('rect', {x:x, y:y, width:gr.cw, height:gr.ch, rx:6}, g);
+      var tx = el('text', {x:x + gr.cw/2, y:y + gr.ch/2 + fs*0.36, 'text-anchor':'middle', 'font-size':fs}, g, POD_TXT.ok);
+      E.pods.push({g:g, t:tx, s:'ok'});
+    }
+
+    // database
+    var db = G.db;
+    E.db = el('rect', {x:db[0], y:db[1], width:db[2], height:db[3], rx:8, 'class':'box'}, svg);
+    el('text', {x:db[0] + 16, y:db[1] + (layoutName === 'wide' ? 26 : 22), 'font-size':G.fsB, 'class':'t b'}, svg, 'PostgreSQL');
+    E.dbT = el('text', {x:db[0] + 16, y:db[1] + db[3] - 14, 'font-size':fs, 'class':'t'}, svg);
+
+    // gauge
+    var gg = G.g;
+    el('text', {x:gg.x, y:gg.ty, 'font-size':fs, 'class':'t b'}, svg, '連線數');
+    el('text', {x:gg.x + gg.w, y:gg.ty, 'font-size':fs, 'text-anchor':'end', 'class':'t m mono'}, svg, 'max_connections 400');
+    el('rect', {x:gg.x, y:gg.y, width:gg.w, height:gg.h, rx:4, 'class':'track'}, svg);
+    E.segA = el('rect', {x:gg.x, y:gg.y + 1, width:0, height:gg.h - 2, rx:3, 'class':'segA'}, svg);
+    E.segB = el('rect', {x:gg.x, y:gg.y + 1, width:0, height:gg.h - 2, 'class':'segB'}, svg);
+    var lx = gg.x + gg.w * 0.8;
+    el('line', {x1:lx, x2:lx, y1:gg.y - 6, y2:gg.y + gg.h + 6, 'class':'limit'}, svg);
+    E.gT = el('text', {x:gg.x, y:gg.vy, 'font-size':fs, 'class':'t'}, svg);
+
+    // fatal
+    var f = G.fatal;
+    E.fatal = el('g', {opacity:0}, svg);
+    el('rect', {x:f[0], y:f[1], width:f[2], height:f[3], rx:6, 'class':'fatal'}, E.fatal);
+    el('text', {x:f[0] + f[2]/2, y:f[1] + f[3]/2 + G.fsMono*0.36, 'text-anchor':'middle', 'font-size':G.fsMono, 'class':'t mono b on-hot'}, E.fatal, 'FATAL: sorry, too many clients already');
+
+    // tiles
+    var TL = ['liveness 失敗', 'RESTARTS', '錯誤持續'];
+    E.tiles = G.tiles.map(function(r, k){
+      var g = el('g', {}, svg);
+      var rect = el('rect', {x:r[0], y:r[1], width:r[2], height:r[3], rx:8, 'class':'tile'}, g);
+      var lab = el('text', {x:r[0] + r[2]/2, y:r[1] + 22, 'text-anchor':'middle', 'font-size':fs, 'class':'t m'}, g, TL[k]);
+      var v = el('text', {x:r[0] + r[2]/2, y:r[1] + r[3] - 12, 'text-anchor':'middle', 'font-size':G.fsV, 'class':'tv'}, g, '0');
+      return {rect:rect, lab:lab, v:v};
+    });
+  }
+
+  // ---------- model: everything is a pure function of (mode, t) ----------
+  function keyAt(t){ var k = 0; for (var i = 0; i < KT.length; i++) if (t >= KT[i] - 1e-6) k = i; return k; }
+  function ease(u){ u = Math.max(0, Math.min(1, u)); return 1 - Math.pow(1 - u, 3); }
+  function stag(i){ return (i % 6) * 0.05 + Math.floor(i / 6) * 0.04; }
+
+  function podState(i, k, u){
+    if (mode === 'before'){
+      if (k === 0) return 'ok';
+      if (k === 1) return u < stag(i) ? 'ok' : 'out';
+      if (k === 2 || k === 3) return 'out';
+      if (k === 4) return 'rst';
+      if (k === 5) return u < 0.25 ? 'rst' : 'boot';
+      if (k === 6){
+        var s = (i * 7 + Math.floor(u * 1.6) * 3) % 5;
+        return ['crash', 'boot', 'crash', 'rst', 'boot'][s];
+      }
+      return u < i * 0.03 ? 'boot' : 'ok';
+    }
+    if (k === 0) return 'ok';
+    if (k >= 1 && k <= 4) return (k === 1 && u < stag(i)) ? 'ok' : 'out';
+    if (k === 5) return u < stag(i) ? 'out' : 'ok';
+    return 'ok';
+  }
+
+  function gauge(k, u, t){
+    // returns {v, hot, text}
+    var before = mode === 'before';
+    if (k === 0) return {v:300, hot:false, text:'平常 300 條（30 × 10）'};
+    if (k >= 1 && k <= 4){
+      var v = k === 1 ? 300 * (1 - ease(u / 0.6)) : 0;
+      return {v:v, hot:false, text: before ? '切換中，連不上' : '切換中，連不上（Pod 沒重啟，等它回來）'};
+    }
+    if (!before){
+      return {v:300 * ease(u / 0.8), hot:false, text:'連線池重新連上；沒有冷開機'};
+    }
+    if (k === 5){
+      var a = 300 * ease(u / 0.8);
+      var b = u > 0.8 ? 300 + 160 * ease((u - 0.8) / 0.6) : a;
+      return {v:b, hot:true, text:'300 條冷開機＋其他服務重連 → 超過 400'};
+    }
+    if (k === 6){
+      var w = 380 + 70 * Math.sin(u * 2.4) * Math.cos(u * 0.9);
+      var from = 460 + (w - 460) * ease(u / 0.6);
+      return {v:from, hot:false, text:'連線數隨 Pod 起起落落'};
+    }
+    var w7 = 380 + 70 * Math.sin(3 * 2.4) * Math.cos(3 * 0.9);
+    return {v:w7 + (300 - w7) * ease(u / 0.8), hot:false, text:'恢復正常'};
+  }
+
+  function setCls(n, c){ if (n.getAttribute('class') !== c) n.setAttribute('class', c); }
+  function setTxt(n, s){ if (n.textContent !== s) n.textContent = s; }
+  function boxState(b, st){ // st: '', hot, fail, good
+    setCls(b.rect, 'box' + (st ? ' ' + st : ''));
+    var base = b.text.getAttribute('class').indexOf(' b') >= 0 ? 't b' : 't';
+    setCls(b.text, base + (st === 'hot' ? ' on-hot' : st === 'fail' ? ' on-fail' : st === 'good' ? ' on-good' : ''));
+  }
+  function pulse(n, u){ var o = u >= 0 && u < 0.9 ? (1 - u / 0.9) : 0; n.setAttribute('opacity', o.toFixed(3)); }
+
+  function render(t){
+    curT = t;
+    var k = keyAt(t), u = t - KT[k], before = mode === 'before';
+    range.value = t.toFixed(2);
+    setTxt(capStep, LABEL[k]);
+    setTxt(capTxt, CAP[mode][k]);
+
+    E.gB.setAttribute('display', before ? 'inline' : 'none');
+    E.gA.setAttribute('display', before ? 'none' : 'inline');
+
+    var dbDown = k >= 1 && k <= 4;
+    if (before){
+      var fail = k >= 1 && k <= 6;
+      boxState(E.bRes, fail ? 'fail' : 'good'); setTxt(E.bRes.text, fail ? '回 500' : '回 200');
+      boxState(E.bChips[0], fail ? 'fail' : '');
+      boxState(E.bChips[1], '');
+      boxState(E.bChips[2], k === 6 ? 'hot' : '');
+      pulse(E.bPr, k === 1 ? u : -1);
+      pulse(E.bPl, (k >= 2 && k <= 4) || k === 6 ? (k === 6 ? (u % 1.2) : u) : -1);
+      setCls(E.bPl, 'pulse bad');
+    } else {
+      boxState(E.aRes1, 'good'); setTxt(E.aRes1.text, '200');
+      boxState(E.aRes2, dbDown ? 'fail' : 'good'); setTxt(E.aRes2.text, dbDown ? '503' : '200');
+      if (E.aChip) boxState(E.aChip, dbDown ? 'fail' : '');
+      boxState(E.aEp2, dbDown ? 'fail' : '');
+      pulse(E.aPr, k === 1 ? u : -1);
+      pulse(E.aPl, k >= 2 && k <= 4 ? u : -1);
+    }
+
+    // pods
+    var okN = 0;
+    for (var i = 0; i < 30; i++){
+      var s = podState(i, k, u), p = E.pods[i];
+      if (s === 'ok') okN++;
+      if (p.s !== s){ p.s = s; setCls(p.g, 'pod ' + s); setTxt(p.t, POD_TXT[s]); }
+    }
+    setTxt(E.gridHead, '30 個 Pod　Service 的 endpoint：' + okN + ' 個');
+
+    // database
+    var dbTxt, dbCls = 'box';
+    if (k === 0) dbTxt = '正常';
+    else if (dbDown){ dbTxt = '主從切換中，連不上'; dbCls = 'box hot'; }
+    else if (before && k === 5){ dbTxt = '切換完成，但連線數爆了'; dbCls = 'box hot'; }
+    else if (before && k === 6) dbTxt = '已正常（但 Pod 還在起起落落）';
+    else dbTxt = k === 5 ? '切換完成' : '正常';
+    setCls(E.db, dbCls); setTxt(E.dbT, dbTxt);
+    setCls(E.dbT, dbCls === 'box hot' ? 't on-hot' : 't');
+
+    // gauge
+    var gg = G.g, gv = gauge(k, u, t), px = gg.w / 500;
+    var vA = Math.min(gv.v, 300), vB = Math.max(0, Math.min(gv.v, 500) - 300);
+    E.segA.setAttribute('width', (vA * px).toFixed(1));
+    E.segB.setAttribute('x', (gg.x + 300 * px).toFixed(1));
+    E.segB.setAttribute('width', (vB * px).toFixed(1));
+    setCls(E.segA, gv.hot ? 'segA hot' : 'segA');
+    setTxt(E.gT, gv.text);
+    setCls(E.gT, gv.hot ? 't b' : 't');
+    E.fatal.setAttribute('opacity', before && k === 5 ? ease((u - 1.0) / 0.4).toFixed(3) : '0');
+
+    // tiles
+    var lv, rs, er, lvHot = false, rsHot = false, erCls = '';
+    if (before){
+      lv = ['0 / 3', '0 / 3', '1 / 3', '2 / 3', '3 / 3', '0 / 3', '又到 3', '0 / 3'][k];
+      lvHot = k === 4 || k === 6;
+      rs = k < 4 ? '0' : k < 6 ? '30' : '30+ ↑';
+      rsHot = k === 4 || k === 6;
+      if (k === 0) er = '—';
+      else if (k <= 4) er = Math.floor((t - 2) * 5) + ' 秒';
+      else if (k === 5) er = '40 秒+';
+      else if (k === 6) er = '好幾分鐘';
+      else { er = '26 分鐘'; erCls = 'hot'; }
+    } else {
+      lv = '0 / 3'; rs = '0';
+      if (k === 0) er = '—';
+      else if (k <= 4) er = Math.floor((t - 2) * 5) + ' 秒';
+      else { er = '約 40 秒'; erCls = 'good'; }
+    }
+    var T = E.tiles;
+    setTxt(T[0].v, lv); setTxt(T[1].v, rs); setTxt(T[2].v, er);
+    setCls(T[0].rect, lvHot ? 'tile hot' : 'tile'); setCls(T[0].v, lvHot ? 'tv on-hot' : 'tv');
+    setCls(T[1].rect, rsHot ? 'tile hot' : 'tile'); setCls(T[1].v, rsHot ? 'tv on-hot' : 'tv');
+    setCls(T[2].rect, erCls ? 'tile ' + erCls : 'tile'); setCls(T[2].v, erCls ? 'tv on-' + erCls : 'tv');
+  }
+
+  // ---------- controller ----------
+  var playing = false, visible = false, raf = 0, last = 0;
+  function setPlaying(on){
+    playing = on;
+    playBtn.textContent = on ? '❚❚ 暫停' : '▶ 播放';
+    playBtn.setAttribute('aria-label', on ? '暫停' : '播放');
+    arm();
+  }
+  function arm(){ if (playing && visible && !raf){ last = 0; raf = requestAnimationFrame(tick); } }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0; last = now;
+    var t = Math.min(DUR, curT + dt);
+    render(t);
+    if (t >= DUR){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function play(){ if (curT >= DUR - 0.01) render(0); setPlaying(true); }
+  function seek(t){ t = Math.max(0, Math.min(DUR, +t || 0)); setPlaying(false); render(t); }
+  // 每個時間點停在「動畫已落定」的那一格
+  function settled(i){ return KT[i] + 1.6; }
+  function stepTo(dir){
+    var i;
+    if (dir > 0){ for (i = 0; i < KT.length; i++) if (settled(i) > curT + 0.01) return seek(settled(i)); }
+    else { for (i = KT.length - 1; i >= 0; i--) if (settled(i) < curT - 0.01) return seek(settled(i)); seek(0); }
+  }
+  function setMode(m){
+    mode = m;
+    btnB.classList.toggle('on', m === 'before'); btnB.setAttribute('aria-pressed', m === 'before');
+    btnA.classList.toggle('on', m === 'after'); btnA.setAttribute('aria-pressed', m === 'after');
+    E.pods.forEach(function(p){ p.s = ''; });
+    render(curT);
+  }
+  btnB.addEventListener('click', function(){ setMode('before'); });
+  btnA.addEventListener('click', function(){ setMode('after'); });
+  playBtn.addEventListener('click', function(){ playing ? setPlaying(false) : play(); });
+  fig.querySelector('.prev').addEventListener('click', function(){ stepTo(-1); });
+  fig.querySelector('.next').addEventListener('click', function(){ stepTo(1); });
+  range.addEventListener('input', function(){ seek(range.value); });
+  fig.querySelector('.theme').addEventListener('click', function(){
+    var root = document.documentElement;
+    var cur = root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    if (e.key === 'ArrowRight'){ stepTo(1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft'){ stepTo(-1); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter'){ playing ? setPlaying(false) : play(); e.preventDefault(); }
+    else if (e.key === 'Home'){ seek(0); e.preventDefault(); }
+    else if (e.key === 'End'){ seek(DUR); e.preventDefault(); }
+    else if (e.key === 'm' || e.key === 'M'){ setMode(mode === 'before' ? 'after' : 'before'); e.preventDefault(); }
+  });
+
+  // ---------- layout + visibility（不自動播放：停在 21:03:40） ----------
+  function pick(w){ return w >= 720 ? 'wide' : 'narrow'; }
+  build(pick((fig.clientWidth || window.innerWidth) - 32));
+  render(REST);
+  if ('ResizeObserver' in window){
+    new ResizeObserver(function(entries){
+      var n = pick(entries[0].contentRect.width);
+      if (n !== layoutName){ build(n); render(curT); }
+    }).observe(fig);
+  }
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; arm(); }, {rootMargin:'120px'}).observe(fig);
+  } else { visible = true; }
+
+  // 高度跟著內容走，變大變小都要：外層讀 max(documentElement.scrollHeight, body.scrollHeight)，
+  // documentElement.scrollHeight 永遠不小於 iframe 目前的高度，所以內容變矮時，
+  // 在下一格把網站的 iframe（只碰 .draw-fig__frame）縮回 body 的實際高度。
+  var shrinkRaf = 0;
+  function shrinkHost(){
+    shrinkRaf = 0;
+    try {
+      var fe = window.frameElement;
+      if (!fe || !fe.classList || !fe.classList.contains('draw-fig__frame')) return;
+      var h = Math.ceil(document.body.scrollHeight);
+      if (h > 0 && Math.abs(fe.offsetHeight - h) > 1) fe.style.height = h + 'px';
+    } catch (e) {}
+  }
+  if ('ResizeObserver' in window && window.parent !== window){
+    new ResizeObserver(function(){ if (!shrinkRaf) shrinkRaf = requestAnimationFrame(shrinkHost); }).observe(document.body);
+  }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.setMode = setMode;
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:KT.slice()}; };
+})();
+</script>
+</body>
+</html>

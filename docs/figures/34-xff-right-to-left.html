@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X-Forwarded-For 從右往左讀</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280;
+  --rule:#d1d5db; --rule-strong:#9ca3af; --cell:#f8fafc;
+  --hot-fill:#fde68a; --hot-line:#b45309; --hot-ink:#111111;
+  --bad:#b91c1c; --bad-tint:rgba(185,28,28,.07);
+  --btn:#f3f4f6; --btn-hover:#e5e7eb; --focus:#b45309;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e5e7eb; --muted:#c0c6d1; --soft:#a3aab6;
+    --rule:#3b4150; --rule-strong:#5b6274; --cell:#262a34;
+    --hot-fill:#6b4a12; --hot-line:#fbbf24; --hot-ink:#fde68a;
+    --bad:#f87171; --bad-tint:rgba(248,113,113,.10);
+    --btn:#2b303b; --btn-hover:#363c49; --focus:#fbbf24;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e5e7eb; --muted:#c0c6d1; --soft:#a3aab6;
+  --rule:#3b4150; --rule-strong:#5b6274; --cell:#262a34;
+  --hot-fill:#6b4a12; --hot-line:#fbbf24; --hot-ink:#fde68a;
+  --bad:#f87171; --bad-tint:rgba(248,113,113,.10);
+  --btn:#2b303b; --btn-hover:#363c49; --focus:#fbbf24;
+  color-scheme:dark;
+}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:12px 16px;
+  -webkit-text-size-adjust:100%;
+}
+.fig{margin:0;max-width:760px;margin-inline:auto;outline:none}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--focus);border-radius:8px}
+.mono{font-family:ui-monospace,"Cascadia Mono","Consolas","Menlo","Noto Sans TC",monospace}
+
+/* 站點列 */
+.hops{display:flex;align-items:stretch;gap:0;position:relative}
+.hop{flex:1 1 0;min-width:0;text-align:center;border:1.5px solid var(--rule);border-radius:8px;
+  padding:8px 4px;background:var(--cell);display:flex;flex-direction:column;justify-content:center;gap:2px}
+.hop b{font-size:14px;font-weight:600;line-height:1.3;word-break:keep-all}
+.hop small{font-size:12px;color:var(--soft);line-height:1.3}
+.hop.hot{background:var(--hot-fill);border-color:var(--hot-line);color:var(--hot-ink)}
+.hop.hot small{color:var(--hot-ink)}
+.arr{flex:0 0 20px;display:flex;align-items:center;justify-content:center;color:var(--rule-strong)}
+.arr svg{width:16px;height:12px}
+.track{position:relative;height:24px;margin-top:4px}
+.track .line{position:absolute;top:11px;height:0;border-top:1.5px dashed var(--rule)}
+.packet{position:absolute;top:4px;left:0;height:16px;padding:0 6px;border-radius:8px;
+  background:var(--hot-fill);border:1.5px solid var(--hot-line);color:var(--hot-ink);
+  font-size:12px;line-height:14px;white-space:nowrap;will-change:transform}
+
+/* 標頭 */
+.hdr{position:relative;margin-top:8px;border:1.5px solid var(--rule);border-radius:8px;padding:8px 12px 4px}
+.hdr-label{font-size:12px;color:var(--soft);margin-bottom:6px}
+.cells{display:flex;justify-content:center;align-items:flex-start;gap:0}
+.col{flex:0 1 auto;min-width:88px;display:flex;flex-direction:column;align-items:center;will-change:transform,opacity}
+.col.c1{min-width:120px}
+.comma{flex:0 0 auto;width:12px;text-align:center;font-size:14px;line-height:36px;color:var(--soft)}
+.cell{border:1.5px solid var(--rule-strong);border-radius:6px;padding:0 8px;height:36px;
+  display:flex;align-items:center;font-size:13px;background:var(--bg);white-space:nowrap}
+.col.c0 .cell{border-style:dashed;border-color:var(--bad);background:var(--bad-tint)}
+.cell.hot{background:var(--hot-fill);border-color:var(--hot-line);border-style:solid;color:var(--hot-ink);font-weight:600}
+.col.c0 .cell.wrong{border-style:solid;border-width:2px}
+.tag{margin-top:4px;font-size:12px;line-height:1.35;text-align:center;color:var(--muted);word-break:keep-all}
+.tag strong{display:block;font-weight:600;color:var(--ink)}
+.col.c0 .tag strong{color:var(--bad)}
+.col.dim{opacity:.5}
+.bracket{position:relative;height:28px;margin-top:2px}
+.bracket .b{position:absolute;top:0;height:10px;border:1.5px solid var(--muted);border-top:none;border-radius:0 0 6px 6px}
+.bracket .bt{position:absolute;top:10px;font-size:12px;line-height:16px;color:var(--ink);white-space:nowrap;font-weight:600}
+
+/* 讀取指標 */
+.ptrs{position:relative;height:56px}
+.ptrs.bad{height:52px}
+.ptr-arrow{position:absolute;top:0;width:0;height:0;margin-left:-7px;
+  border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:10px solid var(--hot-line)}
+.ptrs.bad .ptr-arrow{border-bottom-color:var(--bad)}
+.ptr-label{position:absolute;top:12px;width:12em;font-size:12px;line-height:1.4;text-align:center;
+  border-radius:6px;padding:3px 4px;box-sizing:border-box}
+.ptrs.good .ptr-label{background:var(--hot-fill);border:1.5px solid var(--hot-line);color:var(--hot-ink)}
+.ptrs.bad .ptr-label{border:1.5px solid var(--bad);color:var(--bad);background:var(--bad-tint)}
+.ptrs.bad .ptr-label.quiet{border-color:transparent;background:none;color:var(--soft)}
+.ptr-label code{font-size:12px}
+
+/* readout 與控制 */
+.readout{margin-top:6px;min-height:4.5em;font-size:14px;line-height:1.5;color:var(--ink)}
+.readout .n{display:inline-block;min-width:3.2em;color:var(--soft);font-size:12px}
+.ctrl{display:flex;align-items:center;gap:6px;margin-top:6px}
+.ctrl button{flex:0 0 auto;height:36px;min-width:36px;padding:0 8px;border-radius:8px;border:1.5px solid var(--rule);
+  background:var(--btn);color:var(--ink);font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:4px}
+.ctrl button:hover{background:var(--btn-hover)}
+.ctrl button:focus-visible,.ctrl input:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.ctrl svg{width:14px;height:14px;fill:currentColor}
+.ctrl input[type=range]{flex:1 1 auto;min-width:60px;accent-color:var(--hot-line);height:36px;margin:0}
+.ctrl .theme{margin-left:2px}
+
+@media (max-width:520px){
+  .hop small{display:none}
+  .hop b{font-size:13px}
+  .hdr{padding:8px 4px 4px}
+  .cells{justify-content:space-between}
+  .col{min-width:0;flex:1 1 0}
+  .col.c1{flex:1.35 1 0;min-width:0}
+  .cell{padding:0 5px;font-size:12px}
+  .comma{width:8px}
+  .readout{font-size:13px;min-height:6em}
+  .ctrl .lbl{display:none}
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="xff" data-dur="12" data-rest="9.6" tabindex="0"
+  aria-label="動畫：使用者偽造的 X-Forwarded-For 經過雲端 LB 與 Nginx，每一層在最右邊附加一個 IP；取真實 IP 的程式從最右邊往左讀，跳過可信代理 10.0.0.5，停在真實使用者 198.51.100.23；最左邊偽造的 6.6.6.6 輪不到被讀。">
+
+  <div class="hops" id="hops">
+    <div class="hop" data-h="0"><b>使用者</b><small class="mono">198.51.100.23</small></div>
+    <div class="arr" aria-hidden="true"><svg viewBox="0 0 16 12"><path d="M0 6h13M9 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></div>
+    <div class="hop" data-h="1"><b>雲端 LB</b><small class="mono">10.0.0.5</small></div>
+    <div class="arr" aria-hidden="true"><svg viewBox="0 0 16 12"><path d="M0 6h13M9 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></div>
+    <div class="hop" data-h="2"><b>Nginx</b><small>反向代理</small></div>
+    <div class="arr" aria-hidden="true"><svg viewBox="0 0 16 12"><path d="M0 6h13M9 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></div>
+    <div class="hop" data-h="3"><b>取真實 IP 的程式</b><small>應用程式</small></div>
+  </div>
+  <div class="track" id="track" aria-hidden="true"><div class="line" id="tline"></div><div class="packet" id="packet">標頭</div></div>
+
+  <div class="hdr" id="hdr">
+    <div class="hdr-label mono">X-Forwarded-For</div>
+    <div class="cells" id="cells">
+      <div class="col c0" data-c="0"><div class="cell mono">6.6.6.6</div><div class="tag"><strong>不能信</strong>使用者<wbr>自己寫的</div></div>
+      <span class="comma mono" data-k="1">,</span>
+      <div class="col c1" data-c="1"><div class="cell mono">198.51.100.23</div><div class="tag"><strong>可信</strong>LB 寫的</div></div>
+      <span class="comma mono" data-k="2">,</span>
+      <div class="col c2" data-c="2"><div class="cell mono">10.0.0.5</div><div class="tag"><strong>可信</strong>Nginx 寫的</div></div>
+    </div>
+    <div class="bracket" id="bracket" aria-hidden="true"><div class="b" id="bline"></div><div class="bt" id="btext">只有右邊這段可信</div></div>
+    <div class="ptrs good" id="pgood" aria-hidden="true"><div class="ptr-arrow" id="pga"></div><div class="ptr-label" id="pgl"></div></div>
+    <div class="ptrs bad" id="pbad" aria-hidden="true"><div class="ptr-arrow" id="pba"></div><div class="ptr-label" id="pbl"></div></div>
+  </div>
+
+  <div class="readout" id="readout" aria-live="polite"></div>
+
+  <div class="ctrl">
+    <button type="button" id="bprev" aria-label="上一步"><svg viewBox="0 0 14 14"><path d="M9.5 2 4 7l5.5 5z"/></svg><span class="lbl">上一步</span></button>
+    <button type="button" id="bplay" aria-label="播放"><svg viewBox="0 0 14 14" id="iplay"><path d="M3 1.5v11L12 7z"/></svg><span class="lbl" id="lplay">播放</span></button>
+    <button type="button" id="bnext" aria-label="下一步"><span class="lbl">下一步</span><svg viewBox="0 0 14 14"><path d="M4.5 2 10 7l-5.5 5z"/></svg></button>
+    <input type="range" id="scrub" min="0" max="12" step="0.01" value="9.6" aria-label="時間軸">
+    <button type="button" class="theme" id="btheme" aria-label="切換深淺色"><svg viewBox="0 0 14 14"><path d="M7 1a6 6 0 1 0 0 12A6 6 0 0 0 7 1zm0 1.5v9a4.5 4.5 0 0 1 0-9z"/></svg></button>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var fig = document.querySelector('.fig');
+  var DUR = parseFloat(fig.dataset.dur), REST = parseFloat(fig.dataset.rest);
+  var STEP_START = [0, 2, 4, 6, 8, 10];
+  var STEP_REST  = [1.0, 3.6, 5.9, 7.6, 9.6, 11.6];
+  var TEXT = [
+    '使用者 198.51.100.23 自己帶一個假的標頭 <span class="mono">6.6.6.6</span> 送出。這一格是使用者自己寫的，不能信。',
+    '雲端 LB 在最右邊附加它看到的 TCP 對方：198.51.100.23。這一格是 LB 寫的，可信。',
+    'Nginx 在最右邊附加它看到的 TCP 對方，也就是 LB 10.0.0.5。每經過一層代理，就在最右邊附加一個。',
+    '取真實 IP 的程式從最右邊開始看：10.0.0.5 是可信代理，跳過，往左一格。',
+    '198.51.100.23 不是可信代理，停在這裡，這就是真實使用者。最左邊的 6.6.6.6 根本輪不到被讀，偽造也就沒有用。',
+    '對照錯誤做法：<span class="mono">xff.split(",")[0]</span> 取最左邊，拿到的是使用者亂填的 6.6.6.6。'
+  ];
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  var $ = function(id){ return document.getElementById(id); };
+  var hops = [].slice.call(document.querySelectorAll('.hop'));
+  var cols = [].slice.call(document.querySelectorAll('.col'));
+  var commas = [].slice.call(document.querySelectorAll('.comma'));
+  var cellsEl = cols.map(function(c){ return c.querySelector('.cell'); });
+  var packet = $('packet'), tline = $('tline');
+  var bline = $('bline'), btext = $('btext'), bracket = $('bracket');
+  var pga = $('pga'), pgl = $('pgl'), pba = $('pba'), pbl = $('pbl');
+  var readout = $('readout'), scrub = $('scrub');
+  var geo = null;
+
+  function clamp(v, a, b){ return v < a ? a : v > b ? b : v; }
+  function ease(x){ x = clamp(x, 0, 1); return x * x * (3 - 2 * x); }
+  function seg(t, a, b){ return ease((t - a) / (b - a)); }
+  function lerp(a, b, k){ return a + (b - a) * k; }
+
+  // 版面只在 resize / fonts.ready 讀一次
+  function measure(){
+    var hb = $('hops').getBoundingClientRect();
+    var hc = $('hdr').getBoundingClientRect();
+    geo = {
+      hop: hops.map(function(h){ var r = h.getBoundingClientRect(); return r.left - hb.left + r.width / 2; }),
+      col: cols.map(function(c){ var r = c.querySelector('.cell').getBoundingClientRect(); return { cx: r.left - hc.left + r.width / 2, l: r.left - hc.left, r: r.right - hc.left }; }),
+      hdrW: hc.width,
+      pw: packet.offsetWidth,
+      lw: pgl.offsetWidth || 144
+    };
+  }
+
+  function stepOf(t){ var s = 0; for (var i = 0; i < STEP_START.length; i++) if (t >= STEP_START[i]) s = i; return s; }
+
+  var lastStep = -1;
+  function render(tIn){
+    if (!geo) measure();
+    var t = tIn;
+    if (reduce.matches) t = STEP_REST[stepOf(tIn)];   // 減少動態：每一步直接跳到定格，不補間
+    var s = stepOf(t);
+
+    // 站點高亮
+    var activeHop = s <= 2 ? s : 3;
+    hops.forEach(function(h, i){ h.classList.toggle('hot', i === activeHop && s < 5); });
+
+    // 封包沿站點移動
+    var hx = geo.hop, px;
+    if (t < 2) px = hx[0];
+    else if (t < 4) px = lerp(hx[0], hx[1], seg(t, 2, 2.8));
+    else if (t < 6) px = lerp(hx[1], hx[2], seg(t, 4, 4.8));
+    else px = lerp(hx[2], hx[3], seg(t, 6, 6.8));
+    packet.style.transform = 'translateX(' + (px - geo.pw / 2).toFixed(1) + 'px)';
+    packet.style.opacity = s >= 5 ? '0.35' : '1';
+    tline.style.left = hx[0] + 'px'; tline.style.width = (hx[3] - hx[0]) + 'px';
+
+    // 標頭格依序出現（在最右邊附加）
+    var appear = [seg(t, 0.1, 0.7), seg(t, 2.8, 3.4), seg(t, 4.8, 5.4)];
+    var dim = [s === 4, false, s >= 4 && t >= 8.6];
+    cols.forEach(function(c, i){
+      var k = appear[i];
+      c.style.opacity = (k * (dim[i] ? 0.5 : 1)).toFixed(3);
+      c.style.transform = 'translateX(' + ((1 - k) * 18).toFixed(1) + 'px)';
+    });
+    commas[0].style.opacity = appear[1].toFixed(3);
+    commas[1].style.opacity = appear[2].toFixed(3);
+
+    // 剛附加的那格亮琥珀；停住時答案那格亮琥珀
+    cellsEl[0].classList.toggle('hot', s === 0);
+    cellsEl[1].classList.toggle('hot', s === 1 || (s >= 4 && t >= 8.8));
+    cellsEl[2].classList.toggle('hot', s === 2);
+    cellsEl[0].classList.toggle('wrong', s === 5);
+
+    // 可信段括號
+    var c1 = geo.col[1], c2 = geo.col[2];
+    bline.style.left = c1.l + 'px'; bline.style.width = (c2.r - c1.l) + 'px';
+    var bw = btext.offsetWidth || 96;
+    btext.style.left = clamp((c1.l + c2.r) / 2 - bw / 2, 0, geo.hdrW - bw - 8) + 'px';
+    bracket.style.opacity = seg(t, 5.4, 5.9).toFixed(3);
+
+    // 正確讀法：從最右邊往左
+    var gk = seg(t, 6.8, 7.2), gx;
+    if (t < 8) gx = geo.col[2].cx; else gx = lerp(geo.col[2].cx, geo.col[1].cx, seg(t, 8, 8.8));
+    pga.style.left = gx + 'px';
+    var lw = geo.lw;
+    pgl.style.left = clamp(gx - lw / 2, 0, geo.hdrW - lw - 8) + 'px';
+    var good = $('pgood'); good.style.opacity = gk.toFixed(3);
+    var gtext = (t < 8.8) ? '<strong>是可信代理</strong><br>跳過，往左一格 ←'
+                          : '<strong>不是可信代理</strong><br>停！這就是真實使用者';
+    if (pgl._h !== gtext) { pgl.innerHTML = gtext; pgl._h = gtext; }
+
+    // 錯誤讀法：取最左邊（第 6 步）；第 5 步只標「輪不到被讀」
+    var bad = $('pbad'), bx = geo.col[0].cx, btxt;
+    pba.style.left = bx + 'px';
+    pbl.style.left = clamp(bx - lw / 2, 0, geo.hdrW - lw - 8) + 'px';
+    if (s === 5) {
+      bad.style.opacity = seg(t, 10, 10.6).toFixed(3);
+      pba.style.visibility = 'visible';
+      pbl.classList.remove('quiet');
+      btxt = '<code class="mono">xff.split(",")[0]</code><br>✗ 取最左邊：被騙了';
+    } else if (s === 4) {
+      bad.style.opacity = seg(t, 8.8, 9.2).toFixed(3);
+      pba.style.visibility = 'hidden';
+      pbl.classList.add('quiet');
+      btxt = '最左邊的 6.6.6.6<br>根本輪不到被讀';
+    } else {
+      bad.style.opacity = '0';
+      pba.style.visibility = 'hidden';
+      pbl.classList.add('quiet');
+      btxt = '';
+    }
+    if (pbl._h !== btxt) { pbl.innerHTML = btxt; pbl._h = btxt; }
+
+    // readout
+    if (s !== lastStep) {
+      readout.innerHTML = '<span class="n">第 ' + (s + 1) + ' / 6 步</span>' + TEXT[s];
+      lastStep = s;
+    }
+    scrub.value = tIn.toFixed(2);
+  }
+
+  // 時鐘：只在播放中且在畫面內才跑 rAF
+  var t = REST, playing = false, visible = true, raf = 0, last = 0;
+  function setPlaying(p){
+    playing = p;
+    $('bplay').setAttribute('aria-label', p ? '暫停' : '播放');
+    $('lplay').textContent = p ? '暫停' : '播放';
+    $('iplay').innerHTML = p ? '<path d="M3 1.5h3v11H3zM8 1.5h3v11H8z"/>' : '<path d="M3 1.5v11L12 7z"/>';
+    arm();
+  }
+  function arm(){
+    if (playing && visible && !raf) { last = 0; raf = requestAnimationFrame(tick); }
+  }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    if (last) t += Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (t >= DUR) { t = DUR; render(t); setPlaying(false); return; }
+    render(t);
+    raf = requestAnimationFrame(tick);
+  }
+  function seek(x){
+    t = clamp(+x || 0, 0, DUR);
+    if (playing) setPlaying(false);
+    render(t);
+  }
+  window.seek = seek;
+  window.DUR = DUR;
+  window.timeline = function(){ return { dur: DUR, rest: REST, steps: STEP_REST.slice() }; };
+
+  function next(){ for (var i = 0; i < STEP_REST.length; i++) if (STEP_REST[i] > t + 0.01) return seek(STEP_REST[i]); seek(STEP_REST[STEP_REST.length - 1]); }
+  function prev(){ for (var i = STEP_REST.length - 1; i >= 0; i--) if (STEP_REST[i] < t - 0.01) return seek(STEP_REST[i]); seek(STEP_REST[0]); }
+  function toggle(){
+    if (playing) { setPlaying(false); return; }
+    if (t >= DUR - 0.05) t = 0;
+    setPlaying(true);
+  }
+
+  $('bplay').addEventListener('click', toggle);
+  $('bnext').addEventListener('click', next);
+  $('bprev').addEventListener('click', prev);
+  scrub.addEventListener('input', function(){ seek(scrub.value); });
+  fig.addEventListener('keydown', function(e){
+    var tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'BUTTON') return;
+    if (e.key === 'ArrowRight') { next(); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { prev(); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter') { toggle(); e.preventDefault(); }
+  });
+  $('btheme').addEventListener('click', function(){
+    var root = document.documentElement;
+    var cur = root.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+
+  // 重新量測：尺寸、字型、主題
+  var pending = false;
+  function remeasure(){
+    if (pending) return; pending = true;
+    requestAnimationFrame(function(){ pending = false; geo = null; measure(); render(t); });
+  }
+  if ('ResizeObserver' in window) new ResizeObserver(remeasure).observe(fig);
+  else window.addEventListener('resize', remeasure);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(remeasure);
+  new MutationObserver(function(){ render(t); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  reduce.addEventListener && reduce.addEventListener('change', function(){ render(t); });
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; arm(); }, { rootMargin: '120px' }).observe(fig);
+  }
+
+  // 不自動播放：停在最能說明重點的那一格
+  render(t);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OFFSET 匯出越翻越慢</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --paper-2: #f3f4f6;
+  --ink: #2d3142;
+  --muted: #4f5d75;
+  --soft: #5a6580;
+  --rule: rgba(45,49,66,0.14);
+  --rule-solid: #c4c7cf;
+  --strip: #e3e6eb;
+  --strip-dim: #eef0f3;
+  --want: #2e5aa8;
+  --want-ink: #ffffff;
+  --hot-fill: #fde68a;
+  --hot-stroke: #b45309;
+  --hot-hatch: rgba(180,83,9,0.28);
+  --hot-ink: #111111;
+  --hot-text: #92400e;
+  --ok: #2f6b4f;
+  --focus: #2e5aa8;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e2129;
+    --paper-2: #282c37;
+    --ink: #e8e9ee;
+    --muted: #bfc3cc;
+    --soft: #a3abbd;
+    --rule: rgba(232,233,238,0.14);
+    --rule-solid: rgba(191,195,204,0.35);
+    --strip: #363b48;
+    --strip-dim: #2b2f3b;
+    --want: #7fa8e6;
+    --want-ink: #111111;
+    --hot-fill: #6b4210;
+    --hot-stroke: #f59e0b;
+    --hot-hatch: rgba(251,191,36,0.30);
+    --hot-ink: #fde68a;
+    --hot-text: #fbbf24;
+    --ok: #7cc4a0;
+    --focus: #7fa8e6;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e2129;
+  --paper-2: #282c37;
+  --ink: #e8e9ee;
+  --muted: #bfc3cc;
+  --soft: #a3abbd;
+  --rule: rgba(232,233,238,0.14);
+  --rule-solid: rgba(191,195,204,0.35);
+  --strip: #363b48;
+  --strip-dim: #2b2f3b;
+  --want: #7fa8e6;
+  --want-ink: #111111;
+  --hot-fill: #6b4210;
+  --hot-stroke: #f59e0b;
+  --hot-hatch: rgba(251,191,36,0.30);
+  --hot-ink: #fde68a;
+  --hot-text: #fbbf24;
+  --ok: #7cc4a0;
+  --focus: #7fa8e6;
+  color-scheme: dark;
+}
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+.fig { margin: 0; padding: 12px 16px 16px; max-width: 980px; box-sizing: border-box; outline: none; }
+.fig:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); border-radius: 8px; }
+.fig * { box-sizing: border-box; }
+.fig code, .fig .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, "Noto Sans TC", monospace; font-size: 12.5px; }
+
+/* top bar */
+.fig .top { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.fig .modes { display: inline-flex; border: 1px solid var(--rule-solid); border-radius: 8px; overflow: hidden; }
+.fig .modes button { min-height: 36px; padding: 6px 12px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13.5px; cursor: pointer; }
+.fig .modes button + button { border-left: 1px solid var(--rule-solid); }
+.fig .modes button[aria-pressed="true"] { background: var(--ink); color: var(--bg); font-weight: 600; }
+.fig button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.fig .theme { min-height: 32px; min-width: 32px; padding: 4px 10px; border: 1px solid var(--rule-solid); border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+
+/* three causes */
+.fig .causes { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.fig .causes li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--rule-solid); background: var(--paper-2); font-size: 13px; }
+.fig .badge { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 12px; font-weight: 700; background: var(--want); color: var(--want-ink); flex: none; }
+.fig[data-mode="offset"] .badge { background: var(--hot-stroke); color: var(--bg); }
+
+/* strips */
+.fig .row { margin-top: 16px; }
+.fig .lab { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 14px; font-weight: 600; }
+.fig .lab .val { font-weight: 600; font-size: 13.5px; }
+.fig .lab .val.hot { color: var(--hot-text); }
+.fig .lab .val.good { color: var(--ok); }
+.fig .lab .t { display: inline-flex; gap: 6px; align-items: center; }
+.fig .bar { position: relative; height: 32px; margin-top: 6px; border-radius: 6px; background: var(--strip); overflow: hidden; }
+.fig .bar.b { height: 44px; }
+.fig .seg { position: absolute; top: 0; bottom: 0; left: 0; width: 0; }
+.fig .scan { background: var(--hot-fill); border-right: 2px solid var(--hot-stroke); }
+.fig .scan.done { border-right-color: transparent; }
+.fig .sept { position: absolute; top: 0; bottom: 0; right: 0; width: 7.5%; border: 2px dashed var(--muted); border-radius: 0 6px 6px 0; }
+.fig .sliver { background: var(--want); min-width: 4px; }
+.fig .discard { background: repeating-linear-gradient(135deg, var(--hot-fill) 0 7px, var(--hot-hatch) 7px 10px); border-right: 2px solid var(--hot-stroke); }
+.fig .done-dim { background: var(--strip-dim); border-right: 2px solid var(--want); }
+.fig .want { background: var(--want); min-width: 5px; }
+.fig .note { margin-top: 6px; font-size: 13px; color: var(--soft); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.fig .note.right { justify-content: flex-end; }
+.fig .note.hot { color: var(--hot-text); }
+.fig .ticks { position: relative; height: 20px; margin-top: 4px; font-size: 12px; color: var(--soft); }
+.fig .ticks span { position: absolute; top: 0; white-space: nowrap; }
+.fig .pin { position: absolute; top: -2px; bottom: -2px; width: 0; }
+.fig .pinwrap { position: relative; height: 24px; margin-top: 6px; }
+.fig .pinlab { position: absolute; bottom: 0; transform: translateX(-50%); white-space: nowrap; font-size: 12.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--want); color: var(--want-ink); }
+.fig .legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.fig .legend li { display: inline-flex; gap: 6px; align-items: center; }
+.fig .sw { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+.fig .sw.d { background: repeating-linear-gradient(135deg, var(--hot-fill) 0 4px, var(--hot-hatch) 4px 6px); border: 1px solid var(--hot-stroke); }
+.fig .sw.w { background: var(--want); }
+.fig .sw.r { background: var(--strip); border: 1px solid var(--rule-solid); }
+.fig .sw.p { background: var(--strip-dim); border: 1px solid var(--rule-solid); }
+.fig .legend b { color: var(--ink); font-weight: 600; }
+
+/* cards */
+.fig .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+.fig .card { border: 1px solid var(--rule-solid); border-radius: 8px; padding: 8px 12px; background: var(--paper-2); min-height: 92px; }
+.fig .card.hot { border: 2px solid var(--hot-stroke); background: var(--hot-fill); color: var(--hot-ink); }
+.fig .card .k { font-size: 12.5px; color: var(--soft); }
+.fig .card.hot .k { color: var(--hot-ink); opacity: .85; }
+.fig .card .v { font-size: 20px; font-weight: 700; line-height: 1.3; margin-top: 2px; }
+.fig .card .s { font-size: 12.5px; margin-top: 2px; }
+@media (max-width: 720px) { .fig .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .fig .card .v { font-size: 18px; } }
+
+/* caption + timeline */
+.fig .cap { margin-top: 12px; min-height: 48px; font-size: 14px; border-left: 3px solid var(--hot-stroke); padding: 2px 0 2px 10px; }
+.fig[data-mode="keyset"] .cap { border-left-color: var(--want); }
+.fig .cap b { font-weight: 700; }
+.fig .tl { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.fig .tl button.ctl { min-width: 40px; min-height: 36px; border: 1px solid var(--rule-solid); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; flex: none; }
+.fig .tl button.play { min-width: 64px; font-weight: 600; }
+.fig .tl input[type=range] { flex: 1; min-width: 0; height: 36px; accent-color: var(--ink); margin: 0; }
+.fig .chips { position: relative; height: 32px; margin-top: 4px; }
+.fig .chips button { position: absolute; top: 0; transform: translateX(-50%); min-height: 32px; padding: 2px 6px; border: 0; background: transparent; color: var(--soft); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; border-radius: 6px; }
+.fig .chips button[aria-current="step"] { color: var(--ink); font-weight: 700; background: var(--paper-2); }
+.fig .chips button .tm { display: none; }
+@media (min-width: 560px) { .fig .chips button .tm { display: inline; } }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="offset-export-slowdown" data-dur="14" data-rest="10" data-mode="offset" tabindex="0"
+  aria-label="動態圖：訂單匯出用 OFFSET 分頁時，每一頁都把 orders 表 800 萬列掃一遍，還要先產生再丟掉前面的列，所以越翻越慢，拖慢同一台資料庫上的前台；切到 keyset 模式，每一頁都只讀那 1000 筆。">
+
+  <div class="top">
+    <div class="modes" role="group" aria-label="切換寫法">
+      <button type="button" data-mode-btn="offset" aria-pressed="true">原本：OFFSET 分頁</button>
+      <button type="button" data-mode-btn="keyset" aria-pressed="false">改成：keyset 分頁</button>
+    </div>
+    <button type="button" class="theme" data-theme-btn aria-label="切換深淺色">深色</button>
+  </div>
+
+  <ul class="causes" data-causes aria-label="這支 SQL 的三個地方">
+    <li><span class="badge">1</span><span data-c1><code>date(created_at)</code>：索引用不上</span></li>
+    <li><span class="badge">2</span><span data-c2><code>OFFSET n</code>：先產生再丟掉前 n 列</span></li>
+    <li><span class="badge">3</span><span data-c3><code>SELECT *</code>：連大 JSON 一起送</span></li>
+  </ul>
+
+  <div class="row">
+    <div class="lab"><span class="t"><span class="badge">1</span>這一頁讀了多少：orders 表約 800 萬列</span><span class="val hot" data-a-val>800 萬列（全表掃描）</span></div>
+    <div class="bar" aria-hidden="true">
+      <div class="seg scan" data-a-scan></div>
+      <div class="seg sliver" data-a-sliver style="display:none"></div>
+      <div class="sept"></div>
+    </div>
+    <div class="note right"><span>虛線框：9 月的 60 萬筆，下面放大 ↓</span></div>
+    <div class="note hot" data-a3><span class="badge">3</span><span data-a3-txt>每一列都連 <code>shipping_detail</code>（大 JSON）一起讀、一起送出</span></div>
+  </div>
+
+  <div class="row">
+    <div class="lab"><span class="t"><span class="badge">2</span>9 月的 60 萬筆，依 <code>created_at, id</code> 排好：每頁 1000 筆，共 600 頁</span></div>
+    <div class="pinwrap" aria-hidden="true"><span class="pinlab" data-pinlab style="left:50%">第 300 頁</span></div>
+    <div class="bar b" aria-hidden="true">
+      <div class="seg discard" data-b-before></div>
+      <div class="seg want" data-b-want></div>
+    </div>
+    <div class="ticks" aria-hidden="true">
+      <span style="left:0">第 1 頁</span>
+      <span style="left:50%;transform:translateX(-50%)">第 300 頁</span>
+      <span style="right:0">第 600 頁</span>
+    </div>
+    <ul class="legend" data-legend>
+      <li><span class="sw d" data-lg-sw1></span><span data-lg1>先產生再丟掉</span></li>
+      <li><span class="sw w"></span><span>這一頁真正要的 <b>1000 筆</b></span></li>
+      <li><span class="sw r"></span><span data-lg3>還沒翻到</span></li>
+    </ul>
+  </div>
+
+  <div class="cards">
+    <div class="card" data-card="0"><div class="k">這一頁</div><div class="v" data-v></div><div class="s" data-s></div></div>
+    <div class="card" data-card="1"><div class="k" data-kk>這一頁耗時</div><div class="v" data-v></div><div class="s" data-s></div></div>
+    <div class="card" data-card="2"><div class="k">資料庫</div><div class="v" data-v></div><div class="s" data-s></div></div>
+    <div class="card" data-card="3"><div class="k">前台「我的訂單」</div><div class="v" data-v></div><div class="s" data-s></div></div>
+  </div>
+
+  <div class="cap" data-cap aria-live="polite"></div>
+
+  <div class="tl">
+    <button type="button" class="ctl" data-prev aria-label="上一格">‹</button>
+    <button type="button" class="ctl play" data-play aria-label="播放">▶ 播放</button>
+    <button type="button" class="ctl" data-next aria-label="下一格">›</button>
+    <input type="range" data-scrub min="0" max="14" step="0.01" value="10" aria-label="時間軸">
+  </div>
+  <div class="chips" data-chips></div>
+</figure>
+
+<script>
+(function () {
+  "use strict";
+  var fig = document.querySelector('.fig');
+  var STEP = 2.5, TR = 1.0, HOLD = 1.5;
+  var q = function (s) { return fig.querySelector(s); };
+
+  // ---- 文章裡的事實，逐格 ----
+  var MODES = {
+    offset: {
+      rest: 4,
+      pages: [1, 100, 170, 230, 300, 300],   // 第 3、4 格的位置只是示意：文章只說在第 100～300 頁之間
+      chips: [['T1', '9:05'], ['T2', ''], ['T3', '9:20'], ['T4', ''], ['T5', ''], ['T6', '']],
+      cards: [
+        [['第 1 頁', 'OFFSET 0', 0], ['0.8 秒', '掃完 800 萬列，挑出前 1000 筆', 0], ['全表掃描', '每一頁都掃 800 萬列', 0], ['約 80ms', '正常', 0]],
+        [['第 100 頁', 'OFFSET 99000', 0], ['更慢', '先產生再丟掉前 9.9 萬列', 0], ['全表掃描', '每一頁都重讀 800 萬列', 0], ['—', '', 0]],
+        [['第 100～300 頁之間', '還在跑', 0], ['更慢', '每一頁都比上一頁慢', 0], ['CPU 95% 以上', '磁碟讀取 IOPS 頂到上限', 1], ['6 秒', '同一台資料庫上的查詢跟著變慢', 1]],
+        [['第 100～300 頁之間', '還在跑', 0], ['更慢', '每一頁都比上一頁慢', 0], ['CPU 95% 以上', '磁碟讀取 IOPS 頂到上限', 1], ['timeout', '連線池被占滿，新請求等不到連線', 1]],
+        [['第 300 頁', 'OFFSET 299000', 0], ['20 幾秒', '先產生再丟掉前 29.9 萬列', 1], ['CPU 95% 以上', '磁碟讀取 IOPS 頂到上限', 1], ['還是很慢', '連線池被占滿', 1]],
+        [['第 300 頁', '600 頁，後面還有 300 頁', 0], ['越往後越慢', '看不到盡頭', 1], ['CPU 95% 以上', '磁碟讀取 IOPS 頂到上限', 1], ['還是很慢', '連線池被占滿', 1]]
+      ],
+      discard: ['OFFSET 0：不用丟', '先產生再丟掉 <b>9.9 萬列</b>', '先產生再丟掉的列<b>越來越多</b>', '先產生再丟掉的列<b>越來越多</b>', '先產生再丟掉 <b>29.9 萬列</b>', '先產生再丟掉 <b>29.9 萬列</b>'],
+      rest3: ['還沒翻到 <b>59.9 萬列</b>', '還沒翻到 <b>50 萬列</b>', '還沒翻到', '還沒翻到', '還沒翻到 <b>30 萬列</b>', '後面還有 <b>300 頁</b>'],
+      caps: [
+        '<b>T1 9:05</b>｜營運按下匯出。第 1 頁 <code>OFFSET 0</code>：索引用不上，800 萬列全部讀一遍，挑出 9 月的前 1000 筆，花 0.8 秒。',
+        '<b>T2</b>｜翻到第 100 頁，<code>OFFSET 99000</code>：每一頁都重讀 800 萬列，還要先產生再丟掉前 9.9 萬列。',
+        '<b>T3 9:20</b>｜還在跑，每一頁都比上一頁慢。CPU 長時間 95% 以上，同一台資料庫上的前台查詢升到 6 秒。',
+        '<b>T4</b>｜前台的每支查詢都跑得更久、占著連線不放，連線池被占滿，新的請求開始 timeout。',
+        '<b>T5</b>｜翻到第 300 頁，<code>OFFSET 299000</code>：先產生再丟掉前 29.9 萬列，才回傳那 1000 筆，這一頁要 20 幾秒。',
+        '<b>T6</b>｜600 頁才翻到一半，後面還有 300 頁，越往後每一頁越慢，看不到盡頭。'
+      ]
+    },
+    keyset: {
+      rest: 2,
+      pages: [1, 100, 300, 600],
+      chips: [['第 1 頁', ''], ['第 100 頁', ''], ['第 300 頁', ''], ['完成', '']],
+      cards: [
+        [['第 1 頁', '從 9 月 1 日的起點開始', 0], ['1000 筆', '只讀這一頁要的', 0], ['用得上索引', '範圍條件，直接找到 9 月起點', 0], ['不搶同一台', '匯出改到讀取副本跑', 0]],
+        [['第 100 頁', '從上一頁最後一筆接著拿', 0], ['1000 筆', '不用再丟掉前 9.9 萬列', 0], ['用得上索引', '直接跳到上一頁最後一筆', 0], ['不搶同一台', '匯出改到讀取副本跑', 0]],
+        [['第 300 頁', '從上一頁最後一筆接著拿', 0], ['1000 筆', '跟第 1 頁一樣多', 0], ['用得上索引', '直接跳到上一頁最後一筆', 0], ['不搶同一台', '匯出改到讀取副本跑', 0]],
+        [['600 頁', '全部匯完', 0], ['40 秒', '原本是「跑不完」', 0], ['用得上索引', '每頁都只讀 1000 筆', 0], ['不搶同一台', '匯出改到讀取副本跑', 0]]
+      ],
+      discard: ['前面沒有已匯出的', '前 99 頁已匯出，<b>不再讀</b>', '前 299 頁已匯出，<b>不再讀</b>', '600 頁<b>全部匯完</b>'],
+      rest3: ['還沒翻到', '還沒翻到', '還沒翻到', '還沒翻到'],
+      caps: [
+        '<b>第 1 頁</b>｜條件改成 <code>created_at &gt;= \'2026-09-01\' AND created_at &lt; \'2026-10-01\'</code>，索引直接找到 9 月的起點，只讀 1000 筆。',
+        '<b>第 100 頁</b>｜keyset 記住上一頁最後一筆，下一頁從那裡接著拿，前面的 9.9 萬列不用再產生、再丟掉。',
+        '<b>第 300 頁</b>｜跟第 1 頁一樣只讀這 1000 筆，而且只選財務要的 8 個欄位，不帶 <code>shipping_detail</code>。',
+        '<b>完成</b>｜600 頁全部匯完；匯出也改到讀取副本跑，整份匯出從「跑不完」變成 40 秒。'
+      ]
+    }
+  };
+  var CAUSES = {
+    offset: ['<code>date(created_at)</code>：索引用不上', '<code>OFFSET n</code>：先產生再丟掉前 n 列', '<code>SELECT *</code>：連大 JSON 一起送'],
+    keyset: ['<code>created_at &gt;= … AND &lt; …</code>：用得上索引', 'keyset：從上一頁最後一筆接著拿', '只選 8 個欄位']
+  };
+
+  var el = {
+    aScan: q('[data-a-scan]'), aSliver: q('[data-a-sliver]'), aVal: q('[data-a-val]'),
+    a3: q('[data-a3]'), a3t: q('[data-a3-txt]'),
+    before: q('[data-b-before]'), want: q('[data-b-want]'), pinlab: q('[data-pinlab]'),
+    lg1: q('[data-lg1]'), lg3: q('[data-lg3]'), sw1: q('[data-lg-sw1]'),
+    cap: q('[data-cap]'), scrub: q('[data-scrub]'), play: q('[data-play]'),
+    chips: q('[data-chips]'), c: [q('[data-c1]'), q('[data-c2]'), q('[data-c3]')],
+    cards: [].slice.call(fig.querySelectorAll('[data-card]')), kk: q('[data-kk]')
+  };
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var mode = 'offset', M = MODES[mode], t = 0, playing = false, visible = true, raf = 0, last = 0;
+  var cache = new WeakMap();
+
+  function setHTML(node, html) { if (cache.get(node) !== html) { node.innerHTML = html; cache.set(node, html); } }
+  function setW(node, v) { var s = v.toFixed(3) + '%'; if (node.style.width !== s) node.style.width = s; }
+  function ease(x) { return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
+  function dur() { return (M.pages.length - 1) * STEP + HOLD; }
+
+  // t → (目前這一格 k, 前一格 p, 轉場進度 e)
+  function stateAt(tt) {
+    var n = M.pages.length;
+    var k = Math.min(n - 1, Math.max(0, Math.floor((tt + TR) / STEP)));
+    var e = 1;
+    if (k > 0) { var local = tt - (k * STEP - TR); e = local >= TR ? 1 : Math.max(0, local / TR); }
+    if (reduce) e = 1;
+    return { k: k, p: Math.max(0, k - 1), e: e };
+  }
+
+  function render() {
+    var s = stateAt(t), k = s.k, e = ease(s.e);
+    var page = M.pages[s.p] + (M.pages[k] - M.pages[s.p]) * e;
+    var txtK = s.e >= 0.6 ? k : s.p;          // 讀數在轉場後段才換
+    var off = mode === 'offset';
+
+    // 條帶 A：整張表
+    if (off) {
+      el.aScan.style.display = '';
+      el.aSliver.style.display = 'none';
+      var scanP = (k > 0 && s.e < 1) ? e : 1;
+      setW(el.aScan, scanP * 100);
+      el.aScan.classList.toggle('done', scanP >= 1);
+    } else {
+      el.aScan.style.display = 'none';
+      el.aSliver.style.display = '';
+      var l = 92.5 + 7.5 * (page - 1) / 600;
+      el.aSliver.style.left = l.toFixed(3) + '%';
+      setW(el.aSliver, 7.5 / 600);
+    }
+
+    // 條帶 B：9 月 600 頁
+    var before = (page - 1) / 600 * 100;
+    setW(el.before, before);
+    el.want.style.left = before.toFixed(3) + '%';
+    setW(el.want, 100 / 600);
+    var pinL = Math.min(97, Math.max(3, before + 100 / 1200));
+    el.pinlab.style.left = pinL.toFixed(2) + '%';
+    var pk = M.pages[txtK];
+    var pinTxt = off
+      ? ((txtK === 2 || txtK === 3) ? '翻頁中' : '第 ' + pk + ' 頁')
+      : (txtK === M.pages.length - 1 ? '第 600 頁・最後一頁' : '上一頁最後一筆 → 第 ' + pk + ' 頁');
+    setHTML(el.pinlab, pinTxt);
+
+    setHTML(el.lg1, M.discard[txtK]);
+    setHTML(el.lg3, M.rest3[txtK]);
+
+    // 讀數卡
+    var row = M.cards[txtK];
+    for (var i = 0; i < 4; i++) {
+      var c = el.cards[i], d = row[i];
+      setHTML(c.querySelector('[data-v]'), d[0]);
+      setHTML(c.querySelector('[data-s]'), d[1]);
+      c.classList.toggle('hot', !!d[2]);
+    }
+    setHTML(el.cap, M.caps[txtK]);
+    setHTML(el.kk, off ? '這一頁耗時' : (txtK === M.pages.length - 1 ? '整份匯出' : '這一頁讀了'));
+
+    // 時間軸
+    var v = t.toFixed(2);
+    if (el.scrub.value !== v) el.scrub.value = v;
+    var btns = el.chips.children;
+    for (var j = 0; j < btns.length; j++) {
+      if (j === k && s.e >= 1) btns[j].setAttribute('aria-current', 'step'); else btns[j].removeAttribute('aria-current');
+    }
+  }
+
+  function applyMode(m) {
+    mode = m; M = MODES[m];
+    fig.dataset.mode = m;
+    fig.dataset.dur = String(dur());
+    fig.dataset.rest = String(M.rest * STEP);
+    window.DUR = dur();
+    [].forEach.call(fig.querySelectorAll('[data-mode-btn]'), function (b) { b.setAttribute('aria-pressed', String(b.dataset.modeBtn === m)); });
+    for (var i = 0; i < 3; i++) setHTML(el.c[i], CAUSES[m][i]);
+    var off = m === 'offset';
+    el.aVal.className = 'val ' + (off ? 'hot' : 'good');
+    setHTML(el.aVal, off ? '800 萬列（全表掃描）' : '只讀 1000 筆');
+    el.a3.className = 'note' + (off ? ' hot' : '');
+    setHTML(el.a3t, off ? '每一列都連 <code>shipping_detail</code>（大 JSON）一起讀、一起送出' : '每一列只帶財務要的 8 個欄位');
+    el.before.className = 'seg ' + (off ? 'discard' : 'done-dim');
+    el.sw1.className = 'sw ' + (off ? 'd' : 'p');
+    setHTML(el.kk, off ? '這一頁耗時' : '這一頁讀了');
+    el.scrub.max = String(dur());
+    el.chips.innerHTML = '';
+    M.chips.forEach(function (ch, idx) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.innerHTML = ch[0] + (ch[1] ? '<span class="tm"> ' + ch[1] + '</span>' : '');
+      b.setAttribute('aria-label', '跳到 ' + ch[0] + (ch[1] ? ' ' + ch[1] : ''));
+      var pct = idx / (M.pages.length - 1 + HOLD / STEP) * 100;
+      b.style.left = 'calc(' + pct.toFixed(2) + '% + ' + (8 - pct * 0.16).toFixed(2) + 'px)';
+      b.addEventListener('click', function () { pause(); seek(idx * STEP); });
+      el.chips.appendChild(b);
+    });
+  }
+
+  function seek(tt) {
+    t = Math.max(0, Math.min(dur(), +tt || 0));
+    render();
+  }
+
+  // ---- 播放：只在播放中且看得到時跑 ----
+  function loop(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    t += dt;
+    if (t >= dur()) { t = dur(); render(); pause(); return; }
+    render();   // reduced motion：stateAt() 不給轉場進度，每格直接換
+    raf = requestAnimationFrame(loop);
+  }
+  function arm() { if (!raf && playing && visible) { last = 0; raf = requestAnimationFrame(loop); } }
+  function play() {
+    if (t >= dur() - 0.01) t = 0;
+    playing = true;
+    el.play.textContent = '❚❚ 暫停'; el.play.setAttribute('aria-label', '暫停');
+    arm();
+  }
+  function pause() {
+    playing = false;
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    el.play.textContent = '▶ 播放'; el.play.setAttribute('aria-label', '播放');
+  }
+  function stepBy(d) {
+    pause();
+    var s = stateAt(t), k = s.k;
+    var target = d > 0 ? (s.e < 1 ? k : k + 1) : k - 1;
+    target = Math.max(0, Math.min(M.pages.length - 1, target));
+    seek(target * STEP);
+  }
+
+  el.play.addEventListener('click', function () { playing ? pause() : play(); });
+  q('[data-prev]').addEventListener('click', function () { stepBy(-1); });
+  q('[data-next]').addEventListener('click', function () { stepBy(1); });
+  el.scrub.addEventListener('input', function () { pause(); seek(parseFloat(el.scrub.value)); });
+  [].forEach.call(fig.querySelectorAll('[data-mode-btn]'), function (b) {
+    b.addEventListener('click', function () { if (b.dataset.modeBtn === mode) return; pause(); applyMode(b.dataset.modeBtn); seek(M.rest * STEP); });
+  });
+  fig.addEventListener('keydown', function (ev) {
+    if (ev.target.tagName === 'INPUT') return;
+    if (ev.key === 'ArrowRight') { stepBy(1); ev.preventDefault(); }
+    else if (ev.key === 'ArrowLeft') { stepBy(-1); ev.preventDefault(); }
+    else if (ev.key === ' ' && ev.target === fig) { playing ? pause() : play(); ev.preventDefault(); }
+  });
+
+  // 深淺色切換：寫在根元素 data-theme（網站也會設這個）
+  var themeBtn = q('[data-theme-btn]');
+  function isDark() {
+    var a = document.documentElement.getAttribute('data-theme');
+    if (a === 'dark') return true; if (a === 'light') return false;
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  function syncThemeBtn() { themeBtn.textContent = isDark() ? '淺色' : '深色'; }
+  themeBtn.addEventListener('click', function () { document.documentElement.setAttribute('data-theme', isDark() ? 'light' : 'dark'); syncThemeBtn(); });
+  if (window.MutationObserver) new MutationObserver(syncThemeBtn).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  if (window.matchMedia) { var mq = window.matchMedia('(prefers-color-scheme: dark)'); if (mq.addEventListener) mq.addEventListener('change', syncThemeBtn); }
+
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      visible = es[0].isIntersecting;
+      if (visible) arm(); else if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    }, { rootMargin: '120px' }).observe(fig);
+  }
+
+  window.seek = function (tt) { pause(); seek(tt); };
+  window.timeline = function () { return { dur: dur(), rest: M.rest * STEP, mode: mode }; };
+  window.setMode = function (m) { if (MODES[m]) { pause(); applyMode(m); seek(M.rest * STEP); } };
+
+  applyMode('offset');
+  syncThemeBtn();
+  seek(M.rest * STEP);   // 不自動播放：停在第 300 頁那一格
+})();
+</script>
+</body>
+</html>

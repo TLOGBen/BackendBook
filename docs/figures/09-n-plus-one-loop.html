@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N+1 查詢來回</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --paper: #ffffff;
+  --paper-2: #f3f4f6;
+  --ink: #2d3142;
+  --muted: #4f5d75;
+  --soft: #5a6580;
+  --rule: rgba(45, 49, 66, 0.18);
+  --rule-strong: rgba(45, 49, 66, 0.42);
+  --hot-fill: #fde68a;
+  --hot-stroke: #b45309;
+  --hot-ink: #111111;
+  --hot-text: #92400e;
+  --ghost: rgba(45, 49, 66, 0.10);
+  --focus: #4f5d75;
+  --sans: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', 'Heiti TC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', 'SFMono-Regular', Menlo, Consolas, 'Noto Sans TC', 'Microsoft JhengHei', monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e2029;
+    --paper: #1e2029;
+    --paper-2: #2a2d39;
+    --ink: #e8eaf0;
+    --muted: #c3c8d4;
+    --soft: #a7afc0;
+    --rule: rgba(232, 234, 240, 0.18);
+    --rule-strong: rgba(232, 234, 240, 0.42);
+    --hot-fill: #5c3d0b;
+    --hot-stroke: #f5b544;
+    --hot-ink: #fff4d6;
+    --hot-text: #fbd38d;
+    --ghost: rgba(232, 234, 240, 0.10);
+    --focus: #c3c8d4;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e2029;
+  --paper: #1e2029;
+  --paper-2: #2a2d39;
+  --ink: #e8eaf0;
+  --muted: #c3c8d4;
+  --soft: #a7afc0;
+  --rule: rgba(232, 234, 240, 0.18);
+  --rule-strong: rgba(232, 234, 240, 0.42);
+  --hot-fill: #5c3d0b;
+  --hot-stroke: #f5b544;
+  --hot-ink: #fff4d6;
+  --hot-text: #fbd38d;
+  --ghost: rgba(232, 234, 240, 0.10);
+  --focus: #c3c8d4;
+  color-scheme: dark;
+}
+html, body { margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); }
+
+.fig { margin: 0; padding: 12px 16px 16px; box-sizing: border-box; width: 100%; max-width: 1040px; margin-inline: auto; outline: none; }
+.fig:focus-visible { outline: 1px solid var(--focus); outline-offset: -2px; }
+.fig * { box-sizing: border-box; }
+
+.fig-readouts { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: flex-end; margin-bottom: 8px; }
+.fig-ro { display: flex; flex-direction: column; min-width: 0; }
+.fig-ro-k { font-size: 12px; color: var(--soft); line-height: 1.4; }
+.fig-ro-v { font-size: 22px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.fig-ro-v small { font-size: 13px; font-weight: 500; color: var(--soft); margin-left: 2px; }
+.fig-ro.is-hot .fig-ro-v { color: var(--hot-text); }
+.fig-ro-sum .fig-ro-v { font-size: 16px; font-weight: 600; font-family: var(--mono); padding-bottom: 2px; }
+
+.fig-stage { width: 100%; }
+.fig-stage svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.fig-sql { font-family: var(--mono); font-size: 13px; line-height: 1.5; color: var(--muted); min-height: 3em; margin: 6px 0 10px; padding: 6px 10px; border-left: 3px solid var(--rule-strong); background: var(--paper-2); border-radius: 0 4px 4px 0; overflow-wrap: anywhere; }
+.fig-sql.is-hot { border-left-color: var(--hot-stroke); color: var(--ink); }
+.fig-sql b { font-family: var(--sans); font-weight: 600; color: var(--soft); margin-right: 6px; }
+
+.fig-meters { display: grid; gap: 10px; margin-bottom: 12px; }
+.fig-meter-k { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--soft); margin-bottom: 4px; }
+.fig-meter-k span:last-child { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+.fig-bar { position: relative; height: 14px; border-radius: 3px; background: var(--paper-2); overflow: hidden; }
+.fig-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--hot-fill); border-right: 2px solid var(--hot-stroke); }
+.fig-bar-ghost { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; border: 1.5px dashed var(--rule-strong); border-radius: 3px; display: none; }
+.fig-bar-ghost.is-on { display: block; }
+.fig-orders { display: grid; grid-template-columns: repeat(25, 1fr); gap: 3px; }
+.fig-order { height: 12px; border-radius: 2px; background: var(--paper-2); border: 1px solid var(--rule); }
+.fig-order.is-done { background: var(--rule-strong); border-color: transparent; }
+.fig-order.is-cur { background: var(--hot-fill); border-color: var(--hot-stroke); }
+
+.fig-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.fig-seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; }
+.fig-btn { font: inherit; font-size: 13px; min-height: 34px; padding: 0 12px; color: var(--ink); background: var(--paper); border: 0; cursor: pointer; }
+.fig-seg .fig-btn + .fig-btn { border-left: 1px solid var(--rule-strong); }
+.fig-seg .fig-btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); font-weight: 600; }
+.fig-btn.fig-solo { border: 1px solid var(--rule-strong); border-radius: 6px; min-width: 76px; }
+.fig-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.fig-scrub { flex: 1 1 160px; min-width: 120px; height: 34px; accent-color: var(--hot-stroke); margin: 0; }
+.fig-theme { min-width: 34px; padding: 0 8px; }
+
+.fig-cap { font-size: 13px; line-height: 1.6; color: var(--muted); margin: 10px 0 0; }
+
+/* SVG parts */
+.n1-box { fill: var(--paper); stroke: var(--rule-strong); stroke-width: 1.5; }
+.n1-box.is-hot { fill: var(--hot-fill); stroke: var(--hot-stroke); stroke-width: 2; }
+.n1-name { font-family: var(--sans); font-size: 14px; font-weight: 600; fill: var(--ink); }
+.n1-sub { font-family: var(--sans); font-size: 12px; fill: var(--soft); }
+.n1-box.is-hot ~ .n1-name, .is-hotg .n1-name { fill: var(--hot-ink); }
+.is-hotg .n1-sub { fill: var(--hot-ink); }
+.n1-chip { fill: var(--paper-2); stroke: var(--rule); stroke-width: 1; }
+.n1-chip.is-hot { fill: var(--hot-fill); stroke: var(--hot-stroke); stroke-width: 2; }
+.n1-chip-t { font-family: var(--mono); font-size: 12px; fill: var(--ink); }
+.n1-chip-t.is-cjk { font-family: var(--sans); }
+.n1-chip.is-hot + .n1-chip-t { fill: var(--hot-ink); font-weight: 700; }
+.n1-tag { font-family: var(--sans); font-size: 12px; fill: var(--soft); }
+.n1-tag.is-hot { fill: var(--hot-text); font-weight: 600; }
+.n1-track { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.n1-track.is-back { stroke-dasharray: 4 3; }
+.n1-head { fill: var(--muted); }
+.n1-pkt rect { fill: var(--hot-fill); stroke: var(--hot-stroke); stroke-width: 2; }
+.n1-pkt.is-back rect { fill: var(--paper); }
+.n1-pkt text { font-family: var(--mono); font-size: 12px; font-weight: 700; fill: var(--hot-ink); }
+.n1-pkt.is-back text { fill: var(--hot-text); font-family: var(--sans); }
+.n1-flash { fill: none; stroke: var(--hot-stroke); stroke-width: 2; opacity: 0; }
+
+@media (max-width: 480px) {
+  .fig { padding: 8px 16px 12px; }
+  .fig-ro-v { font-size: 20px; }
+  .fig-orders { grid-template-columns: repeat(10, 1fr); }
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="n1fig" data-fig="n-plus-one-loop" data-dur="18.6" data-rest="18.6" tabindex="0"
+  aria-label="N+1 查詢動畫：序列化器迴圈每讀一次 o.customer.name 或 len(o.items)，ORM 就送一條 SQL 經過連線池到 PostgreSQL 來回一趟，50 筆訂單累計 101 條；切到預先載入只剩 2 條。左右鍵逐趟移動，空白鍵播放或暫停。">
+
+  <div class="fig-readouts">
+    <div class="fig-ro"><span class="fig-ro-k">訂單</span><span class="fig-ro-v" id="roOrder">50<small>/ 50 筆</small></span></div>
+    <div class="fig-ro is-hot"><span class="fig-ro-k">已送出的 SQL</span><span class="fig-ro-v" id="roSql">101<small>條</small></span></div>
+    <div class="fig-ro fig-ro-sum"><span class="fig-ro-k" id="roSumK">組成：查訂單 + 查客戶 + 查明細</span><span class="fig-ro-v" id="roSum">1 + 50 + 50</span></div>
+  </div>
+
+  <div class="fig-stage" id="stage"></div>
+
+  <div class="fig-sql" id="sqlLine" aria-hidden="true"><b>正在送</b>—</div>
+
+  <div class="fig-meters">
+    <div>
+      <div class="fig-meter-k"><span id="barK">這個請求佔住連線的來回趟數</span><span id="barV">101 趟</span></div>
+      <div class="fig-bar"><div class="fig-bar-ghost" id="barGhost"></div><div class="fig-bar-fill" id="barFill"></div></div>
+    </div>
+    <div>
+      <div class="fig-meter-k"><span>50 筆訂單逐筆組回傳內容</span><span id="ordV">50 / 50</span></div>
+      <div class="fig-orders" id="orders" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <div class="fig-controls">
+    <div class="fig-seg" role="group" aria-label="載入方式">
+      <button class="fig-btn" type="button" id="mLazy" aria-pressed="true">延遲載入（出事時）</button>
+      <button class="fig-btn" type="button" id="mEager" aria-pressed="false">預先載入（修好後）</button>
+    </div>
+    <button class="fig-btn fig-solo" type="button" id="play" aria-label="播放">▶ 播放</button>
+    <input class="fig-scrub" type="range" id="scrub" min="0" max="1000" step="1" value="1000" aria-label="時間軸，拖動檢視每一趟">
+    <button class="fig-btn fig-solo fig-theme" type="button" id="theme" aria-label="切換深淺色">◐</button>
+  </div>
+
+  <figcaption class="fig-cap" id="cap" aria-live="polite">每一條 SQL 都很快（資料庫 CPU 只有 40%），慢的是一個請求要來回 101 趟，連線整段被佔住。</figcaption>
+</figure>
+
+<script>
+(function () {
+  'use strict';
+  var NS = 'http://www.w3.org/2000/svg';
+  var fig = document.getElementById('n1fig');
+  var stage = document.getElementById('stage');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- timelines (pure data, seekable) ---------- */
+  var SLOW = 1.6, MID = 0.6, FAST = 0.09, LEAD = 0.6, TAIL = 1.4;
+  function buildLazy() {
+    var trips = [], t = LEAD;
+    for (var k = 0; k <= 100; k++) {
+      var d = k < 3 ? SLOW : (k < 9 ? MID : FAST);
+      trips.push({ t0: t, d: d, kind: k === 0 ? 'orders' : (k % 2 === 1 ? 'customer' : 'items'), order: k === 0 ? 0 : Math.ceil(k / 2) });
+      t += d;
+    }
+    return { mode: 'lazy', trips: trips, dur: +(t + TAIL).toFixed(2) };
+  }
+  function buildEager() {
+    var trips = [], t = LEAD;
+    trips.push({ t0: t, d: SLOW, kind: 'eager1', order: 0 }); t += SLOW;
+    trips.push({ t0: t, d: SLOW, kind: 'eager2', order: 0 }); t += SLOW;
+    var loopStart = t, loopDur = 2.4; t += loopDur;
+    return { mode: 'eager', trips: trips, loopStart: loopStart, loopDur: loopDur, dur: +(t + TAIL).toFixed(2) };
+  }
+  var TL = { lazy: buildLazy(), eager: buildEager() };
+  fig.setAttribute('data-dur', String(TL.lazy.dur));
+  fig.setAttribute('data-rest', String(TL.lazy.dur));
+
+  var SQL = {
+    orders: 'SELECT ... FROM orders LIMIT 50',
+    customer: 'SELECT ... FROM customers WHERE id = ?',
+    items: 'SELECT ... FROM order_items WHERE order_id = ?',
+    eager1: 'SELECT ... FROM orders LEFT OUTER JOIN customers ... LIMIT 50',
+    eager2: 'SELECT ... FROM order_items WHERE order_id IN (...)'
+  };
+
+  function stateAt(S, t) {
+    var st = { sent: 0, held: 0, active: null, phase: 0, cust: 0, items: 0, done: 0, cur: 0, chip: null, preloaded: false };
+    for (var i = 0; i < S.trips.length; i++) {
+      var tr = S.trips[i];
+      if (t < tr.t0) break;
+      st.sent++;
+      if (tr.kind === 'customer') st.cust++;
+      if (tr.kind === 'items') st.items++;
+      var p = Math.min(1, (t - tr.t0) / tr.d);
+      st.held += p;
+      if (p < 1) { st.active = tr; st.phase = p; }
+      if (tr.kind === 'items' && p >= 1) st.done = tr.order;
+    }
+    if (S.mode === 'lazy') {
+      if (st.active && st.active.order > 0) { st.cur = st.active.order; st.chip = st.active.kind; }
+      if (st.active && st.active.kind === 'orders') st.chip = 'orders';
+    } else {
+      if (st.active) st.chip = 'orders';
+      if (t >= S.loopStart) {
+        var f = Math.min(1, (t - S.loopStart) / S.loopDur);
+        var pos = f * 50;
+        st.done = Math.min(50, Math.floor(pos));
+        if (st.done < 50) {
+          st.cur = st.done + 1;
+          st.chip = (pos - Math.floor(pos)) < 0.5 ? 'customer' : 'items';
+          st.preloaded = true;
+        }
+      }
+    }
+    return st;
+  }
+
+  /* ---------- layout (svg units = css px of the container) ---------- */
+  var L = null, el = {};
+  function r4(v) { return Math.round(v / 4) * 4; }
+  function mk(tag, attrs, parent, text) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function layout(W) {
+    var wide = W >= 640, pad = 8, boxes = [];
+    if (wide) {
+      var gap = 40, h = 172, serW = r4(W * 0.32);
+      var rest = Math.floor((W - 2 * pad - serW - 3 * gap) / 3);
+      var x = pad;
+      boxes.push({ id: 'ser', x: x, y: pad, w: serW, h: h }); x += serW + gap;
+      ['orm', 'pool', 'db'].forEach(function (id) { boxes.push({ id: id, x: x, y: pad, w: rest, h: h }); x += rest + gap; });
+      // tracks run through the lower part of each box, below every text line
+      return { wide: true, W: W, H: pad * 2 + h, boxes: boxes, outY: pad + 112, backY: pad + 144,
+        start: boxes[0].x + boxes[0].w + 12, end: boxes[3].x + boxes[3].w / 2 };
+    }
+    var bw = W - 2 * pad, g2 = 36, sh = 132, oh = 60, y = pad;
+    boxes.push({ id: 'ser', x: pad, y: y, w: bw, h: sh }); y += sh + g2;
+    ['orm', 'pool', 'db'].forEach(function (id) { boxes.push({ id: id, x: pad, y: y, w: bw, h: oh }); y += oh + g2; });
+    var cx = pad + bw / 2;
+    return { wide: false, W: W, H: y - g2 + pad, boxes: boxes, outX: r4(cx - 14), backX: r4(cx + 14),
+      start: boxes[0].y + boxes[0].h + 12, end: boxes[3].y + 2 };
+  }
+
+  var LABEL = {
+    lazy: { orm: ['延遲載入', '用到才查'], ormN: '延遲載入：用到才查', r1: '① 查 50 筆訂單' },
+    eager: { orm: ['預先載入', '查訂單時一起載'], ormN: '預先載入：一起載好', r1: '① 查訂單，一起載關聯' }
+  };
+
+  function build() {
+    var W = Math.max(280, Math.floor(stage.clientWidth));
+    L = layout(W);
+    stage.textContent = '';
+    var svg = mk('svg', { viewBox: '0 0 ' + L.W + ' ' + L.H, width: L.W, height: L.H, role: 'img', 'aria-labelledby': 'n1-loop-title n1-loop-desc' });
+    mk('title', { id: 'n1-loop-title' }, svg, 'N+1 查詢：一個請求裡的來回');
+    mk('desc', { id: 'n1-loop-desc' }, svg, '序列化器、ORM、連線池、PostgreSQL 四站；延遲載入時每讀一次關聯就送一條 SQL 來回一趟，50 筆訂單共 101 條；預先載入只有 2 條。');
+    var defs = mk('defs', {}, svg);
+    var mR = mk('marker', { id: 'n1-hr', viewBox: '0 0 8 8', refX: '7', refY: '4', markerWidth: '7', markerHeight: '7', orient: 'auto' }, defs);
+    mk('path', { d: 'M0,0 L8,4 L0,8 z', class: 'n1-head' }, mR);
+
+    var gTracks = mk('g', {}, svg), gBoxes = mk('g', {}, svg);
+    el.box = {}; el.boxG = {}; el.chips = {}; el.chipT = {}; el.tags = {};
+    var B = {}; L.boxes.forEach(function (b) { B[b.id] = b; });
+
+    // tracks between boxes (out + back), drawn first
+    for (var i = 0; i < 3; i++) {
+      var a = L.boxes[i], b = L.boxes[i + 1];
+      if (L.wide) {
+        mk('path', { d: 'M' + (a.x + a.w) + ',' + L.outY + ' H' + (b.x - 2), class: 'n1-track', 'marker-end': 'url(#n1-hr)' }, gTracks);
+        mk('path', { d: 'M' + (b.x) + ',' + L.backY + ' H' + (a.x + a.w + 2), class: 'n1-track is-back', 'marker-end': 'url(#n1-hr)' }, gTracks);
+      } else {
+        mk('path', { d: 'M' + L.outX + ',' + (a.y + a.h) + ' V' + (b.y - 2), class: 'n1-track', 'marker-end': 'url(#n1-hr)' }, gTracks);
+        mk('path', { d: 'M' + L.backX + ',' + b.y + ' V' + (a.y + a.h + 2), class: 'n1-track is-back', 'marker-end': 'url(#n1-hr)' }, gTracks);
+      }
+    }
+    // track legend in the first gap
+    if (L.wide) {
+      var g0 = L.boxes[0], g1 = L.boxes[1];
+      var lx = (g0.x + g0.w + g1.x) / 2;
+      mk('text', { x: lx, y: L.outY - 8, class: 'n1-sub', 'text-anchor': 'middle' }, gTracks, '去');
+      mk('text', { x: lx, y: L.backY + 20, class: 'n1-sub', 'text-anchor': 'middle' }, gTracks, '回');
+    } else {
+      var n0 = L.boxes[0], n1 = L.boxes[1], ly = (n0.y + n0.h + n1.y) / 2 + 4;
+      mk('text', { x: L.outX - 10, y: ly, class: 'n1-sub', 'text-anchor': 'end' }, gTracks, '去');
+      mk('text', { x: L.backX + 10, y: ly, class: 'n1-sub' }, gTracks, '回');
+    }
+
+    L.boxes.forEach(function (b) {
+      var g = mk('g', {}, gBoxes);
+      el.boxG[b.id] = g;
+      el.box[b.id] = mk('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 6, class: 'n1-box' }, g);
+      if (b.id === 'ser') {
+        mk('text', { x: b.x + 12, y: b.y + 24, class: 'n1-name' }, g, '序列化器迴圈');
+        mk('text', { x: b.x + b.w - 12, y: b.y + 24, class: 'n1-sub', 'text-anchor': 'end' }, g, 'for o in orders');
+        var rows = [['orders', '', true], ['customer', 'o.customer.name', false], ['items', 'len(o.items)', false]];
+        rows.forEach(function (r, j) {
+          var cy = b.y + 36 + j * 32;
+          el.chips[r[0]] = mk('rect', { x: b.x + 12, y: cy, width: b.w - 24, height: 24, rx: 4, class: 'n1-chip' }, g);
+          el.chipT[r[0]] = mk('text', { x: b.x + 22, y: cy + 16.5, class: 'n1-chip-t' + (r[2] ? ' is-cjk' : '') }, g, r[1]);
+          if (j > 0) el.tags[r[0]] = mk('text', { x: b.x + b.w - 22, y: cy + 16.5, class: 'n1-tag', 'text-anchor': 'end' }, g, '');
+        });
+      } else {
+        var name = b.id === 'orm' ? 'ORM' : (b.id === 'pool' ? '連線池' : 'PostgreSQL');
+        if (L.wide) {
+          mk('text', { x: b.x + 10, y: b.y + 24, class: 'n1-name' }, g, name);
+          var subs = b.id === 'db' ? ['每條都很快', 'CPU 只有 40%', '慢查詢日誌：空'] : (b.id === 'pool' ? ['借出 1 條連線', ''] : ['', '']);
+          el['sub_' + b.id] = subs.map(function (s, j) { return mk('text', { x: b.x + 10, y: b.y + 48 + j * 20, class: 'n1-sub' }, g, s); });
+        } else {
+          mk('text', { x: b.x + 12, y: b.y + b.h / 2 + 5, class: 'n1-name' }, g, name);
+          var subsN = b.id === 'db' ? ['每條都很快 · CPU 40%', '慢查詢日誌：空'] : (b.id === 'pool' ? ['借出 1 條連線', ''] : ['', '']);
+          el['sub_' + b.id] = subsN.map(function (s, j) { return mk('text', { x: b.x + b.w - 12, y: b.y + 26 + j * 18, class: 'n1-sub', 'text-anchor': 'end' }, g, s); });
+        }
+      }
+    });
+    el.flash = mk('rect', { x: B.db.x - 4, y: B.db.y - 4, width: B.db.w + 8, height: B.db.h + 8, rx: 8, class: 'n1-flash' }, svg);
+    el.pkt = mk('g', { class: 'n1-pkt', visibility: 'hidden' }, svg);
+    mk('rect', { x: -24, y: -12, width: 48, height: 24, rx: 5 }, el.pkt);
+    el.pktT = mk('text', { x: 0, y: 4.5, 'text-anchor': 'middle' }, el.pkt, 'SQL');
+    stage.appendChild(svg);
+    last = {};
+    paint();
+    postHeight();
+  }
+
+  /* ---------- painting ---------- */
+  var mode = 'lazy', t = TL.lazy.dur, playing = false, last = {};
+  var $ = function (id) { return document.getElementById(id); };
+  var roOrder = $('roOrder'), roSql = $('roSql'), roSum = $('roSum'), roSumK = $('roSumK'), sqlLine = $('sqlLine'),
+      barFill = $('barFill'), barGhost = $('barGhost'), barV = $('barV'), ordV = $('ordV'), scrub = $('scrub'), cap = $('cap'),
+      ordersEl = $('orders'), btnPlay = $('play');
+  var orderCells = [];
+  for (var i = 0; i < 50; i++) { var c = document.createElement('div'); c.className = 'fig-order'; ordersEl.appendChild(c); orderCells.push(c); }
+
+  function setText(node, key, v) { if (last[key] !== v) { last[key] = v; node.textContent = v; } }
+  function setHTML(node, key, v) { if (last[key] !== v) { last[key] = v; node.innerHTML = v; } }
+  function setCls(node, key, cls, on) { var k = key + cls; if (last[k] !== on) { last[k] = on; node.classList.toggle(cls, on); } }
+  function easeIO(p) { return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; }
+
+  function paint() {
+    if (!L) return;
+    var S = TL[mode], st = stateAt(S, t), lab = LABEL[mode];
+
+    // readouts
+    setHTML(roOrder, 'ro', (st.cur ? st.cur : st.done) + '<small>/ 50 筆</small>');
+    setHTML(roSql, 'sql', st.sent + '<small>條</small>');
+    if (mode === 'lazy') {
+      setText(roSumK, 'sumk', '組成：查訂單 + 查客戶 + 查明細');
+      setText(roSum, 'sum', (st.sent ? 1 : 0) + ' + ' + st.cust + ' + ' + st.items);
+    } else {
+      setText(roSumK, 'sumk', '組成：joinedload + selectinload');
+      setText(roSum, 'sum', Math.min(1, st.sent) + ' + ' + Math.max(0, st.sent - 1));
+    }
+
+    // svg: ORM labels
+    var ormSub = el.sub_orm;
+    if (L.wide) { setText(ormSub[0], 'orm0', lab.orm[0]); setText(ormSub[1], 'orm1', lab.orm[1]); }
+    else { setText(ormSub[0], 'orm0', lab.ormN); setText(ormSub[1], 'orm1', ''); }
+    setText(el.chipT.orders, 'r1', lab.r1);
+    var poolBusy = st.sent > 0 && !(st.done >= 50 && !st.active);
+    var poolTxt = st.sent === 0 ? '尚未借出' : (poolBusy ? '佔用中' : '已歸還');
+    setText(el.sub_pool[1], 'pool1', poolTxt);
+
+    // chips
+    ['orders', 'customer', 'items'].forEach(function (k) {
+      var on = st.chip === k;
+      setCls(el.chips[k], 'chip' + k, 'is-hot', on);
+      if (el.tags[k]) {
+        var tag = '';
+        if (on) tag = st.preloaded ? '已載好，不送 SQL' : '→ 送 1 條 SQL';
+        setText(el.tags[k], 'tag' + k, tag);
+        setCls(el.tags[k], 'tagc' + k, 'is-hot', on && !st.preloaded);
+      }
+    });
+
+    // packet
+    var hot = { ser: false, orm: false, pool: false, db: false }, flash = 0;
+    if (st.active) {
+      var p = st.phase, back = p > 0.55, pos;
+      var s0 = L.start, s1 = L.end;
+      if (p < 0.45) pos = s0 + (s1 - s0) * easeIO(p / 0.45);
+      else if (p <= 0.55) { pos = s1; flash = 1 - Math.abs((p - 0.5) / 0.05); }
+      else pos = s1 + (s0 - s1) * easeIO((p - 0.55) / 0.45);
+      var x = L.wide ? pos : (back ? L.backX : L.outX);
+      var y = L.wide ? (back ? L.backY : L.outY) : pos;
+      el.pkt.setAttribute('transform', 'translate(' + x.toFixed(1) + ',' + y.toFixed(1) + ')');
+      setText(el.pktT, 'pkt', back ? '結果' : 'SQL');
+      setCls(el.pkt, 'pkt', 'is-back', back);
+      if (last.pv !== 'visible') { last.pv = 'visible'; el.pkt.setAttribute('visibility', 'visible'); }
+      L.boxes.forEach(function (b) {
+        if (b.id === 'ser') return;
+        var inside = L.wide ? (x >= b.x && x <= b.x + b.w) : (y >= b.y && y <= b.y + b.h);
+        if (inside) hot[b.id] = true;
+      });
+    } else if (last.pv !== 'hidden') { last.pv = 'hidden'; el.pkt.setAttribute('visibility', 'hidden'); }
+    ['orm', 'pool', 'db'].forEach(function (id) {
+      setCls(el.box[id], 'box' + id, 'is-hot', hot[id]);
+      setCls(el.boxG[id], 'boxg' + id, 'is-hotg', hot[id]);
+    });
+    var fo = flash > 0 ? flash.toFixed(2) : '0';
+    if (last.flash !== fo) { last.flash = fo; el.flash.style.opacity = fo; }
+
+    // sql line
+    var sqlHtml, sqlHot = false;
+    if (st.active) {
+      sqlHot = true;
+      var who = st.active.kind === 'customer' ? '第 ' + st.active.order + ' 筆讀 o.customer.name' :
+                st.active.kind === 'items' ? '第 ' + st.active.order + ' 筆讀 len(o.items)' :
+                st.active.kind === 'orders' ? '查出 50 筆訂單' :
+                st.active.kind === 'eager1' ? '① joinedload：訂單和客戶一起查' : '② selectinload：全部明細一次查';
+      sqlHtml = '<b>第 ' + st.sent + ' 條｜' + who + '</b>' + esc(SQL[st.active.kind]);
+    } else if (st.preloaded) {
+      sqlHtml = '<b>第 ' + st.cur + ' 筆</b>關聯已經在記憶體裡，讀屬性不再送 SQL';
+    } else if (st.sent === 0) {
+      sqlHtml = '<b>準備中</b>一個「訂單列表」請求進來，一頁 50 筆';
+    } else if (mode === 'lazy') {
+      sqlHtml = st.done >= 50 ? '<b>結束</b>共 101 條：1 條查訂單 + 50 條查客戶 + 50 條查明細' : '<b>…</b>';
+    } else {
+      sqlHtml = st.done >= 50 ? '<b>結束</b>共 2 條：101 條變 2 條' : '<b>關聯已載好</b>接下來迴圈只讀記憶體';
+    }
+    setHTML(sqlLine, 'sqlline', sqlHtml);
+    setCls(sqlLine, 'sqlc', 'is-hot', sqlHot);
+
+    // meters
+    var frac = Math.min(1, st.held / 101);
+    var w = (frac * 100).toFixed(2) + '%';
+    if (last.bw !== w) { last.bw = w; barFill.style.width = w; barFill.style.borderRightWidth = st.held > 0 ? '2px' : '0'; }
+    setText(barV, 'barv', Math.floor(st.held + 1e-6) + ' 趟' + (mode === 'eager' ? '（延遲載入時 101 趟）' : ''));
+    setCls(barGhost, 'ghost', 'is-on', mode === 'eager');
+    for (var i = 0; i < 50; i++) {
+      var n = i + 1, cls = n === st.cur ? 'cur' : (n <= st.done ? 'done' : '');
+      if (last['o' + i] !== cls) {
+        last['o' + i] = cls;
+        orderCells[i].classList.toggle('is-cur', cls === 'cur');
+        orderCells[i].classList.toggle('is-done', cls === 'done');
+      }
+    }
+    setText(ordV, 'ordv', st.done + ' / 50');
+
+    // scrubber
+    var sv = String(Math.round(t / S.dur * 1000));
+    if (last.sv !== sv) { last.sv = sv; scrub.value = sv; }
+    scrub.setAttribute('aria-valuetext', '已送出 ' + st.sent + ' 條 SQL');
+  }
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+  /* ---------- controller ---------- */
+  var raf = 0, prev = 0, visible = true;
+  function loop(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = prev ? Math.min(0.05, (now - prev) / 1000) : 0;
+    prev = now;
+    t += dt;
+    var D = TL[mode].dur;
+    if (t >= D) { t = D; setPlaying(false); paint(); return; }
+    paint();
+    raf = requestAnimationFrame(loop);
+  }
+  function arm() { if (!raf && playing && visible) { prev = 0; raf = requestAnimationFrame(loop); } }
+  function setPlaying(on) {
+    playing = on;
+    btnPlay.textContent = on ? '❚❚ 暫停' : '▶ 播放';
+    btnPlay.setAttribute('aria-label', on ? '暫停' : '播放');
+    if (on) arm(); else if (raf) { cancelAnimationFrame(raf); raf = 0; }
+  }
+  function play() {
+    if (t >= TL[mode].dur - 0.01) t = 0;
+    if (reduce) { t = TL[mode].dur; paint(); return; }
+    setPlaying(true);
+  }
+  function seek(x) { setPlaying(false); t = Math.max(0, Math.min(TL[mode].dur, +x || 0)); paint(); }
+  function setMode(m, autoplay) {
+    mode = m;
+    $('mLazy').setAttribute('aria-pressed', String(m === 'lazy'));
+    $('mEager').setAttribute('aria-pressed', String(m === 'eager'));
+    window.DUR = TL[m].dur;
+    cap.textContent = m === 'lazy'
+      ? '每一條 SQL 都很快（資料庫 CPU 只有 40%），慢的是一個請求要來回 101 趟，連線整段被佔住。'
+      : '查訂單時就用 joinedload、selectinload 把關聯一起載好：101 條變 2 條，p99 從 4 秒回到 100ms 左右。';
+    last = {};
+    if (autoplay && !reduce) { t = 0; setPlaying(true); paint(); }
+    else seek(TL[m].dur);
+  }
+  window.seek = seek;
+  window.DUR = TL.lazy.dur;
+  window.timeline = function () { return { mode: mode, dur: TL[mode].dur, t: t }; };
+  window.setMode = function (m) { setMode(m === 'eager' ? 'eager' : 'lazy', false); };
+
+  btnPlay.addEventListener('click', function () { if (playing) setPlaying(false); else play(); });
+  $('mLazy').addEventListener('click', function () { if (mode !== 'lazy') setMode('lazy', true); });
+  $('mEager').addEventListener('click', function () { if (mode !== 'eager') setMode('eager', true); });
+  scrub.addEventListener('input', function () { seek(scrub.value / 1000 * TL[mode].dur); });
+
+  function tripStarts() { return TL[mode].trips.map(function (tr) { return tr.t0 + tr.d * 0.3; }); }
+  fig.addEventListener('keydown', function (e) {
+    if (e.target !== fig) return;
+    var k = e.key, ts = tripStarts(), D = TL[mode].dur;
+    if (k === ' ' || k === 'Enter') { e.preventDefault(); if (playing) setPlaying(false); else play(); }
+    else if (k === 'ArrowRight' || k === 'ArrowLeft') {
+      e.preventDefault();
+      var step = e.shiftKey ? 10 : 1, idx = 0;
+      for (var i = 0; i < ts.length; i++) if (ts[i] <= t + 1e-3) idx = i;
+      if (t < ts[0]) idx = -1;
+      idx = k === 'ArrowRight' ? idx + step : idx - step;
+      if (idx >= ts.length) seek(D); else if (idx < 0) seek(0); else seek(ts[idx]);
+    }
+    else if (k === 'Home') { e.preventDefault(); seek(0); }
+    else if (k === 'End') { e.preventDefault(); seek(D); }
+  });
+
+  // theme
+  var btnTheme = $('theme');
+  function isDark() {
+    var a = document.documentElement.getAttribute('data-theme');
+    if (a === 'dark') return true; if (a === 'light') return false;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  btnTheme.addEventListener('click', function () { document.documentElement.setAttribute('data-theme', isDark() ? 'light' : 'dark'); });
+
+  // visibility
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) { visible = es[0].isIntersecting; if (visible) arm(); }, { rootMargin: '120px' }).observe(fig);
+  }
+  // resize: read width once per resize
+  var lastW = 0, rz = 0;
+  function onResize() {
+    var w = Math.floor(stage.clientWidth);
+    if (w && w !== lastW) { lastW = w; build(); }
+  }
+  if ('ResizeObserver' in window) new ResizeObserver(function () { if (!rz) rz = requestAnimationFrame(function () { rz = 0; onResize(); }); }).observe(stage);
+  else window.addEventListener('resize', onResize);
+
+  var lastH = 0;
+  function postHeight() {
+    var h = Math.ceil(fig.getBoundingClientRect().height);
+    if (h !== lastH && window.parent && window.parent !== window) { lastH = h; try { window.parent.postMessage({ type: 'draw-figure-height', fig: 'n-plus-one-loop', height: h }, '*'); } catch (e) {} }
+  }
+
+  onResize();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { last = {}; paint(); postHeight(); });
+})();
+</script>
+</body>
+</html>

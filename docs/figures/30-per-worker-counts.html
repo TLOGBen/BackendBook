@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>各自計數的限流器</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280;
+  --line:#d1d5db; --card:#f8fafc; --track:#e5e7eb; --bar:#64748b;
+  --flow:#2563eb; --limit:#b91c1c;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#78350f;
+  --chip:#eef2f7;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e5e7eb; --muted:#b4b9c4; --soft:#9aa1ad;
+    --line:#3f4451; --card:#262a35; --track:#343947; --bar:#94a3b8;
+    --flow:#60a5fa; --limit:#f87171;
+    --hot-fill:#4a3410; --hot-stroke:#f59e0b; --hot-ink:#fcd34d;
+    --chip:#2f3441;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e5e7eb; --muted:#b4b9c4; --soft:#9aa1ad;
+  --line:#3f4451; --card:#262a35; --track:#343947; --bar:#94a3b8;
+  --flow:#60a5fa; --limit:#f87171;
+  --hot-fill:#4a3410; --hot-stroke:#f59e0b; --hot-ink:#fcd34d;
+  --chip:#2f3441;
+  color-scheme: dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);
+  font:14px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;}
+.fig{margin:0;padding:12px 16px 16px;box-sizing:border-box;max-width:100%;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--flow);border-radius:8px}
+.fig *{box-sizing:border-box}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,"Noto Sans TC","Microsoft JhengHei",monospace}
+
+/* step chips */
+.steps{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:0 0 8px;padding:0;list-style:none}
+.steps button{width:100%;min-height:32px;border:1px solid var(--line);background:var(--card);color:var(--muted);
+  border-radius:6px;font:600 13px/1 inherit;font-family:inherit;cursor:pointer;padding:0 2px}
+.steps button[aria-current="step"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.cap{min-height:48px;margin:0 0 12px;font-size:14px;color:var(--ink)}
+.cap b{display:inline-block;margin-right:6px;color:var(--muted);font-weight:700}
+
+/* stage */
+.stage{display:grid;grid-template-columns:132px 40px 1fr 40px 132px;gap:8px;align-items:stretch}
+.node{border:1.5px solid var(--line);background:var(--card);border-radius:10px;padding:10px;position:relative;
+  transition:none}
+.node.hot{background:var(--hot-fill);border-color:var(--hot-stroke)}
+.node.hot .t, .node.hot .sub{color:var(--hot-ink)}
+.t{font-weight:700;font-size:14px;line-height:1.35}
+.sub{font-size:12px;color:var(--soft);line-height:1.4}
+.badge{display:block;margin-top:8px;padding:4px 6px;border-radius:6px;background:var(--chip);color:var(--ink);
+  font-size:12px;line-height:1.35;opacity:0}
+.badge.on{opacity:1}
+.badge.warn{background:var(--hot-fill);color:var(--hot-ink);border:1px solid var(--hot-stroke)}
+
+/* flows */
+.flow{position:relative;min-height:32px}
+.flow .rail{position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;background:var(--line)}
+.flow .rail::after{content:"";position:absolute;right:-1px;top:-5px;border:6px solid transparent;border-left-color:var(--line);border-right:0}
+.dot{position:absolute;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--flow);left:calc(var(--p,0)*100%);opacity:0}
+.dot.on{opacity:1}
+
+/* pods */
+.pods .head{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;justify-content:space-between;margin-bottom:8px}
+.legend{font-size:12px;color:var(--soft);white-space:nowrap}
+.legend i{display:inline-block;width:14px;height:0;border-top:2px dashed var(--limit);vertical-align:middle;margin-right:4px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pods.many .grid{grid-template-columns:repeat(6,1fr);gap:6px}
+.pod{border:1px solid var(--line);border-radius:8px;padding:4px 6px 6px;background:var(--bg)}
+.pod.extra{display:none}
+.pods.many .pod.extra{display:block}
+.pod .pl{font-size:12px;color:var(--soft);line-height:1.3;white-space:nowrap;overflow:hidden}
+.ws{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;height:72px;margin-top:4px}
+.pods.many .ws{height:36px;gap:3px}
+.w{position:relative;background:var(--track);border-radius:3px;overflow:hidden}
+.w i{position:absolute;left:0;right:0;bottom:0;height:100%;background:var(--bar);transform-origin:bottom;transform:scaleY(0)}
+.pods.hot .w i{background:var(--hot-stroke)}
+.w::after{content:"";position:absolute;left:0;right:0;top:8%;border-top:2px dashed var(--limit)}
+.overlay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:6px 10px;border-radius:8px;
+  background:var(--ink);color:var(--bg);font-size:13px;font-weight:600;white-space:nowrap;opacity:0;pointer-events:none}
+.overlay.on{opacity:1}
+
+/* db */
+.meter{height:10px;border-radius:5px;background:var(--track);overflow:hidden;margin:6px 0 2px}
+.meter i{display:block;height:100%;width:100%;background:var(--bar);transform-origin:left;transform:scaleX(0)}
+.db.hot .meter i{background:var(--hot-stroke)}
+.kv{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
+.db.hot .kv{color:var(--hot-ink)}
+.big{font-size:16px;font-weight:700}
+
+/* readouts */
+.reads{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.rd{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--card)}
+.rd .k{font-size:12px;color:var(--soft)}
+.rd .v{font-size:18px;font-weight:700;line-height:1.3;white-space:nowrap}
+.rd .n{font-size:12px;color:var(--muted);min-height:18px}
+.rd.hot{background:var(--hot-fill);border-color:var(--hot-stroke)}
+.rd.hot .k,.rd.hot .v,.rd.hot .n{color:var(--hot-ink)}
+
+/* controls */
+.ctrl{display:flex;align-items:center;gap:8px;margin-top:12px}
+.ctrl button{min-width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);
+  font-size:14px;cursor:pointer;padding:0 10px;font-family:inherit}
+.ctrl button.play{font-weight:700;min-width:72px}
+.ctrl input[type=range]{flex:1;min-width:0;height:36px;accent-color:var(--flow);margin:0}
+.ctrl .tm{font-size:12px;color:var(--soft);min-width:24px;text-align:right}
+
+@media (max-width:640px){
+  .stage{grid-template-columns:1fr;gap:4px}
+  .flow{height:32px;min-height:32px}
+  .flow .rail{left:50%;right:auto;top:0;bottom:0;width:2px;height:auto;margin:0 0 0 -1px}
+  .flow .rail::after{right:auto;left:-5px;top:auto;bottom:-1px;border:6px solid transparent;border-top-color:var(--line);border-bottom:0}
+  .dot{left:50%;top:calc(var(--p,0)*100%);margin:-4px 0 0 -4px}
+  .client,.db{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;align-items:start}
+  .client .badge,.db .badge{margin-top:0}
+  .client .badges{display:grid;gap:4px}
+  .pods.many .grid{grid-template-columns:repeat(4,1fr)}
+  .pods.many .ws{height:28px}
+  .reads{grid-template-columns:1fr;gap:6px}
+  .rd{display:grid;grid-template-columns:auto 1fr;gap:0 10px;align-items:baseline}
+  .rd .k{grid-column:1}
+  .rd .v{grid-column:2;text-align:right}
+  .rd .n{grid-column:1 / -1;min-height:0}
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="pwc" data-fig="per-worker-counts" data-dur="28" data-rest="15" tabindex="0"
+  aria-label="動畫：同一個 API key 的請求被分散到 12 個 worker，每個 worker 在自己的記憶體裡各記一份 counts，每份都沒超過 600，所以一筆 429 都沒有；請求全進資料庫把 CPU 打到 100%，HPA 擴展後計數變成 48 份，上限放大到 28800。">
+  <ol class="steps" aria-label="時間軸步驟">
+    <li><button type="button" data-s="0">T1</button></li>
+    <li><button type="button" data-s="1">T2</button></li>
+    <li><button type="button" data-s="2">T3</button></li>
+    <li><button type="button" data-s="3">T4</button></li>
+    <li><button type="button" data-s="4">T5</button></li>
+    <li><button type="button" data-s="5">T6</button></li>
+    <li><button type="button" data-s="6">T7</button></li>
+  </ol>
+  <div class="cap" id="cap" aria-live="polite"></div>
+
+  <div class="stage">
+    <div class="node client" id="client">
+      <div>
+        <div class="t">客戶的同步腳本</div>
+        <div class="sub">同一個 API key</div>
+      </div>
+      <div class="badges">
+        <span class="badge" id="bNew">整點拉一次全部資料，迴圈沒有間隔</span>
+        <span class="badge warn" id="bRetry">逾時就立刻重試</span>
+      </div>
+    </div>
+
+    <div class="flow" id="f1" aria-hidden="true"><div class="rail"></div></div>
+
+    <div class="node pods" id="pods">
+      <div class="head">
+        <div>
+          <div class="t" id="podT">3 個 Pod × 4 個 worker</div>
+          <div class="sub" id="podS">每一格是一個 worker 自己記憶體裡的 <span class="mono">counts</span>，彼此看不到</div>
+        </div>
+        <span class="legend"><i></i>上限 600</span>
+      </div>
+      <div class="grid" id="grid"></div>
+      <div class="overlay mono" id="clear">counts.clear()：全部歸 0</div>
+    </div>
+
+    <div class="flow" id="f2" aria-hidden="true"><div class="rail"></div></div>
+
+    <div class="node db" id="db">
+      <div>
+        <div class="t">資料庫</div>
+        <div class="kv"><span>CPU</span><span class="mono" id="cpu">18%</span></div>
+        <div class="meter"><i id="cpuBar"></i></div>
+      </div>
+      <div>
+        <div class="kv"><span>所有客戶的 API 延遲</span></div>
+        <div class="big" id="lat">80ms</div>
+        <span class="badge warn" id="b504">大量 504</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="reads">
+    <div class="rd"><div class="k">合約上限</div><div class="v">每分鐘 600 次</div><div class="n">每個 API key</div></div>
+    <div class="rd" id="rCap"><div class="k">這個 key 每分鐘實際能打</div><div class="v mono" id="vCap">600 × 12 = 7200</div><div class="n" id="nCap">12 份計數，每份上限 600</div></div>
+    <div class="rd" id="r429"><div class="k">限流日誌：429 Too Many Requests</div><div class="v" id="v429">0 筆</div><div class="n" id="n429"></div></div>
+  </div>
+
+  <div class="ctrl">
+    <button type="button" class="play" id="play" aria-label="播放">▶ 播放</button>
+    <input type="range" id="scrub" min="0" max="28" step="0.05" value="15" aria-label="時間軸">
+    <span class="tm mono" id="tm">T4</span>
+    <button type="button" id="theme" aria-label="切換深淺色">◐</button>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var fig = document.getElementById('pwc');
+  var DUR = +fig.dataset.dur, REST = +fig.dataset.rest, STEP = 4;
+  var $ = function(id){ return document.getElementById(id); };
+  var CAPS = [
+    ['T1 平常', '同一個 API key 的請求被分散到 3 個 Pod × 4 個 worker。每個 worker 各記一份 counts、上限 600，合起來其實能打 600 × 12 = 7200 次，平常沒人打這麼多，一直沒人發現。'],
+    ['T2 某天', '一家客戶上線新的同步腳本：每分鐘整點把所有資料拉一次，迴圈裡沒有任何間隔。'],
+    ['T3 整點', '排程執行 counts.clear()，12 份計數同時清成 0；同一秒，客戶的腳本開始連續送請求。'],
+    ['T4 整點後幾秒', '每個 worker 只分到總量的 1/12，次數都沒超過 600，全部放行——一筆 429 都沒有。'],
+    ['T5', '請求全部進到資料庫，CPU 衝到 100%，所有客戶的 API 延遲從 80ms 變成好幾秒。'],
+    ['T6', '客戶的腳本遇到逾時就立刻重試，沒有退避也沒有抖動，流量越重試越多。'],
+    ['T7', 'HPA 看到負載變高，把 Pod 從 3 個拉到 12 個：計數變成 12 × 4 = 48 份，上限 600 × 48 = 28800，限流器等於完全沒作用。']
+  ];
+
+  // build pods: 12 pods × 4 workers (pods 4–12 only show after HPA)
+  var grid = $('grid'), bars = [], pods = [];
+  var frag = document.createDocumentFragment();
+  for (var p = 0; p < 12; p++){
+    var pod = document.createElement('div');
+    pod.className = 'pod' + (p >= 3 ? ' extra' : '');
+    pod.innerHTML = '<div class="pl">Pod ' + (p+1) + '</div><div class="ws"><div class="w"><i></i></div><div class="w"><i></i></div><div class="w"><i></i></div><div class="w"><i></i></div></div>';
+    frag.appendChild(pod); pods.push(pod);
+    var is = pod.querySelectorAll('.w i');
+    for (var k = 0; k < 4; k++) bars.push(is[k]);
+  }
+  grid.appendChild(frag);
+
+  function mkDots(el, n){ var a=[]; for (var i=0;i<n;i++){ var d=document.createElement('span'); d.className='dot'; el.appendChild(d); a.push(d);} return a; }
+  var d1 = mkDots($('f1'), 10), d2 = mkDots($('f2'), 10);
+
+  // deterministic per-worker spread (no Math.random)
+  var spread = bars.map(function(_, i){ var x = Math.sin(i * 12.9898 + 4.1) * 43758.5453; return 0.88 + 0.16 * (x - Math.floor(x)); });
+
+  var clamp = function(x,a,b){ return x < a ? a : x > b ? b : x; };
+  var lerp = function(a,b,u){ return a + (b-a)*u; };
+  var ease = function(u){ u = clamp(u,0,1); return 1 - Math.pow(1-u, 3); };
+
+  var LIMIT_POS = 0.92; // dashed 600 line sits 8% from top of track
+
+  function baseLevel(s, u){
+    if (s <= 1) return 0.14;
+    if (s === 2) return u < 0.15 ? lerp(0.14, 0, u/0.15) : lerp(0, 0.2, ease((u-0.15)/0.85));
+    if (s === 3) return lerp(0.2, 0.68, ease(u/0.45));
+    if (s === 4) return lerp(0.68, 0.74, ease(u));
+    if (s === 5) return lerp(0.74, 0.8, ease(u));
+    return lerp(0.8, 0.3, ease(u/0.5));
+  }
+
+  var last = {};
+  function set(key, el, prop, val){ if (last[key] !== val){ last[key] = val; if (prop === 'text') el.textContent = val; else if (prop === 'class') el.className = val; else el.style[prop] = val; } }
+  function tog(key, el, cls, on){ if (last[key] !== on){ last[key] = on; el.classList.toggle(cls, on); } }
+
+  var t = REST, playing = false, visible = true, raf = 0, prevTs = 0, played = false;
+  var stepBtns = fig.querySelectorAll('.steps button');
+
+  function D(tt){
+    t = clamp(tt, 0, DUR);
+    var s = Math.min(6, Math.floor(t / STEP)), u = (t - s*STEP) / STEP;
+    if (t >= DUR) { s = 6; u = 1; }
+
+    // caption + chips
+    if (last.capS !== s){ last.capS = s; $('cap').innerHTML = '<b>' + CAPS[s][0] + '</b>' + CAPS[s][1].replace('counts.clear()', '<span class="mono">counts.clear()</span>');
+      for (var i=0;i<stepBtns.length;i++){ if (i === s) stepBtns[i].setAttribute('aria-current','step'); else stepBtns[i].removeAttribute('aria-current'); }
+      set('tm', $('tm'), 'text', 'T' + (s+1));
+    }
+
+    // client badges
+    tog('bNew', $('bNew'), 'on', s >= 1);
+    tog('bRetry', $('bRetry'), 'on', s >= 5);
+
+    // pods
+    var many = s === 6;
+    tog('many', $('pods'), 'many', many);
+    tog('podsHot', $('pods'), 'hot', s === 3 || s === 6);
+    set('podT', $('podT'), 'text', many ? '12 個 Pod × 4 個 worker' : '3 個 Pod × 4 個 worker');
+    if (last.podSm !== many){ last.podSm = many;
+      $('podS').innerHTML = many ? 'HPA 把 Pod 從 3 個拉到 12 個：<span class="mono">counts</span> 變成 48 份，各記各的'
+                                 : '每一格是一個 worker 自己記憶體裡的 <span class="mono">counts</span>，彼此看不到'; }
+    tog('clear', $('clear'), 'on', s === 2 && u < 0.45);
+
+    var b = baseLevel(s, u);
+    for (var w = 0; w < bars.length; w++){
+      var lv;
+      if (w < 12) lv = b * spread[w];
+      else if (!many) lv = 0;
+      else { var pi = Math.floor(w/4) - 3; lv = lerp(0, 0.3, ease((u - 0.08 - pi*0.025) / 0.4)) * spread[w]; }
+      lv = clamp(lv, 0, LIMIT_POS - 0.06);
+      var v = 'scaleY(' + lv.toFixed(3) + ')';
+      if (last['w'+w] !== v){ last['w'+w] = v; bars[w].style.transform = v; }
+    }
+    for (var q = 3; q < 12; q++){
+      var op = many ? clamp((u - 0.02 - (q-3)*0.025) / 0.1, 0, 1).toFixed(2) : '1';
+      set('po'+q, pods[q], 'opacity', op);
+    }
+
+    // traffic dots
+    var n = s <= 1 ? 2 : s === 2 ? (u < 0.15 ? 2 : 6) : s <= 4 ? 6 : 10;
+    var speed = s <= 1 ? 0.35 : s <= 4 ? 0.7 : 1.0;
+    for (var j = 0; j < 10; j++){
+      var on = j < n;
+      var ph = on ? ((t * speed + j / n) % 1) : 0;
+      tog('d1'+j, d1[j], 'on', on); tog('d2'+j, d2[j], 'on', on);
+      var pv = ph.toFixed(3);
+      if (last['dp'+j] !== pv){ last['dp'+j] = pv; d1[j].style.setProperty('--p', pv); d2[j].style.setProperty('--p', ((ph + 0.37) % 1).toFixed(3)); }
+    }
+
+    // database
+    var cpu = s <= 2 ? 0.18 : s === 3 ? lerp(0.18, 0.7, ease(u)) : s === 4 ? lerp(0.7, 1, ease(u/0.4)) : 1;
+    set('cpu', $('cpu'), 'text', Math.round(cpu*100) + '%');
+    set('cpuB', $('cpuBar'), 'transform', 'scaleX(' + cpu.toFixed(3) + ')');
+    tog('dbHot', $('db'), 'hot', s === 4 || s === 5);
+    var slow = s > 4 || (s === 4 && u > 0.3);
+    set('lat', $('lat'), 'text', slow ? '80ms → 好幾秒' : '80ms');
+    tog('b504', $('b504'), 'on', s > 4 || (s === 4 && u > 0.5));
+
+    // readouts
+    var big = s === 6 && u > 0.3;
+    set('vCap', $('vCap'), 'text', big ? '600 × 48 = 28800' : '600 × 12 = 7200');
+    set('nCap', $('nCap'), 'text', big ? '48 份計數，每份上限 600' : '12 份計數，每份上限 600');
+    tog('rCapHot', $('rCap'), 'hot', big);
+    tog('r429Hot', $('r429'), 'hot', s === 3);
+    set('n429', $('n429'), 'text', s >= 4 ? '監控上這個 key 佔了 70% 的流量' : (s === 3 ? '每份都沒到 600，全部放行' : ''));
+
+    // scrubber
+    var sv = t.toFixed(2);
+    if (last.sv !== sv){ last.sv = sv; $('scrub').value = sv; }
+  }
+
+  function setPlaying(on){
+    playing = on;
+    $('play').textContent = on ? '❚❚ 暫停' : '▶ 播放';
+    $('play').setAttribute('aria-label', on ? '暫停' : '播放');
+    if (on) arm(); else stop();
+  }
+  function arm(){ if (!raf && playing && visible){ prevTs = 0; raf = requestAnimationFrame(tick); } }
+  function stop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function tick(ts){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = prevTs ? Math.min(0.1, (ts - prevTs) / 1000) : 0;
+    prevTs = ts;
+    D(t + dt);
+    if (t >= DUR){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+
+  function seek(tt){ setPlaying(false); D(tt); }
+  window.seek = seek; window.DUR = DUR; window.timeline = function(){ return DUR; };
+
+  $('play').addEventListener('click', function(){
+    if (playing){ setPlaying(false); return; }
+    if (!played || t >= DUR) D(0);
+    played = true; setPlaying(true);
+  });
+  $('scrub').addEventListener('input', function(e){ played = true; seek(+e.target.value); });
+  for (var i = 0; i < stepBtns.length; i++){
+    stepBtns[i].addEventListener('click', function(e){ played = true; seek(+e.currentTarget.dataset.s * STEP + STEP * 0.8); });
+  }
+  fig.addEventListener('keydown', function(e){
+    if (e.target.tagName === 'INPUT') return;
+    var s = Math.min(6, Math.floor(t / STEP));
+    if (e.key === ' ' && e.target === fig){ e.preventDefault(); $('play').click(); }
+    else if (e.key === 'ArrowRight'){ e.preventDefault(); played = true; seek(Math.min(6, s+1) * STEP + STEP*0.8); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); played = true; seek(Math.max(0, s-1) * STEP + STEP*0.8); }
+    else if (e.key === 'Home'){ e.preventDefault(); seek(0); }
+    else if (e.key === 'End'){ e.preventDefault(); seek(DUR); }
+  });
+
+  // theme
+  var root = document.documentElement, mq = matchMedia('(prefers-color-scheme: dark)');
+  $('theme').addEventListener('click', function(){
+    var cur = root.getAttribute('data-theme') || (mq.matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+  var redraw = function(){ last = {}; D(t); };
+  if (mq.addEventListener) mq.addEventListener('change', redraw);
+  new MutationObserver(redraw).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(redraw);
+
+  // visible-only loop
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); else stop(); }, { rootMargin: '120px' }).observe(fig);
+  }
+
+  // rest frame first (also under reduced motion: no autoplay at all)
+  D(REST);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本機快取只清一台</title>
+<style>
+:root{
+  --paper:#ffffff; --paper-2:#f3f4f6; --ink:#2d3142; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(45,49,66,.14); --rule-solid:#c4c7cc;
+  --hot-fill:#fde68a; --hot-line:#b45309; --hot-ink:#78350f;
+  --ok-fill:#e8f0fb; --ok-line:#2e5aa8; --empty:#9aa1ad;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1f2230; --paper-2:#2a2e3f; --ink:#f1f2f4; --muted:#c3c6cc; --soft:#a3abbd;
+    --rule:rgba(241,242,244,.14); --rule-solid:rgba(191,192,192,.3);
+    --hot-fill:#5b3a0b; --hot-line:#f59e0b; --hot-ink:#fde68a;
+    --ok-fill:#24324d; --ok-line:#739fdf; --empty:#7b8396;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1f2230; --paper-2:#2a2e3f; --ink:#f1f2f4; --muted:#c3c6cc; --soft:#a3abbd;
+  --rule:rgba(241,242,244,.14); --rule-solid:rgba(191,192,192,.3);
+  --hot-fill:#5b3a0b; --hot-line:#f59e0b; --hot-ink:#fde68a;
+  --ok-fill:#24324d; --ok-line:#739fdf; --empty:#7b8396;
+  color-scheme:dark;
+}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);padding:12px 16px;
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:14px;line-height:1.45;-webkit-text-size-adjust:100%}
+.fig{margin:0;max-width:960px;outline:none}
+.fig:focus-visible{outline:2px solid var(--hot-line);outline-offset:4px;border-radius:8px}
+.num{font-variant-numeric:tabular-nums;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas,"Noto Sans TC",monospace}
+
+/* route */
+.route{display:flex;flex-wrap:wrap;align-items:center;gap:6px 4px;min-height:36px;margin-bottom:12px}
+.route .rtag{font-size:12px;color:var(--soft);margin-right:4px}
+.chip{display:inline-flex;align-items:center;min-height:28px;padding:2px 10px;border-radius:6px;
+  border:1px dashed var(--rule-solid);color:var(--soft);font-size:13px;background:var(--paper);
+  transition:background-color .25s,border-color .25s,color .25s}
+.chip.on{border-style:solid;border-color:var(--ink);color:var(--ink);background:var(--paper-2)}
+.chip.on.end{border-color:var(--hot-line);background:var(--hot-fill);color:var(--hot-ink);font-weight:600}
+.arr{color:var(--soft);font-size:13px;opacity:.4;transition:opacity .25s}
+.arr.on{opacity:1}
+.route .idle{font-size:13px;color:var(--soft)}
+
+/* instances */
+.stage{display:grid;grid-template-columns:1fr 1fr 1.15fr;gap:12px}
+.inst{border:1.5px solid var(--rule-solid);border-radius:8px;padding:10px 12px;background:var(--paper);
+  transition:border-color .25s,box-shadow .25s}
+.inst.handler{border-color:var(--hot-line);box-shadow:0 0 0 2px color-mix(in srgb,var(--hot-line) 25%,transparent)}
+.ihead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 6px;font-weight:600;font-size:15px}
+.ihead > span:first-child{white-space:nowrap}
+.badge{font-size:12px;font-weight:500;color:var(--hot-ink);background:var(--hot-fill);border:1px solid var(--hot-line);
+  border-radius:4px;padding:0 6px;visibility:hidden;white-space:nowrap}
+.inst.handler .badge{visibility:visible}
+.cell{margin-top:8px;border:1px solid var(--rule);border-radius:6px;padding:6px 8px;background:var(--paper-2);
+  display:flex;justify-content:space-between;align-items:center;gap:6px;transition:background-color .3s,border-color .3s}
+.cell .lbl{font-size:12px;color:var(--soft)}
+.cell .val{font-size:24px;font-weight:700;line-height:1.1}
+.cell.empty .val{font-size:14px;font-weight:500;color:var(--empty)}
+.cell.hot{background:var(--hot-fill);border-color:var(--hot-line)}
+.cell.hot .val,.cell.hot .lbl{color:var(--hot-ink)}
+.note{margin-top:6px;font-size:12px;color:var(--soft);min-height:18px}
+.others .minis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.mini{border:1px solid var(--rule);border-radius:6px;background:var(--paper-2);text-align:center;padding:4px 0;
+  font-size:15px;font-weight:700;transition:background-color .3s,border-color .3s}
+.mini.hot{background:var(--hot-fill);border-color:var(--hot-line);color:var(--hot-ink)}
+.ihead .sub{font-size:12px;font-weight:400;color:var(--soft)}
+
+/* db */
+.dbrow{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-top:12px;border:1.5px solid var(--rule-solid);
+  border-radius:8px;padding:8px 12px;background:var(--paper)}
+.dbrow .dbname{font-weight:600;font-size:15px}
+.dbrow .dbname small{font-weight:400;font-size:12px;color:var(--soft);margin-left:6px}
+.dbrow .cell{margin-top:0;min-width:150px}
+.dbrow .log{font-size:12px;color:var(--soft);border:1px solid var(--rule);border-radius:4px;padding:2px 8px;display:none}
+.dbrow .log.on{display:inline-block}
+.diff{margin-left:auto;display:flex;align-items:baseline;gap:6px;font-size:13px;color:var(--soft)}
+.diff b{font-size:22px;color:var(--ink)}
+.diff.bad b{color:var(--hot-line)}
+
+/* seen */
+.seen{margin-top:12px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.seen .stitle{font-size:13px;font-weight:600;margin-right:2px}
+.sv{display:inline-flex;align-items:baseline;gap:6px;border:1px solid var(--rule-solid);border-radius:6px;padding:3px 8px;
+  font-size:12px;color:var(--soft);opacity:.28;transition:opacity .3s,background-color .3s}
+.sv b{font-size:16px;color:var(--ink)}
+.sv.on{opacity:1}
+.sv.stale.on{background:var(--hot-fill);border-color:var(--hot-line);color:var(--hot-ink)}
+.sv.stale.on b{color:var(--hot-ink)}
+.jump{font-size:12px;color:var(--hot-line);opacity:0;transition:opacity .3s}
+.jump.on{opacity:1}
+
+/* say */
+.say{margin-top:12px;display:flex;gap:10px;align-items:flex-start;min-height:44px}
+.say .tid{flex:none;font-weight:700;font-size:15px;border:1.5px solid var(--hot-line);color:var(--hot-ink);background:var(--hot-fill);
+  border-radius:6px;padding:0 8px;line-height:26px}
+.say .txt{font-size:14px}
+.say code{font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas,monospace;font-size:13px;background:var(--paper-2);padding:0 4px;border-radius:4px}
+
+/* controls */
+.ctrl{margin-top:12px;display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center}
+.ctrl .btns{grid-column:1;grid-row:1}
+.ctrl .scrub{grid-column:2;grid-row:1}
+.ctrl .theme{grid-column:3;grid-row:1}
+.btns{display:flex;gap:6px}
+button{font:inherit;font-size:13px;color:var(--ink);background:var(--paper-2);border:1px solid var(--rule-solid);border-radius:6px;
+  min-height:34px;min-width:34px;padding:0 10px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--hot-line);outline-offset:2px}
+.play{min-width:72px;font-weight:600}
+.scrub{display:flex;flex-direction:column;gap:4px;min-width:0}
+input[type=range]{width:100%;margin:0;accent-color:var(--hot-line);height:24px}
+.ticks{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.ticks button{min-width:0;padding:0;font-size:12px;min-height:32px}
+.ticks button.cur{background:var(--hot-fill);border-color:var(--hot-line);color:var(--hot-ink);font-weight:700}
+.theme{font-size:12px;padding:0 8px}
+
+@media (max-width:620px){
+  .stage{grid-template-columns:1fr 1fr}
+  .others{grid-column:1 / -1}
+  .others .minis{grid-template-columns:repeat(6,1fr)}
+  .ctrl{grid-template-columns:1fr auto}
+  .ctrl .btns{grid-column:1;grid-row:1}
+  .ctrl .theme{grid-column:2;grid-row:1}
+  .ctrl .scrub{grid-column:1 / -1;grid-row:2}
+  .diff{margin-left:0;width:100%}
+}
+@media (max-width:380px){
+  .cell .val{font-size:20px}
+  .inst{padding:8px}
+  .ihead{font-size:14px}
+}
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important}
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="lcsp" data-fig="local-cache-stale-price" data-dur="21" data-rest="11.9" tabindex="0"
+  aria-label="商品 API 跑 8 個實例，各自用本機快取存商品 42 的價格。營運把價格從 790 改回 990，請求只落在實例 C，C 只清得掉自己的快取；實例 A 和其他 6 台還是 790，使用者每次被分到不同台，看到的價格就在 790 和 990 之間跳，直到 TTL 600 秒到期。">
+
+  <div class="route" id="route" aria-hidden="true"></div>
+
+  <div class="stage">
+    <div class="inst" id="iA">
+      <div class="ihead"><span>實例 A</span><span class="badge">處理這次請求</span></div>
+      <div class="cell" id="cA"><span class="lbl">本機快取<br>商品 42</span><span class="val num">790</span></div>
+      <div class="note" id="nA"></div>
+    </div>
+    <div class="inst" id="iC">
+      <div class="ihead"><span>實例 C</span><span class="badge">處理這次請求</span></div>
+      <div class="cell" id="cC"><span class="lbl">本機快取<br>商品 42</span><span class="val num">790</span></div>
+      <div class="note" id="nC"></div>
+    </div>
+    <div class="inst others" id="iO">
+      <div class="ihead"><span>其他 6 台</span><span class="sub">跟 A 一樣</span></div>
+      <div class="minis" id="minis">
+        <div class="mini num">790</div><div class="mini num">790</div><div class="mini num">790</div>
+        <div class="mini num">790</div><div class="mini num">790</div><div class="mini num">790</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dbrow">
+    <span class="dbname">資料庫<small>PostgreSQL · products</small></span>
+    <div class="cell" id="cDB"><span class="lbl">商品 42 的 price</span><span class="val num">790</span></div>
+    <span class="log" id="log">日誌：沒有任何錯誤</span>
+    <span class="diff" id="diff">記憶體裡跟資料庫不一樣的實例 <b class="num" id="diffN">0</b> / 8 台</span>
+  </div>
+
+  <div class="seen" aria-hidden="true">
+    <span class="stitle">使用者看到的價格</span>
+    <span class="sv" id="s3">T3 商品頁 <b class="num">990</b></span>
+    <span class="jump" id="j4">→ 跳回</span>
+    <span class="sv stale" id="s4">T4 重新整理 <b class="num">790</b></span>
+    <span class="sv stale" id="s5">T5 購物車 <b class="num">790</b></span>
+    <span class="jump" id="j6">→ 又變</span>
+    <span class="sv" id="s6">T6 結帳 <b class="num">990</b></span>
+  </div>
+
+  <div class="say" aria-live="polite"><span class="tid" id="tid">T4</span><span class="txt" id="txt"></span></div>
+
+  <div class="ctrl">
+    <div class="btns">
+      <button type="button" id="prev" aria-label="上一格">◀</button>
+      <button type="button" class="play" id="play" aria-label="播放">▶ 播放</button>
+      <button type="button" id="next" aria-label="下一格">▶</button>
+    </div>
+    <button type="button" class="theme" id="theme" aria-label="切換深淺色">深色</button>
+    <div class="scrub">
+      <input type="range" id="range" min="0" max="2099" step="1" value="1190" aria-label="時間軸：拖動看 T1 到 T7">
+      <div class="ticks" id="ticks"></div>
+    </div>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var fig = document.getElementById('lcsp');
+  var DUR = +fig.dataset.dur, REST = +fig.dataset.rest, SEG = 3, APPLY = 0.78;
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  // 狀態：A／C／其他 6 台／資料庫。'' 代表快取裡沒有。hot = 這一格發生事情的地方（琥珀）。
+  var STEPS = [
+    {id:'T1', route:[], st:{A:'790',C:'790',O:'790',DB:'790'}, handler:null, hot:[], nA:'', nC:'', log:false,
+     txt:'特價中：A、C 和其他 6 台都已經把商品 42 快取起來，價格 790，跟資料庫一樣。'},
+    {id:'T2', route:['營運','負載平衡器','實例 C','UPDATE 資料庫','清掉 C 自己的快取'], st:{A:'790',C:'',O:'790',DB:'990'}, handler:'C', hot:['C','DB'],
+     nA:'不知道價格改了', nC:'只清得到自己這台', log:false,
+     txt:'營運改價 <code>update_price(42, 990)</code>，負載平衡器把它送到 C：C 寫入資料庫，再清掉自己的快取。A 和其他 6 台的記憶體碰不到，還是 790。'},
+    {id:'T3', route:['使用者打開商品頁','負載平衡器','實例 C','快取沒有','查資料庫','990'], st:{A:'790',C:'990',O:'790',DB:'990'}, handler:'C', hot:['C'],
+     nA:'不知道價格改了', nC:'從資料庫重新拿到 990', log:false,
+     txt:'使用者打開商品頁，被分到 C：C 的快取沒有，查資料庫，拿到 990。'},
+    {id:'T4', route:['使用者重新整理','負載平衡器','實例 A','快取還沒過期','790'], st:{A:'790',C:'990',O:'790',DB:'990'}, handler:'A', hot:['A'],
+     nA:'TTL 600 秒還沒到，直接回傳', nC:'', log:false,
+     txt:'使用者重新整理，被分到 A：A 的快取還沒過期，直接回傳 790。同一個頁面，價格從 990 跳回 790。'},
+    {id:'T5', route:['使用者加入購物車','負載平衡器','實例 A','790'], st:{A:'790',C:'990',O:'790',DB:'990'}, handler:'A', hot:['A'],
+     nA:'TTL 600 秒還沒到，直接回傳', nC:'', log:false,
+     txt:'使用者加入購物車，被分到 A：購物車顯示 790。'},
+    {id:'T6', route:['使用者按結帳','負載平衡器','實例 C','990'], st:{A:'790',C:'990',O:'790',DB:'990'}, handler:'C', hot:['C'],
+     nA:'', nC:'', log:true,
+     txt:'使用者按結帳，被分到 C：金額算出 990。購物車寫 790、結帳要付 990，使用者以為標價不實；工程師看到資料庫已經是 990，日誌也沒有任何錯誤。'},
+    {id:'T7', route:['改價後最多 10 分鐘','A 的 TTL 到期','下次讀取查資料庫','990'], st:{A:'990',C:'990',O:'990',DB:'990'}, handler:'A', hot:['A','O'],
+     nA:'TTL 到期，重新查到 990', nC:'', log:true,
+     txt:'改價後最多 10 分鐘，A 的快取 TTL（600 秒）到期，下次讀取才查到 990。其他 6 台也一樣要等 TTL。'}
+  ];
+
+  var $ = function(id){ return document.getElementById(id); };
+  var routeEl = $('route'), rangeEl = $('range'), playBtn = $('play'), ticksEl = $('ticks');
+  var cells = {A:$('cA'), C:$('cC'), DB:$('cDB')}, minis = $('minis').children;
+  var insts = {A:$('iA'), C:$('iC')};
+  var SEEN = [{k:2,el:$('s3')},{k:3,el:$('s4'),j:$('j4')},{k:4,el:$('s5')},{k:5,el:$('s6'),j:$('j6')}];
+
+  STEPS.forEach(function(s, i){
+    var b = document.createElement('button');
+    b.type = 'button'; b.textContent = s.id; b.setAttribute('aria-label', '跳到 ' + s.id);
+    b.addEventListener('click', function(){ pause(); seek(endOf(i)); });
+    ticksEl.appendChild(b);
+  });
+  var tickBtns = ticksEl.children;
+
+  function endOf(i){ return i * SEG + SEG - 0.1; }
+  function readTokens(){ var cs = getComputedStyle(document.documentElement); return {hot: cs.getPropertyValue('--hot-line').trim()}; }
+
+  var lastKey = '', lastStep = -1;
+  function setCell(el, v, hot){
+    var val = el.querySelector('.val');
+    if (v === '') { el.classList.add('empty'); val.textContent = '沒有'; }
+    else { el.classList.remove('empty'); val.textContent = v; }
+    el.classList.toggle('hot', !!hot);
+  }
+  function buildRoute(s){
+    routeEl.innerHTML = '';
+    if (!s.route.length){ var sp = document.createElement('span'); sp.className = 'idle'; sp.textContent = '還沒有請求：8 台的本機快取都存著 790'; routeEl.appendChild(sp); return; }
+    var tag = document.createElement('span'); tag.className = 'rtag'; tag.textContent = '這次請求'; routeEl.appendChild(tag);
+    s.route.forEach(function(r, i){
+      if (i){ var a = document.createElement('span'); a.className = 'arr'; a.textContent = '→'; routeEl.appendChild(a); }
+      var c = document.createElement('span'); c.className = 'chip' + (i === s.route.length - 1 ? ' end' : ''); c.textContent = r; routeEl.appendChild(c);
+    });
+  }
+
+  // D(g, t, C)：畫第 t 秒的樣子。只在狀態改變時動 DOM。
+  function D(g, t, C){
+    t = Math.max(0, Math.min(DUR - 0.01, t));
+    var k = Math.min(STEPS.length - 1, Math.floor(t / SEG));
+    var p = (t - k * SEG) / SEG;
+    var s = STEPS[k], n = s.route.length;
+    var lit = n ? Math.min(n, Math.floor(p / (APPLY / n)) + 1) : 0;
+    if (p >= APPLY) lit = n;
+    var applied = p >= APPLY || n === 0;
+    var key = k + ':' + lit + ':' + (applied ? 1 : 0);
+    if (key === lastKey) return;
+    lastKey = key;
+    if (k !== lastStep){ buildRoute(s); lastStep = k; $('tid').textContent = s.id; $('txt').innerHTML = s.txt; }
+    var chips = routeEl.querySelectorAll('.chip'), arrs = routeEl.querySelectorAll('.arr');
+    for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('on', i < lit);
+    for (var j = 0; j < arrs.length; j++) arrs[j].classList.toggle('on', j + 1 < lit);
+
+    var cur = applied ? s : (STEPS[k - 1] || s);
+    var hot = applied ? s.hot : [];
+    setCell(cells.A, cur.st.A, hot.indexOf('A') >= 0);
+    setCell(cells.C, cur.st.C, hot.indexOf('C') >= 0);
+    setCell(cells.DB, cur.st.DB, hot.indexOf('DB') >= 0);
+    for (var m = 0; m < minis.length; m++){ minis[m].textContent = cur.st.O; minis[m].classList.toggle('hot', hot.indexOf('O') >= 0); }
+    var showH = s.handler && lit >= 3;
+    insts.A.classList.toggle('handler', showH && s.handler === 'A');
+    insts.C.classList.toggle('handler', showH && s.handler === 'C');
+    $('nA').textContent = applied ? s.nA : (STEPS[k - 1] ? STEPS[k - 1].nA : '');
+    $('nC').textContent = applied ? s.nC : (STEPS[k - 1] ? STEPS[k - 1].nC : '');
+    $('log').classList.toggle('on', applied ? s.log : !!(STEPS[k - 1] && STEPS[k - 1].log));
+    var diff = 0;
+    ['A','C'].forEach(function(x){ if (cur.st[x] !== '' && cur.st[x] !== cur.st.DB) diff++; });
+    if (cur.st.O !== cur.st.DB) diff += 6;
+    $('diffN').textContent = diff;
+    $('diff').classList.toggle('bad', diff > 0);
+    SEEN.forEach(function(e){
+      var on = k > e.k || (k === e.k && applied);
+      e.el.classList.toggle('on', on);
+      if (e.j) e.j.classList.toggle('on', on);
+    });
+    for (var q = 0; q < tickBtns.length; q++){ tickBtns[q].classList.toggle('cur', q === k); }
+  }
+
+  var T = REST, playing = false, raf = 0, last = 0, visible = true, rmTimer = 0;
+  function paint(){ D(fig, T, readTokens()); rangeEl.value = Math.round(T * 100); }
+  function seek(t){ T = Math.max(0, Math.min(DUR - 0.01, t)); paint(); }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? (now - last) / 1000 : 0; last = now;
+    T += Math.min(dt, 0.1);
+    if (T >= DUR - 0.01){ T = DUR - 0.01; paint(); pause(); return; }
+    paint();
+    raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (!raf && playing && visible && !reduce.matches){ last = 0; raf = requestAnimationFrame(frame); } }
+  function stepRM(){
+    // 減少動態：一格一格跳到該格結束狀態，不做過場。
+    var k = Math.floor(T / SEG);
+    if (k >= STEPS.length - 1){ pause(); return; }
+    seek(endOf(k + 1));
+    rmTimer = setTimeout(stepRM, 2500);
+  }
+  function play(){
+    if (T >= DUR - 0.2) T = 0;
+    else if (Math.abs(T - REST) < 0.01 && !playing) T = 0;
+    playing = true; playBtn.textContent = '❚❚ 暫停'; playBtn.setAttribute('aria-label', '暫停');
+    if (reduce.matches){ seek(T === 0 ? endOf(0) : T); clearTimeout(rmTimer); rmTimer = setTimeout(stepRM, 2500); }
+    else { paint(); arm(); }
+  }
+  function pause(){
+    playing = false; clearTimeout(rmTimer);
+    if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    playBtn.textContent = '▶ 播放'; playBtn.setAttribute('aria-label', '播放');
+  }
+  function stepBy(d){
+    pause();
+    var k = Math.floor(T / SEG);
+    var atEnd = (T - k * SEG) / SEG >= APPLY;
+    var nk = d > 0 ? (atEnd ? k + 1 : k) : (atEnd ? k - 1 : k - 1);
+    nk = Math.max(0, Math.min(STEPS.length - 1, nk));
+    seek(endOf(nk));
+  }
+
+  playBtn.addEventListener('click', function(){ playing ? pause() : play(); });
+  $('prev').addEventListener('click', function(){ stepBy(-1); });
+  $('next').addEventListener('click', function(){ stepBy(1); });
+  rangeEl.addEventListener('input', function(){ pause(); seek(rangeEl.value / 100); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    if (e.key === 'ArrowRight'){ stepBy(1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft'){ stepBy(-1); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter'){ playing ? pause() : play(); e.preventDefault(); }
+  });
+
+  var root = document.documentElement;
+  function isDark(){ var a = root.getAttribute('data-theme'); return a ? a === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches; }
+  function syncThemeBtn(){ $('theme').textContent = isDark() ? '淺色' : '深色'; }
+  $('theme').addEventListener('click', function(){ root.setAttribute('data-theme', isDark() ? 'light' : 'dark'); });
+  new MutationObserver(function(){ syncThemeBtn(); lastKey = ''; paint(); }).observe(root, {attributes:true, attributeFilter:['data-theme']});
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ syncThemeBtn(); lastKey = ''; paint(); });
+  reduce.addEventListener('change', function(){ if (reduce.matches) pause(); });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); }, {rootMargin:'120px'}).observe(fig);
+  }
+
+  window.DUR = DUR;
+  window.timeline = function(){ return {dur: DUR, rest: REST, steps: STEPS.map(function(s, i){ return {id: s.id, t: endOf(i)}; })}; };
+  window.seek = function(t){ pause(); seek(+t); };
+
+  syncThemeBtn();
+  seek(REST);
+})();
+</script>
+</body>
+</html>

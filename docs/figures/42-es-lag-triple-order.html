@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>讀取模型落後</title>
+<style>
+:root {
+  --bg: #ffffff; --surface: #f6f7f9; --ink: #1f2430; --muted: #4f5d75; --soft: #5a6580; --line: #d5d9e0;
+  --evt: #c9ced8; --evt-ink: #3a4254;
+  --hot-fill: #fde68a; --hot-stroke: #b45309; --hot-ink: #111111;
+  --ok: #2e5aa8; --ok-fill: #e3ebf8;
+  --f-ui: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --f-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Noto Sans TC", "Microsoft JhengHei", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e2129; --surface: #272b35; --ink: #eceef2; --muted: #b8bfcc; --soft: #9aa3b5; --line: #3b4150;
+    --evt: #4a5162; --evt-ink: #dfe3ea;
+    --hot-fill: #5a3a0c; --hot-stroke: #f59e0b; --hot-ink: #fde68a;
+    --ok: #8fb2ea; --ok-fill: #253552;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e2129; --surface: #272b35; --ink: #eceef2; --muted: #b8bfcc; --soft: #9aa3b5; --line: #3b4150;
+  --evt: #4a5162; --evt-ink: #dfe3ea;
+  --hot-fill: #5a3a0c; --hot-stroke: #f59e0b; --hot-ink: #fde68a;
+  --ok: #8fb2ea; --ok-fill: #253552;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); padding: 12px 16px; -webkit-text-size-adjust: 100%; }
+.fig { margin: 0 auto; max-width: 960px; min-width: 0; display: flex; flex-direction: column; gap: 12px; outline: none; }
+.fig:focus-visible { outline: 2px solid var(--hot-stroke); outline-offset: 4px; border-radius: 6px; }
+code { font: 12px var(--f-mono); }
+
+/* top readouts */
+.top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.clock { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.clock .tag { font: 700 13px var(--f-mono); background: var(--ink); color: var(--bg); padding: 2px 8px; border-radius: 4px; }
+.clock .time { font: 700 18px var(--f-mono); font-variant-numeric: tabular-nums; }
+.reads { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; min-width: 0; }
+.lag { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.lag .lbl, .pay .lbl { font-size: 13px; color: var(--muted); }
+.meter { position: relative; width: 120px; height: 12px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; width: 100%; background: var(--hot-stroke); border-radius: 6px; }
+.meter b { position: absolute; top: -1px; bottom: -1px; left: 3px; width: 2px; background: var(--ok); }
+.lag .val { font: 700 14px var(--f-ui); }
+.lag .norm { font-size: 12px; color: var(--soft); }
+.pay { display: flex; align-items: baseline; gap: 6px; }
+.pay .val { font: 700 18px var(--f-ui); font-variant-numeric: tabular-nums; padding: 0 6px; border-radius: 4px; border: 1.5px solid transparent; }
+.pay .val.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); }
+
+/* stage */
+.stage { display: grid; gap: 10px 16px; align-items: center;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr) minmax(0, 200px);
+  grid-template-areas: "api . ." "pri q rm"; }
+.api { grid-area: api; } .pri { grid-area: pri; } .rm { grid-area: rm; } .q { grid-area: q; }
+.chip { font-size: 12px; line-height: 1.35; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--line); color: var(--soft); min-height: 32px; display: flex; align-items: center; }
+.chip.on { border: 1.5px solid var(--ink); color: var(--ink); font-weight: 600; }
+.db { background: var(--surface); border: 1.5px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 148px; }
+.db.ring { border-color: var(--hot-stroke); box-shadow: 0 0 0 2px var(--hot-stroke); }
+.db .name { font-weight: 600; font-size: 14px; line-height: 1.3; }
+.db .sub { font-size: 12px; color: var(--soft); line-height: 1.35; }
+.db .cnt { display: flex; align-items: baseline; gap: 4px; }
+.db .cnt .n { font: 700 22px var(--f-ui); font-variant-numeric: tabular-nums; padding: 0 6px; border-radius: 4px; border: 1.5px solid transparent; }
+.db .cnt .n.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); }
+.db .cnt .u { font-size: 13px; color: var(--muted); }
+.rows { display: flex; flex-wrap: wrap; gap: 4px; min-height: 26px; }
+.row { font: 600 12px var(--f-mono); padding: 3px 6px; border-radius: 4px; background: var(--ok-fill); color: var(--ok); border: 1px solid var(--ok); white-space: nowrap; display: none; }
+.row.on { display: inline-block; }
+
+.q { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.q .qlbl { font-size: 12px; color: var(--soft); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.q .qlbl code { color: var(--soft); }
+.lane { position: relative; height: 48px; border-top: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line); background: var(--surface); overflow: hidden; }
+.lane::after { content: ""; position: absolute; right: 0; top: 50%; width: 0; height: 0; border-left: 8px solid var(--soft); border-top: 6px solid transparent; border-bottom: 6px solid transparent; transform: translateY(-50%); }
+.blk { position: absolute; top: 10px; height: 26px; width: calc(100% / 14 - 4px); left: calc(var(--x, 0) * 100% / 14 + 2px); border-radius: 4px; background: var(--evt); opacity: 0; }
+.blk.me { background: var(--hot-fill); color: var(--hot-ink); border: 2px solid var(--hot-stroke); z-index: 2; top: 8px; height: 30px;
+  width: max(calc(100% / 14 - 4px), 50px); left: calc((var(--x, 0) + 1) * 100% / 14 - 2px); transform: translateX(-100%);
+  font: 700 12px var(--f-mono); display: flex; align-items: center; justify-content: center; white-space: nowrap; }
+.head { position: absolute; right: 0; top: 0; bottom: 0; width: 3px; background: var(--soft); }
+.q .foot { font-size: 12px; color: var(--soft); display: flex; justify-content: space-between; gap: 8px; }
+
+/* inconsistency band */
+.gap { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; text-align: center; font-size: 13px; line-height: 1.4; padding: 6px 10px; border-radius: 6px; border: 1px dashed var(--line); color: var(--soft); min-height: 34px; }
+.gap.hot { background: var(--hot-fill); border: 1.5px solid var(--hot-stroke); color: var(--hot-ink); font-weight: 600; }
+.gap.ok { border: 1.5px solid var(--ok); color: var(--ok); font-weight: 600; }
+
+/* story line + the user's screen */
+.story { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 240px); gap: 12px 16px; align-items: stretch; }
+.say { font-size: 14px; line-height: 1.6; min-height: 4.8em; display: flex; align-items: center; }
+.say code { font: 13px var(--f-mono); background: var(--surface); border: 1px solid var(--line); padding: 0 4px; border-radius: 3px; }
+.screen { border: 1.5px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 112px; }
+.screen .k { font-size: 12px; color: var(--soft); display: flex; justify-content: space-between; gap: 6px; }
+.screen .v { font-size: 14px; font-weight: 600; line-height: 1.45; }
+.screen .list { display: flex; flex-direction: column; gap: 3px; }
+.screen .li { font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); display: none; }
+.screen .li.on { display: block; }
+.screen.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); }
+.screen.hot .k { color: var(--hot-ink); }
+.screen.hot .li { background: transparent; border-color: var(--hot-stroke); color: var(--hot-ink); }
+.screen.dim { opacity: 0.6; }
+
+/* controls */
+.ctrl { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
+.ctrl button { flex: none; min-width: 36px; height: 32px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: 12px var(--f-mono); padding: 0 8px; }
+.ctrl button:hover { border-color: var(--hot-stroke); }
+.ctrl button[aria-current="step"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.ctrl .play { min-width: 64px; font: 600 13px var(--f-ui); }
+.ctrl .theme { font: 12px var(--f-ui); }
+.ctrl input[type=range] { flex: 1 1 160px; min-width: 0; height: 32px; accent-color: var(--hot-stroke); margin: 0; }
+.stops { display: flex; gap: 4px; flex-wrap: wrap; }
+.hint { font-size: 12px; color: var(--soft); width: 100%; }
+:focus-visible { outline: 2px solid var(--hot-stroke); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 560px) {
+  .stage { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "api api" "pri rm" "q q"; gap: 8px 10px; }
+  .story { grid-template-columns: minmax(0, 1fr); }
+  .say { min-height: 0; }
+  .db { min-height: 0; }
+  .meter { width: 80px; }
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="es-lag-triple-order" data-dur="14" data-rest="2.8" tabindex="0"
+  aria-label="消費者延遲時間軸：週年慶 20:10 消費者延遲 4 分鐘以上。使用者送出訂單，主庫立刻有 #1001，但 order.created 事件在佇列裡排隊，「我的訂單」查的 Elasticsearch 讀取模型是 0 筆，列表是空的；使用者以為沒成功又送出兩次，主庫變成 3 筆、扣款 3 次；到 20:14:05 消費者才處理到 #1001，20:15:05 三筆一模一樣的訂單同時出現，兩邊終於一樣。">
+  <div class="top">
+    <div class="clock"><span class="tag" data-k="tag">T2</span><span class="time" data-k="time">20:10:01</span></div>
+    <div class="reads">
+      <div class="lag"><span class="lbl">消費者延遲</span><span class="meter" aria-hidden="true"><i></i><b></b></span><span class="val">4 分鐘以上</span><span class="norm">平常約 300 毫秒</span></div>
+      <div class="pay"><span class="lbl">信用卡扣款</span><span class="val" data-k="pay">1 次</span></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="chip api" data-k="api"><span>下單 API：寫主庫並扣款 → 丟事件 → redirect 到「我的訂單」</span></div>
+    <div class="db pri" data-k="pri">
+      <span class="name">PostgreSQL 主庫</span>
+      <span class="sub">下單時寫入，立刻有</span>
+      <span class="cnt"><span class="n" data-k="pn">1</span><span class="u">筆</span></span>
+      <span class="rows"><span class="row on" data-k="p0">#1001</span><span class="row" data-k="p1">#1002</span><span class="row" data-k="p2">第 3 筆</span></span>
+    </div>
+    <div class="q">
+      <div class="qlbl"><span>訊息佇列：<code>order.created</code> 事件排隊</span><span>消費者 ▸</span></div>
+      <div class="lane" data-k="lane" aria-hidden="true"><span class="head"></span></div>
+      <div class="foot"><span>灰色：其他訂單的事件</span><span>消費者寫進 ES</span></div>
+    </div>
+    <div class="db rm ring" data-k="rm">
+      <span class="name">Elasticsearch 讀取模型</span>
+      <span class="sub">「我的訂單」查這裡</span>
+      <span class="cnt"><span class="n hot" data-k="rn">0</span><span class="u">筆</span></span>
+      <span class="rows"><span class="row" data-k="r0">#1001</span><span class="row" data-k="r1">#1002</span><span class="row" data-k="r2">第 3 筆</span></span>
+    </div>
+  </div>
+
+  <div class="gap hot" data-k="gap"><span data-k="gapv">不一致窗口：主庫 1 筆，讀取模型 0 筆</span></div>
+
+  <div class="story">
+    <div class="say"><span data-k="say">redirect 到「我的訂單」，這頁查的是 Elasticsearch。#1001 的事件還在佇列裡排隊，所以列表是空的，使用者以為沒成功。</span></div>
+    <div class="screen hot" data-k="scr">
+      <span class="k"><span>使用者看到</span><span data-k="scrk">我的訂單</span></span>
+      <span class="v" data-k="scrv">列表是空的</span>
+      <span class="list"><span class="li" data-k="l0">訂單 #1001</span><span class="li" data-k="l1">訂單 #1002</span><span class="li" data-k="l2">訂單（第 3 筆）</span></span>
+    </div>
+  </div>
+
+  <div class="ctrl"></div>
+  <p class="sr" role="status" aria-live="polite" data-k="live"></p>
+</figure>
+
+<script>
+(() => {
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const ease = (u) => u * u * (3 - 2 * u);
+
+// ---- the model: a pure function of t ----
+const STOPS = [
+  { id: 'T1', t: 0.0, time: '20:10:00', go: 1.2, api: true,
+    say: '使用者按「送出訂單」：下單 API 把訂單寫進主庫並扣款，主庫立刻有 #1001；<code>order.created</code> 事件丟進佇列，排在一長串事件後面。',
+    scr: ['下單頁', '按下「送出訂單」'] },
+  { id: 'T2', t: 2.0, time: '20:10:01', go: 2.8, hot: true,
+    say: 'redirect 到「我的訂單」，這頁查的是 Elasticsearch。#1001 的事件還在佇列裡排隊，所以列表是空的，使用者以為沒成功。',
+    scr: ['我的訂單', '列表是空的'] },
+  { id: 'T3', t: 4.0, time: '20:10:30', go: 5.2, api: true,
+    say: '使用者回去再按一次送出，扣款第 2 次。<code>db.insert_order</code> 沒有冪等鍵，主庫多了一筆 #1002。',
+    scr: ['下單頁', '再按一次「送出訂單」'] },
+  { id: 'T4', t: 6.0, time: '20:10:31', go: 6.8, hot: true,
+    say: '列表還是空的：兩筆訂單的事件都還在佇列裡，讀取模型一筆都沒有。',
+    scr: ['我的訂單', '列表還是空的'] },
+  { id: 'T5', t: 8.0, time: '20:11:00', go: 9.0, api: true,
+    say: '第三次送出，扣款第 3 次。主庫 3 筆，Elasticsearch 還是 0 筆。',
+    scr: ['下單頁', '第三次「送出訂單」'] },
+  { id: 'T6', t: 9.8, time: '20:14:05', go: 10.3, dim: true,
+    say: '消費者延遲 4 分鐘以上，到 20:14:05 才處理到 #1001，Elasticsearch 有 1 筆。使用者這時去做別的事了。',
+    scr: ['使用者', '去做別的事'] },
+  { id: 'T7', t: 12.0, time: '20:15:05', go: 13.0, hot: true, list: 3,
+    say: '使用者回來看：三筆一模一樣的訂單同時出現，信用卡被扣三次。主庫和 Elasticsearch 兩邊終於一樣。',
+    scr: ['我的訂單', '三筆一模一樣的訂單同時出現'] },
+];
+// user's events in the queue: index k in the stream of order.created events
+const MINE = [ { k: 9, born: 0.0, label: '#1001' }, { k: 15, born: 4.0, label: '#1002' }, { k: 21, born: 8.0, label: '第3筆' } ];
+const SLOTS = 14, LAST = 30;
+function born(k) {
+  const m = MINE.find((x) => x.k === k); if (m) return m.born;
+  if (k < 9) return -1;                 // already queued before 20:10:00
+  if (k < 15) return 0.75 * (k - 9);
+  if (k < 21) return 4.0 + 0.75 * (k - 15);
+  return 8.0 + 0.75 * (k - 21);
+}
+// cumulative events the consumer has written into Elasticsearch
+function consumed(t) {
+  if (t < 9.8) return lerp(0, 10, t / 9.8);
+  if (t < 10.6) return 10;
+  if (t < 12.0) return lerp(10, 22, seg(t, 10.6, 12.0));
+  return 22 + (t - 12.0) * 0.6;
+}
+const PUT_AT = [0.3, 4.3, 8.3];         // the order lands in the primary
+function stopAt(t) { let s = STOPS[0]; for (const x of STOPS) if (t >= x.t - 1e-6) s = x; return s; }
+
+// ---- DOM ----
+const el = document.querySelector('.fig');
+const $ = (k) => el.querySelector(`[data-k="${k}"]`);
+const N = { tag: $('tag'), time: $('time'), pay: $('pay'), api: $('api'), pri: $('pri'), rm: $('rm'), pn: $('pn'), rn: $('rn'),
+  lane: $('lane'), gap: $('gap'), gapv: $('gapv'), say: $('say'), scr: $('scr'), scrk: $('scrk'), scrv: $('scrv'), live: $('live') };
+const P = [$('p0'), $('p1'), $('p2')], R = [$('r0'), $('r1'), $('r2')], L = [$('l0'), $('l1'), $('l2')];
+const blocks = [];
+for (let k = 0; k <= LAST; k++) {
+  const b = document.createElement('span');
+  const m = MINE.find((x) => x.k === k);
+  b.className = 'blk' + (m ? ' me' : '');
+  if (m) b.textContent = m.label;
+  N.lane.appendChild(b); blocks.push(b);
+}
+const memo = new Map();
+const put = (node, key, val, how = 'text') => {
+  if (memo.get(key) === val) return; memo.set(key, val);
+  if (how === 'text') node.textContent = val; else if (how === 'html') node.innerHTML = val; else how(val);
+};
+
+function render(t) {
+  const s = stopAt(t);
+  const c = consumed(t);
+  const pCount = PUT_AT.filter((x) => t >= x).length;
+  const rCount = MINE.filter((m) => c >= m.k + 1).length;
+  put(N.tag, 'tag', s.id);
+  put(N.time, 'time', s.time);
+  put(N.pay, 'pay', `${Math.max(pCount, 0)} 次`);
+  put(N.pay, 'payc', pCount >= 2, (v) => N.pay.classList.toggle('hot', v));
+  put(N.pn, 'pn', String(pCount));
+  put(N.rn, 'rn', String(rCount));
+  P.forEach((n, i) => put(n, 'p' + i, i < pCount, (v) => n.classList.toggle('on', v)));
+  R.forEach((n, i) => put(n, 'r' + i, i < rCount, (v) => n.classList.toggle('on', v)));
+  const differ = pCount !== rCount;
+  const readHot = s.id === 'T2' || s.id === 'T4';
+  put(N.rn, 'rnc', readHot, (v) => N.rn.classList.toggle('hot', v));
+  put(N.rm, 'rm', readHot, (v) => N.rm.classList.toggle('ring', v));
+  put(N.api, 'api', !!s.api, (v) => N.api.classList.toggle('on', v));
+  put(N.gapv, 'gapv', differ ? `不一致窗口：主庫 ${pCount} 筆，讀取模型 ${rCount} 筆` : (pCount ? `兩邊一樣：主庫 ${pCount} 筆，讀取模型 ${rCount} 筆（收斂）` : '兩邊都還沒有這筆訂單'));
+  put(N.gap, 'gapc', differ ? 'gap hot' : (pCount ? 'gap ok' : 'gap'), (v) => { N.gap.className = v; });
+  put(N.say, 'say', s.say, 'html');
+  put(N.scrk, 'scrk', s.scr[0]);
+  put(N.scrv, 'scrv', s.scr[1]);
+  put(N.scr, 'scrc', 'screen' + (s.hot ? ' hot' : '') + (s.dim ? ' dim' : ''), (v) => { N.scr.className = v; });
+  const shown = s.list ? Math.min(s.list, rCount) : 0;
+  L.forEach((n, i) => put(n, 'l' + i, i < shown, (v) => n.classList.toggle('on', v)));
+  // the queue: event k sits (k - c) slots before the consumer (right edge)
+  for (let k = 0; k <= LAST; k++) {
+    const b = blocks[k], bt = born(k);
+    const pos = k - c;
+    let op = 0, x = 0;
+    if (t >= bt && pos > -0.6 && pos < SLOTS - 0.2) {
+      const fadeIn = bt < 0 ? 1 : seg(t, bt, bt + 0.3);
+      const fadeOut = pos < 0 ? clamp(1 + pos / 0.6) : 1;
+      op = fadeIn * fadeOut;
+      const enter = bt < 0 ? 0 : 1 - ease(seg(t, bt, bt + 0.4));
+      x = (SLOTS - 1 - Math.max(pos, 0)) - enter * 1.2;
+    }
+    b.style.opacity = op.toFixed(3);
+    b.style.setProperty('--x', x.toFixed(3));
+  }
+  return s;
+}
+
+// ---- controls: play / pause, scrubber, T1–T7 stops, keyboard, theme ----
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const dur = +el.dataset.dur, rest = +el.dataset.rest;
+const ctrl = el.querySelector('.ctrl');
+const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'play';
+const range = document.createElement('input'); range.type = 'range'; range.min = 0; range.max = dur; range.step = 0.01;
+range.id = 'scrub-' + el.dataset.fig; range.setAttribute('aria-label', '時間軸');
+const stops = document.createElement('div'); stops.className = 'stops'; stops.setAttribute('role', 'group'); stops.setAttribute('aria-label', '跳到停點');
+const stopBtns = STOPS.map((s) => {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = s.id;
+  b.setAttribute('aria-label', `${s.id}（${s.time}）`);
+  b.addEventListener('click', () => { f.playing = false; f.fresh = false; f.t = s.go; sync(); paint(true); });
+  stops.appendChild(b); return b;
+});
+const theme = document.createElement('button'); theme.type = 'button'; theme.className = 'theme';
+const hint = document.createElement('span'); hint.className = 'hint'; hint.textContent = '按播放，或拖時間軸、點 T1–T7；鍵盤左右鍵也可以切換停點。';
+ctrl.append(btn, range, stops, theme, hint);
+const f = { t: rest, playing: false, visible: false, last: 0, fresh: true };
+
+function paint(announce) {
+  const s = render(f.t);
+  range.value = f.t;
+  range.setAttribute('aria-valuetext', `${s.id}，${s.time}`);
+  stopBtns.forEach((b, i) => { if (STOPS[i] === s) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
+  if (announce) N.live.textContent = `${s.id}，${s.time}：${N.say.textContent}`;
+}
+function sync() {
+  btn.textContent = f.playing ? '❚❚ 暫停' : '▶ 播放';
+  btn.setAttribute('aria-label', f.playing ? '暫停' : '播放');
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+  theme.textContent = dark ? '淺色' : '深色'; theme.setAttribute('aria-label', dark ? '切換為淺色' : '切換為深色');
+}
+const toggle = () => {
+  if (!f.playing && (f.fresh || f.t >= dur - 0.01)) f.t = 0;
+  f.fresh = false; f.playing = !f.playing; sync(); kick();
+};
+btn.addEventListener('click', toggle);
+range.addEventListener('input', () => { f.playing = false; f.fresh = false; f.t = +range.value; sync(); paint(false); });
+el.addEventListener('keydown', (e) => {
+  if (e.target === range) return;
+  const i = STOPS.indexOf(stopAt(f.t));
+  if (e.key === ' ' && e.target === el) { e.preventDefault(); toggle(); return; }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    const j = clamp(i + (e.key === 'ArrowRight' ? 1 : -1), 0, STOPS.length - 1);
+    stopBtns[j].click(); stopBtns[j].focus();
+  }
+});
+theme.addEventListener('click', () => {
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+});
+
+// frame loop: only while playing and on screen, <= 30 fps, stops at the end (no loop)
+new IntersectionObserver((es) => { f.visible = es.some((e) => e.isIntersecting); kick(); }, { rootMargin: '120px' }).observe(el);
+let raf = 0;
+const live = () => f.playing && f.visible;
+function tick(now) {
+  raf = 0;
+  if (!live()) { f.last = 0; return; }
+  if (!f.last) f.last = now;
+  else if (now - f.last >= 33) {
+    f.t = Math.min(dur, f.t + Math.min(0.1, (now - f.last) / 1000)); f.last = now; paint(false);
+    if (f.t >= dur) { f.playing = false; sync(); return; }
+  }
+  raf = requestAnimationFrame(tick);
+}
+function kick() { if (!raf && live()) raf = requestAnimationFrame(tick); }
+
+// seek(t) paints frame t and pauses: the hook for checks, render and a host page
+window.DUR = dur;
+window.seek = (t) => { f.playing = false; f.fresh = false; f.t = clamp(+t, 0, dur); sync(); paint(false); };
+
+// tell a host page our height (once per size change)
+if ('ResizeObserver' in window && window.parent !== window) {
+  let lastH = 0;
+  new ResizeObserver((es) => {
+    const h = Math.ceil(es[0].contentRect.height + 24);
+    if (h !== lastH) { lastH = h; parent.postMessage({ type: 'figure-height', fig: el.dataset.fig, height: h }, '*'); }
+  }).observe(document.body);
+}
+
+sync(); paint(false);
+if (reduce) { f.t = rest; paint(false); }
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', sync);
+new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>
+</body>
+</html>

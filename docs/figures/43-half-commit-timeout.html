@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>逾時後三邊對不起來</title>
+<style>
+:root{
+  --paper:#f7f7f5; --paper-2:#ecece8; --ink:#1f2433; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(31,36,51,.14); --rule-solid:#c4c6cc;
+  --neutral-fill:#dfe2e8; --neutral-stroke:#8a93a6;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#78350f;
+  --void:#7d8494; --bad:#b42318; --bad-fill:#fde4e1;
+  --scope:#2e5aa8; --scope-fill:rgba(46,90,168,.06);
+  --focus:#2e5aa8;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1d2130; --paper-2:#272c3e; --ink:#eef0f4; --muted:#b7bdca; --soft:#9aa3b6;
+    --rule:rgba(238,240,244,.14); --rule-solid:rgba(200,204,214,.3);
+    --neutral-fill:#363c52; --neutral-stroke:#7d869c;
+    --hot-fill:rgba(251,191,36,.26); --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+    --void:#8d94a6; --bad:#ff8a7a; --bad-fill:rgba(255,138,122,.14);
+    --scope:#8fb4f0; --scope-fill:rgba(143,180,240,.07);
+    --focus:#8fb4f0;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1d2130; --paper-2:#272c3e; --ink:#eef0f4; --muted:#b7bdca; --soft:#9aa3b6;
+  --rule:rgba(238,240,244,.14); --rule-solid:rgba(200,204,214,.3);
+  --neutral-fill:#363c52; --neutral-stroke:#7d869c;
+  --hot-fill:rgba(251,191,36,.26); --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+  --void:#8d94a6; --bad:#ff8a7a; --bad-fill:rgba(255,138,122,.14);
+  --scope:#8fb4f0; --scope-fill:rgba(143,180,240,.07);
+  --focus:#8fb4f0;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:14px;line-height:1.5;-webkit-text-size-adjust:100%}
+.fig{margin:0;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0;box-sizing:border-box;position:relative}
+.fig *{box-sizing:border-box}
+.fig:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.fig code{font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"Noto Sans TC","Microsoft JhengHei",monospace;font-size:12px;background:var(--paper-2);padding:0 4px;border-radius:4px}
+
+/* readout */
+.hud{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:start;padding-right:72px}
+.clock{display:flex;flex-direction:column;gap:2px;min-width:112px}
+.clock .sec{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+.clock .sub{font-size:12px;color:var(--soft)}
+.cap{display:flex;gap:8px;align-items:flex-start}
+.cap .tag{flex:none;font-size:12px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--paper-2);border:1px solid var(--rule-solid)}
+.cap .txt{font-size:14px;min-height:42px}
+
+/* lanes */
+.lanes{border-top:1px solid var(--rule);display:flex;flex-direction:column}
+.lane{display:grid;grid-template-columns:128px 1fr;gap:6px 12px;padding:8px 0;border-bottom:1px solid var(--rule);align-items:start}
+.lname{font-size:13px;font-weight:600;line-height:1.35}
+.lname small{display:block;font-size:12px;font-weight:400;color:var(--soft)}
+.lbody{display:flex;flex-direction:column;gap:6px;min-width:0}
+.status{font-size:13px;min-height:20px}
+.tlabel{font-size:12px;color:var(--soft);margin-bottom:-2px}
+.track{position:relative;height:22px;border-radius:4px;background:var(--paper-2)}
+.bar{position:absolute;top:0;height:100%;border-radius:4px;width:0;overflow:hidden}
+.bar .in{position:absolute;left:6px;top:50%;transform:translateY(-50%);font-size:12px;white-space:nowrap;font-weight:600}
+.bar.pending{background:transparent;border:1.5px dashed var(--neutral-stroke)}
+.bar.pending .in{color:var(--muted)}
+.bar.voided{background:repeating-linear-gradient(135deg,transparent 0 5px,var(--void) 5px 6px);border:1.5px dashed var(--void)}
+.bar.voided .in{color:var(--void);text-decoration:line-through}
+.bar.hot{background:var(--hot-fill);border:1.5px solid var(--hot-stroke)}
+.bar.hot .in{color:var(--hot-ink)}
+.bar.wait{background:repeating-linear-gradient(135deg,var(--neutral-fill) 0 6px,transparent 6px 10px);border:1px solid var(--neutral-stroke)}
+.bar.wait .in{color:var(--ink)}
+.bar.pay{background:var(--neutral-fill);border:1px solid var(--neutral-stroke)}
+.bar.pay .in{color:var(--ink)}
+.head{position:absolute;top:-4px;bottom:-4px;width:0;border-left:2px solid var(--ink);opacity:.85}
+.limit{position:absolute;top:-4px;bottom:-4px;width:0;border-left:2px dashed var(--bad)}
+.mark{position:absolute;top:50%;transform:translate(calc(-100% - 4px),-50%);font-size:12px;font-weight:700;padding:0 6px;height:20px;line-height:18px;border-radius:10px;white-space:nowrap;visibility:hidden}
+.mark.on{visibility:visible}
+.mark.bad{background:var(--bad-fill);color:var(--bad);border:1px solid var(--bad);visibility:visible}
+.mark.rb{background:var(--paper);color:var(--ink);border:1.5px solid var(--ink)}
+.mark.money{background:var(--hot-fill);color:var(--hot-ink);border:1.5px solid var(--hot-stroke)}
+.hide-n{display:inline}
+
+/* axis */
+.axis{display:grid;grid-template-columns:128px 1fr;gap:12px}
+.axis .ticks{position:relative;height:18px}
+.tick{position:absolute;top:0;font-size:12px;color:var(--soft);transform:translateX(-50%);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tick.first{transform:none}
+.tick.last{transform:translateX(-100%)}
+.axis .note{font-size:12px;color:var(--soft);text-align:right}
+
+/* result */
+.result{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-items:end}
+.scope{border:2px dashed var(--scope);background:var(--scope-fill);border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:6px}
+.scope .sl{font-size:12px;color:var(--scope);font-weight:600;line-height:1.35}
+.scope.flash{border-style:solid}
+.res{border-radius:8px;padding:8px 12px;border:1px solid var(--rule-solid);background:var(--paper-2);min-height:72px}
+.res .k{font-size:12px;color:var(--soft)}
+.res .v{font-size:14px;font-weight:700}
+.res .n{font-size:12px;color:var(--muted);min-height:18px}
+.res.pending{border:1.5px dashed var(--neutral-stroke);background:var(--paper)}
+.res.voided .v{color:var(--void);text-decoration:line-through}
+.res.hot{background:var(--hot-fill);border:1.5px solid var(--hot-stroke)}
+.res.hot .k,.res.hot .v,.res.hot .n{color:var(--hot-ink)}
+.seen{font-size:13px;color:var(--ink);border-left:3px solid var(--hot-stroke);padding:2px 0 2px 10px;visibility:hidden}
+.seen.on{visibility:visible}
+
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--soft)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:22px;height:12px;border-radius:3px}
+.sw.hot{background:var(--hot-fill);border:1.5px solid var(--hot-stroke)}
+.sw.pending{border:1.5px dashed var(--neutral-stroke)}
+.sw.wait{background:repeating-linear-gradient(135deg,var(--neutral-fill) 0 4px,transparent 4px 7px);border:1px solid var(--neutral-stroke)}
+.sw.scope{border:2px dashed var(--scope)}
+
+/* controls */
+.ctrl{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.btn{font:inherit;font-size:13px;min-height:40px;min-width:40px;padding:0 12px;border-radius:8px;border:1px solid var(--rule-solid);background:var(--paper-2);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{border-color:var(--ink)}
+.btn:focus-visible,.chip:focus-visible,.scrub:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.btn svg{width:14px;height:14px;fill:currentColor}
+.scrubwrap{flex:1 1 200px;min-width:160px;display:flex;align-items:center;min-height:40px}
+.scrub{width:100%;accent-color:var(--hot-stroke);height:32px;margin:0}
+.chips{display:flex;gap:4px;flex-wrap:wrap}
+.chip{font:inherit;font-size:12px;font-weight:700;min-width:36px;min-height:32px;border-radius:6px;border:1px solid var(--rule-solid);background:var(--paper);color:var(--muted);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.theme{position:absolute;top:12px;right:12px;min-height:32px;font-size:12px}
+
+@media (max-width:640px){
+  .lane,.axis{grid-template-columns:1fr;gap:4px}
+  .lname small{display:inline;margin-left:6px}
+  .axis .spacer{display:none}
+  .result{grid-template-columns:1fr;align-items:stretch}
+  .res{min-height:0}
+  .hide-n{display:none}
+}
+@media (max-width:420px){
+  .hud{grid-template-columns:1fr}
+  .clock{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="half-commit-timeout" data-dur="10" data-rest="10" tabindex="0"
+  aria-label="一次下單的時間軸：訂單服務的交易包住三個動作，但庫存服務在第 0.1 秒就自己 COMMIT；支付等滿 5 秒逾時、訂單 ROLLBACK；第 6.2 秒金流商才扣款成功。結果訂單不存在，庫存少了 1 件，錢卻扣了。">
+  <button class="btn theme" type="button" data-theme-btn aria-label="切換深淺色">深色</button>
+
+  <div class="hud" aria-live="polite">
+    <div class="clock">
+      <div class="sec" data-clock>第 6.2 秒</div>
+      <div class="sub">支付平常 300ms，今晚 6 秒；逾時設 5 秒</div>
+    </div>
+    <div class="cap"><span class="tag" data-tag>T6</span><span class="txt" data-cap></span></div>
+  </div>
+
+  <div class="lanes">
+    <div class="lane">
+      <div class="lname">訂單服務<small>with db.transaction()</small></div>
+      <div class="lbody">
+        <div class="status" data-st="order"></div>
+        <div class="track">
+          <div class="bar pending" data-bar="order"><span class="in" data-bar-in="order">交易開著，還沒 commit</span></div>
+          <span class="mark rb" data-mark="rb" style="left:82%">ROLLBACK</span>
+          <span class="head" data-head></span>
+        </div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lname">庫存服務<small>自己的資料庫</small></div>
+      <div class="lbody">
+        <div class="status" data-st="inv"></div>
+        <div class="track">
+          <div class="bar hot" data-bar="inv" style="left:10%"><span class="in">已在庫存資料庫 COMMIT</span></div>
+          <span class="head" data-head></span>
+        </div>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="lname">支付服務與金流商<small>自己的資料庫</small></div>
+      <div class="lbody">
+        <div class="status" data-st="pay"></div>
+        <div class="tlabel">訂單服務在等回應</div>
+        <div class="track">
+          <div class="bar wait" data-bar="wait" style="left:20%"><span class="in">等…</span></div>
+          <span class="limit" style="left:78%"></span>
+          <span class="mark bad" style="left:78%">5 秒逾時</span>
+          <span class="head" data-head></span>
+        </div>
+        <div class="tlabel">金流商處理扣款</div>
+        <div class="track">
+          <div class="bar pay" data-bar="pay" style="left:20%"><span class="in">處理中<span class="hide-n">，金流商很慢</span></span></div>
+          <span class="mark money" data-mark="money" style="left:100%">扣款成功</span>
+          <span class="head" data-head></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="axis" aria-hidden="true">
+    <div class="spacer"></div>
+    <div>
+      <div class="ticks">
+        <span class="tick first" style="left:0">0</span>
+        <span class="tick" style="left:10%">0.1</span>
+        <span class="tick" style="left:20%">0.2</span>
+        <span class="tick" style="left:80%">5.2</span>
+        <span class="tick last" style="left:100%">6.2 秒</span>
+      </div>
+      <div class="note">前 0.2 秒放大畫</div>
+    </div>
+  </div>
+
+  <div class="result">
+    <div class="scope" data-scope>
+      <div class="sl">with db.transaction() 管得到的範圍：ROLLBACK 只碰得到這一格</div>
+      <div class="res" data-res="order"><div class="k">訂單 #1001（訂單資料庫）</div><div class="v" data-v="order"></div><div class="n" data-n="order"></div></div>
+    </div>
+    <div class="res" data-res="inv"><div class="k">SKU-1 庫存（庫存資料庫）</div><div class="v" data-v="inv"></div><div class="n" data-n="inv"></div></div>
+    <div class="res" data-res="pay"><div class="k">支付紀錄（支付資料庫）</div><div class="v" data-v="pay"></div><div class="n" data-n="pay"></div></div>
+  </div>
+  <div class="seen" data-seen>使用者 A 看到：下單失敗，「我的訂單」查不到 #1001，信用卡卻收到扣款通知。</div>
+
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw hot"></i>事情發生在這裡：各自 commit，ROLLBACK 退不回來</span>
+    <span><i class="sw pending"></i>寫入了，還沒 commit</span>
+    <span><i class="sw wait"></i>在等回應</span>
+    <span><i class="sw scope"></i>本地交易管得到的範圍</span>
+  </div>
+
+  <div class="ctrl">
+    <button class="btn" type="button" data-play aria-label="播放"><svg viewBox="0 0 14 14" aria-hidden="true"><path data-icon d="M3 1.5v11l9-5.5z"/></svg><span data-play-txt>播放</span></button>
+    <div class="scrubwrap"><input class="scrub" type="range" min="0" max="1000" step="1" value="1000" data-scrub aria-label="拖曳時間軸"></div>
+    <div class="chips" role="group" aria-label="跳到停格">
+      <button class="chip" type="button" data-key="0" aria-pressed="false">T1</button>
+      <button class="chip" type="button" data-key="1" aria-pressed="false">T2</button>
+      <button class="chip" type="button" data-key="2" aria-pressed="false">T3</button>
+      <button class="chip" type="button" data-key="3" aria-pressed="false">T4</button>
+      <button class="chip" type="button" data-key="4" aria-pressed="false">T5</button>
+      <button class="chip" type="button" data-key="5" aria-pressed="true">T6</button>
+    </div>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var fig = document.querySelector('.fig');
+  var DUR = +fig.dataset.dur, REST = +fig.dataset.rest;
+  // 播放時間 t → 時間軸位置 x（0–1）
+  var TOUR = [[0,0],[1.6,.10],[3.2,.20],[6.4,.78],[7.6,.82],[9.6,1],[10,1]];
+  // 時間軸位置 x → 事故當時的秒數（前 0.2 秒放大畫）
+  var FACT = [[0,0],[.10,.1],[.20,.2],[.78,5.2],[.82,5.2],[1,6.2]];
+  var KEYS = [
+    {t:0,   tag:'T1', cap:'第 0 秒：訂單服務開始交易，寫入訂單 #1001。寫進去了，但還沒 commit。'},
+    {t:1.6, tag:'T2', cap:'第 0.1 秒：呼叫 inventory_api.deduct。庫存服務扣 1 件，在自己的資料庫 COMMIT，回應成功。'},
+    {t:3.2, tag:'T3', cap:'第 0.2 秒：呼叫 payment_api.charge，開始等。支付服務轉給金流商，金流商很慢。'},
+    {t:6.4, tag:'T4', cap:'第 5.2 秒：等滿 5 秒，丟出逾時例外。金流商其實還在處理：逾時只代表「不知道」。'},
+    {t:7.6, tag:'T5', cap:'第 5.2 秒：with 區塊 ROLLBACK，API 回應錯誤。訂單 #1001 不見了，但沒人通知庫存服務。'},
+    {t:9.6, tag:'T6', cap:'第 6.2 秒：金流商扣款成功，回應才送回來，訂單服務早就放棄了。有扣款沒訂單、有扣庫存沒訂單。'}
+  ];
+  var ST = {
+    order:['開始交易，寫入訂單 #1001','呼叫 inventory_api.deduct','呼叫 payment_api.charge，開始等','等滿 5 秒，丟出逾時例外','with 區塊 ROLLBACK，API 回應錯誤','早就放棄這筆了'],
+    inv:  ['','扣 1 件並 COMMIT，回應成功','扣 1 件並 COMMIT，回應成功','扣 1 件並 COMMIT，回應成功','沒人通知它，扣掉的 1 件留著','沒人通知它，扣掉的 1 件留著'],
+    pay:  ['','','轉給金流商，金流商很慢','金流商還在處理','金流商還在處理','金流商扣款成功，回應才送回來']
+  };
+  function lerp(tab, v){
+    if (v <= tab[0][0]) return tab[0][1];
+    for (var i=1;i<tab.length;i++){
+      var a=tab[i-1], b=tab[i];
+      if (v <= b[0]) return b[0]===a[0] ? b[1] : a[1] + (b[1]-a[1])*(v-a[0])/(b[0]-a[0]);
+    }
+    return tab[tab.length-1][1];
+  }
+  function q(s){ return fig.querySelector(s); }
+  var el = {
+    clock:q('[data-clock]'), tag:q('[data-tag]'), cap:q('[data-cap]'),
+    stOrder:q('[data-st="order"]'), stInv:q('[data-st="inv"]'), stPay:q('[data-st="pay"]'),
+    barOrder:q('[data-bar="order"]'), barInv:q('[data-bar="inv"]'), barWait:q('[data-bar="wait"]'), barPay:q('[data-bar="pay"]'),
+    rb:q('[data-mark="rb"]'), money:q('[data-mark="money"]'), heads:fig.querySelectorAll('[data-head]'),
+    scope:q('[data-scope]'),
+    resOrder:q('[data-res="order"]'), resInv:q('[data-res="inv"]'), resPay:q('[data-res="pay"]'),
+    vOrder:q('[data-v="order"]'), vInv:q('[data-v="inv"]'), vPay:q('[data-v="pay"]'),
+    nOrder:q('[data-n="order"]'), nInv:q('[data-n="inv"]'), nPay:q('[data-n="pay"]'),
+    seen:q('[data-seen]'), scrub:q('[data-scrub]'), play:q('[data-play]'), playTxt:q('[data-play-txt]'), icon:q('[data-icon]'),
+    chips:fig.querySelectorAll('[data-key]'), themeBtn:q('[data-theme-btn]')
+  };
+  var E = 1e-6, last = {};
+  function set(node, key, prop, val){ if (last[key] !== val){ last[key] = val; if (prop==='text') node.textContent = val; else if (prop==='class') node.className = val; else node.style[prop] = val; } }
+  function pct(v){ return (Math.max(0,v)*100).toFixed(2)+'%'; }
+
+  // D(g, t, C)：畫第 t 秒（播放時間）的畫面
+  function D(g, t){
+    var x = lerp(TOUR, t), fact = lerp(FACT, x);
+    var k = 0; for (var i=0;i<KEYS.length;i++) if (t + E >= KEYS[i].t) k = i;
+    var committed = x + E >= .10, payStart = x + E >= .20, timedOut = x + E >= .78, rolled = x + E >= .82, charged = x + E >= 1;
+    set(el.clock,'clock','text','第 '+fact.toFixed(1)+' 秒');
+    set(el.tag,'tag','text',KEYS[k].tag);
+    set(el.cap,'cap','text',KEYS[k].cap);
+    set(el.stOrder,'sto','text',ST.order[k]); set(el.stInv,'sti','text',ST.inv[k]||'　'); set(el.stPay,'stp','text',ST.pay[k]||'　');
+    // 訂單：交易開著到 ROLLBACK
+    set(el.barOrder,'bo','width',pct(Math.min(x,.82)));
+    set(el.barOrder,'boc','class', rolled ? 'bar voided' : 'bar pending');
+    set(el.rb,'rb','class', rolled ? 'mark rb on' : 'mark rb');
+    // 庫存：0.1 秒就 COMMIT
+    set(el.barInv,'bi','width', committed ? pct(x-.10) : '0%');
+    // 支付：等回應到逾時；金流商一路處理到 6.2 秒
+    set(el.barWait,'bw','width', payStart ? pct(Math.min(x,.78)-.20) : '0%');
+    set(el.barPay,'bp','width', payStart ? pct(x-.20) : '0%');
+    set(el.money,'mo','class', charged ? 'mark money on' : 'mark money');
+    for (var h=0;h<el.heads.length;h++) el.heads[h].style.left = pct(x);
+    // 三格資料狀態
+    set(el.scope,'sc','class', rolled ? 'scope flash' : 'scope');
+    set(el.resOrder,'ro','class', rolled ? 'res voided' : 'res pending');
+    set(el.vOrder,'vo','text', rolled ? '不存在' : '寫入了，還沒 commit');
+    set(el.nOrder,'no','text', rolled ? 'ROLLBACK 把它撤掉了' : '　');
+    set(el.resInv,'ri','class', committed ? 'res hot' : 'res');
+    set(el.vInv,'vi','text', committed ? '9，已經 commit' : '10');
+    set(el.nInv,'ni','text', rolled ? 'ROLLBACK 碰不到，扣掉的 1 件留著' : '　');
+    set(el.resPay,'rp','class', charged ? 'res hot' : 'res');
+    set(el.vPay,'vp','text', charged ? '已扣款' : '沒有');
+    set(el.nPay,'np','text', charged ? '訂單服務已經放棄這筆' : (timedOut ? '逾時＝不知道，金流商還在處理' : '　'));
+    set(el.seen,'se','class', charged ? 'seen on' : 'seen');
+    set(el.scrub,'sv','value', String(Math.round(t/DUR*1000)));
+    for (var c=0;c<el.chips.length;c++){ var on = String(c===k); if (el.chips[c].getAttribute('aria-pressed')!==on) el.chips[c].setAttribute('aria-pressed',on); }
+  }
+
+  var t = REST, playing = false, visible = true, raf = 0, prev = 0, acc = 0;
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function render(){ D(fig, t); }
+  function setPlaying(p){
+    playing = p;
+    el.play.setAttribute('aria-label', p ? '暫停' : (t >= DUR - E ? '重播' : '播放'));
+    el.playTxt.textContent = p ? '暫停' : (t >= DUR - E ? '重播' : '播放');
+    el.icon.setAttribute('d', p ? 'M3 1.5h3v11H3zM8 1.5h3v11H8z' : 'M3 1.5v11l9-5.5z');
+    if (p) arm(); else stop();
+  }
+  function arm(){ if (!raf && playing && visible){ prev = 0; raf = requestAnimationFrame(tick); } }
+  function stop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function nextKeyIndex(){ for (var i=0;i<KEYS.length;i++) if (KEYS[i].t > t + E) return i; return -1; }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = prev ? Math.min(.1,(now-prev)/1000) : 0; prev = now;
+    if (reduce){
+      // 減少動態：不做補間，每 1.6 秒跳到下一個停格
+      acc += dt;
+      if (acc >= 1.6){ acc = 0; var n = nextKeyIndex(); t = n < 0 ? DUR : KEYS[n].t; }
+    } else {
+      t = Math.min(DUR, t + dt);
+    }
+    render();
+    if (t >= DUR - E){ t = DUR; render(); setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function seek(v){ t = Math.max(0, Math.min(DUR, +v || 0)); acc = 0; setPlaying(false); render(); }
+  window.seek = seek; window.DUR = DUR;
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:KEYS.map(function(k){return k.t;})}; };
+
+  el.play.addEventListener('click', function(){
+    if (playing){ setPlaying(false); return; }
+    if (t >= DUR - E){ t = 0; render(); }
+    acc = 0; setPlaying(true);
+  });
+  el.scrub.addEventListener('input', function(){ seek(el.scrub.value/1000*DUR); });
+  for (var c=0;c<el.chips.length;c++) el.chips[c].addEventListener('click', function(e){ seek(KEYS[+e.currentTarget.dataset.key].t); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    var k = 0; for (var i=0;i<KEYS.length;i++) if (t + E >= KEYS[i].t) k = i;
+    if (e.key === 'ArrowRight'){ e.preventDefault(); seek(KEYS[Math.min(KEYS.length-1, k+1)].t); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(KEYS[(t - E > KEYS[k].t) ? k : Math.max(0,k-1)].t); }
+    else if (e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); el.play.click(); }
+  });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); else stop(); }, {rootMargin:'120px'}).observe(fig);
+  }
+
+  // 深淺色切換：寫在根元素的 data-theme，網站也會設定同一個屬性
+  var root = document.documentElement;
+  function isDark(){ var th = root.getAttribute('data-theme'); if (th) return th === 'dark'; return !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches); }
+  function syncThemeBtn(){ el.themeBtn.textContent = isDark() ? '淺色' : '深色'; }
+  el.themeBtn.addEventListener('click', function(){ root.setAttribute('data-theme', isDark() ? 'light' : 'dark'); syncThemeBtn(); });
+  new MutationObserver(syncThemeBtn).observe(root, {attributes:true, attributeFilter:['data-theme']});
+  if (window.matchMedia){ var mq = matchMedia('(prefers-color-scheme: dark)'); if (mq.addEventListener) mq.addEventListener('change', syncThemeBtn); }
+  syncThemeBtn();
+
+  render(); setPlaying(false);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>舊價格回填時間軸</title>
+<style>
+:root{
+  --paper:#ffffff; --paper-2:#f4f5f7; --ink:#2d3142; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(45,49,66,.22); --line:#8a93a6;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111; --hot-text:#92400e;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,"Noto Sans TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2029; --paper-2:#282b36; --ink:#f1f2f4; --muted:#c3c7d0; --soft:#a8aebb;
+    --rule:rgba(245,245,245,.2); --line:#7c8396;
+    --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fbbf24;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2029; --paper-2:#282b36; --ink:#f1f2f4; --muted:#c3c7d0; --soft:#a8aebb;
+  --rule:rgba(245,245,245,.2); --line:#7c8396;
+  --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fbbf24;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--font);-webkit-text-size-adjust:100%}
+.fig{margin:0;padding:12px 16px 14px;box-sizing:border-box;width:100%;max-width:960px;margin-inline:auto;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--hot-stroke);border-radius:8px}
+.stage{display:block;width:100%;height:auto;margin-inline:auto}
+.stage.narrow{max-width:440px}
+/* SVG parts */
+.node rect.box{fill:var(--paper-2);stroke:var(--rule);stroke-width:1.5}
+.node.hot rect.box{fill:var(--hot-fill);stroke:var(--hot-stroke);stroke-width:2.5}
+.node .name{fill:var(--ink);font-weight:600;font-size:16px}
+.node .role{fill:var(--soft);font-size:15px}
+.node .status{fill:var(--ink);font-size:15px}
+.node .val{fill:var(--ink);font-weight:700;font-size:28px;font-family:var(--font)}
+.node .sub{fill:var(--muted);font-size:15px}
+.node.hot .name,.node.hot .status,.node.hot .val{fill:var(--hot-ink)}
+.node.hot .role,.node.hot .sub{fill:var(--hot-ink)}
+.node .tag rect{fill:none;stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3}
+.node .tag text{fill:var(--muted);font-size:15px}
+.node .tag.open rect{stroke:var(--hot-stroke);stroke-dasharray:none}
+.node .tag.open text{fill:var(--hot-text)}
+.node.hot .tag.open text{fill:var(--hot-ink)}
+.conn line{stroke:var(--line);stroke-width:2}
+.conn.hot line{stroke:var(--hot-stroke);stroke-width:3.5}
+.conn .lbl-bg{fill:var(--paper)}
+.conn .lbl{fill:var(--soft);font-size:15px;font-family:var(--mono)}
+.conn.hot .lbl{fill:var(--hot-text);font-weight:600}
+.pkt rect{fill:var(--hot-fill);stroke:var(--hot-stroke);stroke-width:2}
+.pkt text{fill:var(--hot-ink);font-size:15px;font-family:var(--mono);font-weight:600}
+/* readout */
+.readout{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;margin-top:8px}
+.when{font-size:14px;color:var(--soft)}
+.when b{color:var(--ink);font-size:16px;margin-right:6px}
+.chip{font-size:14px;padding:3px 10px;border-radius:999px;border:1.5px solid var(--rule);color:var(--muted);background:var(--paper)}
+.chip.bad{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink);font-weight:600}
+.cap{font-size:15px;line-height:1.6;margin:6px 0 0;min-height:3.2em;color:var(--ink)}
+.cap code{font-family:var(--mono);font-size:14px}
+/* controls */
+.ctrl{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.ctrl button{font:inherit;font-size:14px;min-height:36px;min-width:36px;padding:0 12px;border-radius:8px;border:1.5px solid var(--rule);background:var(--paper-2);color:var(--ink);cursor:pointer}
+.ctrl button:hover{border-color:var(--line)}
+.ctrl button:focus-visible{outline:2px solid var(--hot-stroke);outline-offset:2px}
+.ctrl .play{font-weight:600}
+.ctrl .theme{margin-left:auto}
+.track{margin-top:10px}
+.track input[type=range]{width:100%;margin:0;accent-color:var(--hot-stroke);height:28px}
+.ticks{display:grid;grid-template-columns:repeat(7,1fr);gap:0;margin-top:2px}
+.ticks button{font:inherit;font-size:13px;min-height:32px;border:0;background:none;color:var(--soft);cursor:pointer;border-radius:6px;padding:0}
+.ticks button.on{color:var(--hot-ink);background:var(--hot-fill);font-weight:700;box-shadow:inset 0 0 0 1.5px var(--hot-stroke)}
+.ticks button:focus-visible{outline:2px solid var(--hot-stroke)}
+.spans{display:grid;grid-template-columns:repeat(7,1fr);margin-top:4px;font-size:12px;color:var(--soft);line-height:1.3}
+.spans .ms{grid-column:1 / span 5;border-top:1.5px solid var(--line);padding-top:3px;text-align:center;margin:0 6px}
+.spans .next{grid-column:7;border-top:1.5px dashed var(--line);padding-top:3px;text-align:center;margin:0 3px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="stale-backfill" data-dur="7" data-rest="6" tabindex="0"
+  aria-label="改價事故時間軸：後台在交易裡先刪 Redis 的 product:1，再 UPDATE 價格成 399 但還沒 commit；這時使用者的讀取請求沒命中，去資料庫讀到舊價格 299；後台 commit 之後，讀取請求把 299 寫回 Redis 而且沒帶 TTL，於是資料庫是 399、快取一直是 299，直到隔天。">
+  <svg class="stage" id="stage" role="img" aria-labelledby="stale-backfill-title stale-backfill-desc" xmlns="http://www.w3.org/2000/svg">
+    <title id="stale-backfill-title">先刪快取再 commit，舊價格被回填</title>
+    <desc id="stale-backfill-desc">後台寫入請求、使用者讀取請求、PostgreSQL 與 Redis 四個角色，依 T1 到 T7 交錯：讀取請求在 commit 前讀到 299 並在 commit 後寫回快取，沒帶 TTL，快取停在 299。</desc>
+  </svg>
+  <div class="readout">
+    <div class="when" id="when"><b>T6</b>23:59 流量高峰</div>
+    <div class="chip" id="chip" aria-live="polite"></div>
+  </div>
+  <p class="cap" id="cap"></p>
+  <div class="ctrl">
+    <button type="button" class="prev" id="prev" aria-label="上一步">◀</button>
+    <button type="button" class="play" id="play" aria-label="從 T1 播放">▶ 播放</button>
+    <button type="button" class="next" id="next" aria-label="下一步">▶</button>
+    <button type="button" class="theme" id="theme" aria-label="切換深淺色">深／淺</button>
+  </div>
+  <div class="track">
+    <input type="range" id="scrub" min="0" max="7" step="0.01" value="6" aria-label="拖動時間軸，T1 到 T7">
+    <div class="ticks" id="ticks"></div>
+    <div class="spans" aria-hidden="true"><div class="ms">T1–T5 只有幾十毫秒</div><div class="next">隔天<br>09:00</div></div>
+  </div>
+</figure>
+<noscript><p style="font-family:sans-serif;padding:0 16px">這張圖需要 JavaScript 才能播放。重點：T6 時資料庫是 399，Redis 的 product:1 卻是 299，TTL -1，永遠不過期。</p></noscript>
+<script>
+(function(){
+  "use strict";
+  var NS="http://www.w3.org/2000/svg";
+  var fig=document.querySelector('.fig');
+  var svg=document.getElementById('stage');
+  var DUR=7, REST=6, STEP_SEC=2.2;
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- layouts (4px grid) ----------
+  var LAYOUTS={
+    wide:{vb:[776,288],
+      nodes:{
+        writer:{x:16,y:16,w:176,h:256},
+        redis:{x:296,y:16,w:184,h:112},
+        pg:{x:296,y:160,w:184,h:112},
+        reader:{x:584,y:16,w:176,h:256}},
+      conns:{
+        wR:{x1:192,y1:72,x2:296,y2:72},
+        wP:{x1:192,y1:216,x2:296,y2:216},
+        rR:{x1:584,y1:72,x2:480,y2:72},
+        rP:{x1:584,y1:216,x2:480,y2:216}}},
+    narrow:{vb:[360,488],
+      nodes:{
+        writer:{x:16,y:16,w:328,h:104},
+        redis:{x:16,y:184,w:152,h:120},
+        pg:{x:192,y:184,w:152,h:120},
+        reader:{x:16,y:368,w:328,h:104}},
+      conns:{
+        wR:{x1:60,y1:120,x2:60,y2:184},
+        wP:{x1:236,y1:120,x2:236,y2:184},
+        rR:{x1:60,y1:368,x2:60,y2:304},
+        rP:{x1:236,y1:368,x2:236,y2:304}}}
+  };
+  var CONN_LABEL={wR:'DEL',wP:'UPDATE',rR:'GET·SET',rP:'查詢'};
+
+  // ---------- the story (facts from 21-快取失效.md) ----------
+  var INIT={
+    writer:{status:['準備把價格','從 299 改回 399'],txn:'none'},
+    reader:{status:['還沒有請求']},
+    pg:{val:'299',sub:['別人讀到的 price']},
+    redis:{val:'299',sub:['改價前的快取']}
+  };
+  var STEPS=[null,
+    {conn:'wR',hot:'redis',fx:.55,legs:[['out','DEL',.08,.55]],
+     set:{writer:{status:['開交易','① 刪掉 product:1'],txn:'open'},redis:{val:'沒有',sub:['key 不存在']}},
+     when:'23:59 流量高峰',cap:'後台開交易，先執行 ①：刪掉 Redis 的 <code>product:1</code>。'},
+    {conn:'wP',hot:'pg',fx:.55,legs:[['out','UPDATE',.08,.55]],
+     set:{writer:{status:['UPDATE','price = 399','還沒 commit'],txn:'open'},pg:{val:'299',sub:['交易內 399','還沒 commit']}},
+     when:'23:59 流量高峰',cap:'<code>UPDATE price = 399</code>，但交易還沒 commit：只有這個交易自己看得到 399，別人讀到的還是 299。'},
+    {conn:'rR',hot:'redis',fx:.7,legs:[['out','GET',.05,.36],['back','沒命中',.4,.7]],
+     set:{reader:{status:['GET product:1','沒命中']}},
+     when:'23:59 流量高峰',cap:'使用者的讀取請求 <code>GET product:1</code>：快取剛被刪，沒命中。'},
+    {conn:'rP',hot:'pg',fx:.7,legs:[['out','查詢',.05,.36],['back','299',.4,.7]],
+     set:{reader:{status:['去資料庫查','讀到 299']}},
+     when:'23:59 流量高峰',cap:'去資料庫查：新價格還沒 commit，看不到，讀到的是 299。'},
+    {conn:'wP',hot:'pg',fx:.5,legs:[['out','commit',.08,.5]],
+     set:{writer:{status:['commit 成功','price = 399'],txn:'done'},pg:{val:'399',sub:['已 commit']},reader:{status:['手上拿著 299','準備回填']}},
+     when:'23:59 流量高峰',cap:'後台 commit 成功，資料庫變成 399。但讀取請求手上拿的已經是 299 了。'},
+    {conn:'rR',hot:'redis',fx:.55,legs:[['out','SET 299',.08,.55]],
+     set:{reader:{status:['② 回填 299','沒帶 TTL']},redis:{val:'299',sub:['TTL -1','永遠不過期']}},
+     when:'23:59 流量高峰',cap:'執行 ②：把 299 寫回 Redis，沒帶 TTL（<code>TTL product:1</code> 回傳 -1），永遠不過期。'},
+    {conn:'rR',hot:'redis',fx:.3,legs:[['out','GET',.04,.16],['back','299',.17,.3],['out','GET',.36,.48],['back','299',.49,.62],['out','GET',.68,.8],['back','299',.81,.94]],
+     set:{reader:{status:['隔天 09:00','每次都命中 299']},redis:{val:'299',sub:['TTL -1','還是 299']}},
+     when:'隔天 09:00',cap:'隔天 09:00，商品頁、結帳頁每次都命中快取裡的 299，結帳也照 299 扣款；資料庫明明是 399。'}
+  ];
+
+  // ---------- build SVG ----------
+  var layoutName=null, els={};
+  function mk(tag,attrs,parent){var e=document.createElementNS(NS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;}
+  function textW(s,px){var w=0;for(var i=0;i<s.length;i++){var c=s.charCodeAt(i);w+=(c>0x2e80||(c>=0x2460&&c<=0x24ff))?px:px*0.62;}return w;}
+  function clearSvg(){var keep=[document.getElementById('stale-backfill-title'),document.getElementById('stale-backfill-desc')];while(svg.lastChild&&keep.indexOf(svg.lastChild)<0)svg.removeChild(svg.lastChild);}
+  function build(name){
+    layoutName=name; var L=LAYOUTS[name]; clearSvg();
+    svg.setAttribute('viewBox','0 0 '+L.vb[0]+' '+L.vb[1]);
+    svg.classList.toggle('narrow',name==='narrow');
+    els={nodes:{},conns:{}};
+    var gc=mk('g',{},svg);
+    for(var id in L.conns){
+      var c=L.conns[id], g=mk('g',{'class':'conn'},gc);
+      mk('line',{x1:c.x1,y1:c.y1,x2:c.x2,y2:c.y2},g);
+      var lab=CONN_LABEL[id], lw=textW(lab,15)+8, lx, ly, bg;
+      if(c.y1===c.y2){ lx=(c.x1+c.x2)/2; ly=c.y1-12;
+        bg=mk('rect',{'class':'lbl-bg',x:lx-lw/2,y:ly-14,width:lw,height:18,rx:2},g);
+        mk('text',{'class':'lbl',x:lx,y:ly,'text-anchor':'middle'},g).textContent=lab;
+      } else { lx=c.x1+10; ly=(c.y1+c.y2)/2+5;
+        bg=mk('rect',{'class':'lbl-bg',x:lx-2,y:ly-14,width:lw,height:18,rx:2},g);
+        mk('text',{'class':'lbl',x:lx+2,y:ly},g).textContent=lab;
+      }
+      els.conns[id]=g;
+    }
+    var gn=mk('g',{},svg);
+    ['writer','redis','pg','reader'].forEach(function(id){
+      var n=L.nodes[id], g=mk('g',{'class':'node',transform:'translate('+n.x+' '+n.y+')'},gn);
+      mk('rect',{'class':'box',x:0,y:0,width:n.w,height:n.h,rx:8},g);
+      var o={g:g,n:n};
+      if(id==='writer'||id==='reader'){
+        o.name=mk('text',{'class':'name',x:12,y:28},g);
+        o.name.textContent=id==='writer'?'後台寫入請求':'使用者讀取請求';
+        if(name==='wide'){
+          o.role=mk('text',{'class':'role',x:12,y:52},g);
+          o.role.textContent=id==='writer'?'營運改價格':'商品頁、結帳頁';
+          mk('line',{x1:12,y1:68,x2:n.w-12,y2:68,stroke:'var(--rule)','stroke-width':1},g);
+          o.lines=[0,1,2].map(function(i){return mk('text',{'class':'status',x:12,y:100+i*24},g);});
+          if(id==='writer'){o.tag=mk('g',{'class':'tag',transform:'translate(12 '+(n.h-44)+')'},g);
+            o.tagR=mk('rect',{x:0,y:0,width:n.w-24,height:30,rx:6},o.tag);
+            o.tagT=mk('text',{x:(n.w-24)/2,y:20,'text-anchor':'middle'},o.tag);}
+        } else {
+          o.lines=[0,1,2].map(function(i){return mk('text',{'class':'status',x:12,y:52+i*20},g);});
+          if(id==='writer'){o.tag=mk('g',{'class':'tag',transform:'translate('+(n.w-184)+' 8)'},g);
+            o.tagR=mk('rect',{x:0,y:0,width:176,height:28,rx:6},o.tag);
+            o.tagT=mk('text',{x:88,y:19,'text-anchor':'middle'},o.tag);}
+        }
+      } else {
+        o.name=mk('text',{'class':'name',x:12,y:26},g);
+        o.name.textContent=id==='redis'?'Redis product:1':'PostgreSQL';
+        o.val=mk('text',{'class':'val',x:12,y:name==='wide'?60:64},g);
+        var sy=name==='wide'?84:90;
+        o.lines=[0,1].map(function(i){return mk('text',{'class':'sub',x:12,y:sy+i*20},g);});
+      }
+      els.nodes[id]=o;
+    });
+    var pk=mk('g',{'class':'pkt',opacity:0},svg);
+    els.pktR=mk('rect',{x:0,y:-13,width:40,height:26,rx:13},pk);
+    els.pktT=mk('text',{x:0,y:5,'text-anchor':'middle'},pk);
+    els.pkt=pk; els.pktLabel=null;
+  }
+
+  // ---------- state at time t (pure, deterministic) ----------
+  function clone(o){return JSON.parse(JSON.stringify(o));}
+  function stepOf(t){ if(t<=0) return {k:0,u:1}; var k=Math.min(DUR,Math.ceil(t-1e-9)); return {k:k,u:t-(k-1)}; }
+  function stateAt(t){
+    var s=clone(INIT), p=stepOf(t);
+    for(var j=1;j<=p.k;j++){ if(j===p.k && p.u<STEPS[j].fx) break;
+      var set=STEPS[j].set; for(var who in set) for(var f in set[who]) s[who][f]=set[who][f]; }
+    return s;
+  }
+  function ease(x){return x<.5?2*x*x:1-Math.pow(-2*x+2,2)/2;}
+
+  // ---------- draw frame t ----------
+  var ticks=[], lastTick=-1;
+  function draw(t){
+    var p=stepOf(t), st=stateAt(t), step=STEPS[p.k];
+    var nd=els.nodes;
+    ['writer','reader'].forEach(function(id){
+      var lines=st[id].status;
+      nd[id].lines.forEach(function(e,i){e.textContent=lines[i]||'';});
+    });
+    var tag=nd.writer, txn=st.writer.txn;
+    tag.tagT.textContent= txn==='open'?'交易中，還沒 commit':(txn==='done'?'交易已 commit':'交易還沒開始');
+    tag.tag.setAttribute('class','tag'+(txn==='open'?' open':''));
+    ['pg','redis'].forEach(function(id){
+      nd[id].val.textContent=st[id].val;
+      nd[id].lines.forEach(function(e,i){e.textContent=st[id].sub[i]||'';});
+    });
+    // highlight
+    var effectDone = step && p.u>=step.fx;
+    for(var id in nd) nd[id].g.setAttribute('class','node'+(step&&step.hot===id&&effectDone?' hot':''));
+    for(var c in els.conns) els.conns[c].setAttribute('class','conn'+(step&&step.conn===c?' hot':''));
+    // packet
+    var shown=false;
+    if(step && !reduce){
+      for(var i=0;i<step.legs.length;i++){ var lg=step.legs[i];
+        if(p.u>=lg[2] && p.u<=lg[3]){
+          var f=(p.u-lg[2])/(lg[3]-lg[2]), cc=LAYOUTS[layoutName].conns[step.conn];
+          var a=lg[0]==='out'?[cc.x1,cc.y1]:[cc.x2,cc.y2], b=lg[0]==='out'?[cc.x2,cc.y2]:[cc.x1,cc.y1];
+          var e=ease(f), x=a[0]+(b[0]-a[0])*e, y=a[1]+(b[1]-a[1])*e;
+          if(els.pktLabel!==lg[1]){ els.pktLabel=lg[1]; els.pktT.textContent=lg[1]; var w=textW(lg[1],15)+20; els.pktR.setAttribute('x',-w/2); els.pktR.setAttribute('width',w); }
+          var op=Math.min(1,f/0.15,(1-f)/0.15);
+          els.pkt.setAttribute('transform','translate('+x.toFixed(1)+' '+y.toFixed(1)+')');
+          els.pkt.setAttribute('opacity',Math.max(0,op).toFixed(2));
+          shown=true; break; }
+      }
+    }
+    if(!shown) els.pkt.setAttribute('opacity',0);
+    // readout
+    var k=p.k;
+    document.getElementById('when').innerHTML= k? '<b>T'+k+'</b>'+step.when : '<b>T0</b>改價之前';
+    var chip=document.getElementById('chip'), db=st.pg.val, rv=st.redis.val;
+    if(rv==='沒有'){chip.className='chip';chip.textContent='快取是空的：下一個讀取會去資料庫查';}
+    else if(rv===db){chip.className='chip';chip.textContent='資料庫 '+db+'／快取 '+rv+'：一致';}
+    else {chip.className='chip bad';chip.textContent='不一致：資料庫 '+db+'／快取 '+rv;}
+    document.getElementById('cap').innerHTML= k? step.cap : '改價之前：快取裡是特價 299。按「播放」從 T1 開始看。';
+    var on=k;
+    if(on!==lastTick){ ticks.forEach(function(b,i){b.classList.toggle('on',i+1===on); b.setAttribute('aria-pressed',i+1===on?'true':'false');}); lastTick=on; }
+  }
+
+  // ---------- controller: seek, play, visible-only loop ----------
+  var t=REST, playing=false, visible=true, raf=0, last=0;
+  var scrub=document.getElementById('scrub'), playBtn=document.getElementById('play');
+  function paint(){ draw(t); scrub.value=t.toFixed(2); }
+  function setPlaying(v){ playing=v; playBtn.textContent=v?'❚❚ 暫停':'▶ 播放'; playBtn.setAttribute('aria-label',v?'暫停':'播放'); if(v) arm(); }
+  function arm(){ if(!raf && playing && visible){ last=0; raf=requestAnimationFrame(frame); } }
+  function frame(now){
+    raf=0; if(!playing||!visible) return;
+    if(!last) last=now; var dt=Math.min(0.1,(now-last)/1000); last=now;
+    if(reduce){ acc+=dt; if(acc>=1.8){acc=0; t=Math.min(DUR,Math.floor(t+1e-9)+1);} }
+    else t=Math.min(DUR,t+dt/STEP_SEC);
+    paint();
+    if(t>=DUR){ setPlaying(false); return; }
+    raf=requestAnimationFrame(frame);
+  }
+  var acc=0;
+  function seek(v){ t=Math.max(0,Math.min(DUR,+v||0)); setPlaying(false); if(raf){cancelAnimationFrame(raf);raf=0;} paint(); }
+  window.seek=seek; window.DUR=DUR; window.timeline=function(){return DUR;};
+
+  playBtn.addEventListener('click',function(){ if(playing){setPlaying(false);return;} if(t>=DUR-1e-6) t=0; acc=0; if(reduce&&t<1) t=Math.floor(t); setPlaying(true); });
+  document.getElementById('prev').addEventListener('click',function(){ seek(Math.max(0,Math.ceil(t-1e-9)-1)); });
+  document.getElementById('next').addEventListener('click',function(){ seek(Math.min(DUR,Math.floor(t+1e-9)+1)); });
+  scrub.addEventListener('input',function(){ seek(scrub.value); });
+  fig.addEventListener('keydown',function(e){
+    if(e.target.tagName==='INPUT') return;
+    if(e.key==='ArrowRight'){ e.preventDefault(); document.getElementById('next').click(); }
+    else if(e.key==='ArrowLeft'){ e.preventDefault(); document.getElementById('prev').click(); }
+    else if(e.key===' '&&e.target===fig){ e.preventDefault(); playBtn.click(); }
+  });
+  var tk=document.getElementById('ticks');
+  for(var i=1;i<=7;i++){ (function(k){ var b=document.createElement('button'); b.type='button'; b.textContent='T'+k; b.setAttribute('aria-label','跳到 T'+k); b.addEventListener('click',function(){seek(k);}); tk.appendChild(b); ticks.push(b); })(i); }
+
+  document.getElementById('theme').addEventListener('click',function(){
+    var root=document.documentElement, cur=root.getAttribute('data-theme');
+    var dark= cur? cur==='dark' : (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);
+    root.setAttribute('data-theme',dark?'light':'dark');
+  });
+
+  if('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible=es[0].isIntersecting; if(visible) arm(); else if(raf){cancelAnimationFrame(raf);raf=0;} },{rootMargin:'120px'}).observe(fig);
+  }
+
+  // ---------- layout switch (width read once per resize) ----------
+  var lastH=0;
+  function fit(){
+    var w=fig.clientWidth-32, want=w>=648?'wide':'narrow';
+    if(want!==layoutName){ build(want); lastTick=-1; paint(); }
+    var h=document.documentElement.scrollHeight;
+    if(h!==lastH && window.parent!==window){ lastH=h; try{ window.parent.postMessage({type:'fig-height',fig:'stale-backfill',height:h},'*'); }catch(e){} }
+  }
+  if('ResizeObserver' in window){ var pend=0; new ResizeObserver(function(){ if(pend) return; pend=requestAnimationFrame(function(){pend=0;fit();}); }).observe(fig); }
+  else window.addEventListener('resize',fit);
+  fit(); paint();
+})();
+</script>
+</body>
+</html>

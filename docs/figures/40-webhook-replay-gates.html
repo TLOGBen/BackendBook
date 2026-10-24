@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Webhook 三道關卡</title>
+<style>
+:root{
+  --paper:#ffffff; --card:#f6f7f9; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280;
+  --rule:#d1d5db; --rule-strong:#9ca3af;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111;
+  --ok:#15803d; --bad:#b91c1c; --flow:#2563eb;
+  --sans:system-ui,-apple-system,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Menlo,Consolas,"Noto Sans TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --card:#272b36; --ink:#e5e7eb; --muted:#b6bcc8; --soft:#9aa1ae;
+    --rule:#3a404d; --rule-strong:#5b6272;
+    --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+    --ok:#4ade80; --bad:#f87171; --flow:#60a5fa;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --card:#272b36; --ink:#e5e7eb; --muted:#b6bcc8; --soft:#9aa1ae;
+  --rule:#3a404d; --rule-strong:#5b6272;
+  --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+  --ok:#4ade80; --bad:#f87171; --flow:#60a5fa;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:13px/1.45 var(--sans)}
+.fig{margin:0;padding:12px 16px 16px;outline:none;container-type:inline-size}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--flow);border-radius:8px}
+
+/* ---------- stage ---------- */
+.stage{display:grid;align-items:stretch;
+  grid-template-columns:minmax(150px,1.35fr) 24px 1fr 24px 1fr 24px 1fr 24px minmax(120px,1.1fr);
+  grid-template-areas:"src c0 g1 c1 g2 c2 g3 c3 inbox"}
+.src{grid-area:src}.c0{grid-area:c0}.c1{grid-area:c1}.c2{grid-area:c2}.c3{grid-area:c3}
+.g1{grid-area:g1}.g2{grid-area:g2}.g3{grid-area:g3}.inbox{grid-area:inbox}
+
+.box{border:1.5px solid var(--rule-strong);border-radius:8px;background:var(--card);padding:10px 12px;
+  transition:none;min-width:0}
+
+/* packet card */
+.src{opacity:var(--o,1)}
+.src.attacker{border-style:dashed}
+.ph{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.pk{font:600 12px/1 var(--mono);color:var(--paper);background:var(--ink);border-radius:4px;padding:3px 6px}
+.pw{font-weight:700;font-size:14px}
+.pa{color:var(--muted);margin-bottom:6px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin:0}
+.kv dt{color:var(--soft);font-size:12px}
+.kv dd{margin:0;font:600 13px/1.45 var(--mono)}
+.pres{margin-top:8px;font-weight:700;min-height:1.45em}
+.pres.ok{color:var(--ok)}.pres.bad{color:var(--bad)}
+.pres .lbl{color:var(--soft);font-weight:400;font-size:12px;margin-right:4px}
+
+/* gates */
+.gate{display:flex;flex-direction:column;gap:2px}
+.gn{font-size:12px;color:var(--soft)}
+.gq{font-weight:700;font-size:14px;line-height:1.35}
+.gs{font-size:12px;color:var(--soft)}
+.gr{margin-top:auto;padding-top:6px;display:flex;gap:6px;align-items:flex-start;min-height:2.2em}
+.ic{flex:none;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  font:700 12px/1 var(--sans);border:1.5px solid var(--rule-strong);color:var(--soft)}
+.gt{font-size:13px;line-height:1.4}
+.gate.idle{opacity:.55}
+.gate.checking{border-color:var(--hot-stroke);border-width:2px}
+.gate.checking .ic{border-color:var(--hot-stroke);color:var(--hot-stroke)}
+.gate.pass .ic{border-color:var(--ok);color:var(--ok)}
+.gate.fail .ic{border-color:var(--bad);color:var(--bad)}
+.hot{background:var(--hot-fill)!important;border-color:var(--hot-stroke)!important;border-width:2px!important}
+.hot,.hot .gq,.hot .gt,.hot .ih,.hot .irow{color:var(--hot-ink)}
+.hot .gn,.hot .gs,.hot .isub{color:var(--hot-ink);opacity:.8}
+
+/* inbox */
+.inbox{display:flex;flex-direction:column;gap:4px}
+.ih{font-weight:700;font-size:14px}
+.isub{font-size:12px;color:var(--soft)}
+.irow{margin-top:auto;font:600 13px/1.4 var(--mono);border:1.5px solid var(--rule);border-radius:6px;padding:6px 8px;background:var(--paper)}
+.irow.empty{font:12px/1.4 var(--sans);color:var(--soft);border-style:dashed}
+.irow.hit{border-color:var(--hot-stroke);border-width:2px;background:var(--hot-fill);color:var(--hot-ink)}
+
+/* connectors */
+.cn{position:relative;min-height:16px}
+.cn::before{content:"";position:absolute;left:2px;right:7px;top:50%;height:2px;margin-top:-1px;background:var(--rule-strong)}
+.cn::after{content:"";position:absolute;right:1px;top:50%;margin-top:-5px;border:5px solid transparent;border-left:6px solid var(--rule-strong);border-right:0}
+.cn.done::before{background:var(--flow)}.cn.done::after{border-left-color:var(--flow)}
+.cn.off{opacity:.35}
+.dot{position:absolute;width:10px;height:10px;border-radius:50%;background:var(--flow);top:50%;margin-top:-5px;
+  left:calc(var(--p,0) * (100% - 10px));display:none}
+.cn.moving .dot{display:block}
+
+/* note */
+.note{margin-top:12px;padding:8px 12px;border-left:4px solid var(--hot-stroke);background:var(--card);border-radius:0 6px 6px 0;
+  font-size:14px;min-height:2.6em}
+
+/* controls */
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:12px}
+.btn{min-height:36px;padding:6px 14px;border:1.5px solid var(--rule-strong);border-radius:8px;background:var(--card);color:var(--ink);
+  font:600 13px/1 var(--sans);cursor:pointer}
+.btn:hover{border-color:var(--ink)}
+.btn:focus-visible{outline:2px solid var(--flow);outline-offset:2px}
+.play{min-width:84px}
+.scrub{flex:1 1 200px;min-width:0;height:36px;accent-color:var(--flow);margin:0}
+.clock{font:600 12px/1 var(--mono);color:var(--muted);min-width:9.5em}
+.theme{margin-left:auto}
+
+.log{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}
+.chip{min-height:56px;padding:6px 4px;border:1.5px solid var(--rule);border-radius:8px;background:var(--paper);color:var(--ink);
+  cursor:pointer;font:12px/1.35 var(--sans);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
+.chip b{font:700 12px/1.2 var(--mono)}
+.chip .r{font:700 12px/1.2 var(--mono);color:var(--soft)}
+.chip .r.ok{color:var(--ok)}.chip .r.bad{color:var(--bad)}
+.chip[aria-current="true"]{border-color:var(--hot-stroke);border-width:2px}
+.chip:focus-visible{outline:2px solid var(--flow);outline-offset:2px}
+
+/* ---------- narrow layout ---------- */
+@container (max-width: 639px){
+  .stage{grid-template-columns:1fr 12px 1fr 12px 1fr;grid-template-rows:auto 28px auto 28px auto;
+    grid-template-areas:"src src src src src" "c0 . . . ." "g1 c1 g2 c2 g3" ". . . . c3" "inbox inbox inbox inbox inbox"}
+  .box{padding:8px}
+  .gq{font-size:13px}
+  .gt{font-size:12px}
+  .gr{flex-direction:column;gap:4px}
+  .src .kv{grid-template-columns:auto 1fr auto 1fr}
+  .c0::before,.c3::before{left:50%;right:auto;top:2px;bottom:7px;width:2px;height:auto;margin:0 0 0 -1px}
+  .c0::after,.c3::after{left:50%;right:auto;top:auto;bottom:1px;margin:0 0 0 -5px;border:5px solid transparent;border-top:6px solid var(--rule-strong);border-bottom:0}
+  .c0.done::after,.c3.done::after{border-top-color:var(--flow)}
+  .c0 .dot,.c3 .dot{left:50%;margin:0 0 0 -5px;top:calc(var(--p,0) * (100% - 10px))}
+  .c1::before,.c2::before{left:1px;right:5px}
+  .c1::after,.c2::after{border-width:4px;margin-top:-4px;border-left-width:5px}
+  .c1 .dot,.c2 .dot{width:8px;height:8px;margin-top:-4px;left:calc(var(--p,0) * (100% - 8px))}
+  .inbox{flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px 8px}
+  .inbox .irow{margin-top:0;flex:1 1 100%}
+  .clock{min-width:0}
+}
+@container (max-width: 380px){
+  .src .kv{grid-template-columns:auto 1fr}
+}
+@media (prefers-reduced-motion: reduce){ .cn .dot{transition:none} }
+</style>
+</head>
+<body>
+<figure class="fig" id="webhook-replay-gates" data-fig="webhook-replay-gates" data-dur="25" data-rest="9.6" tabindex="0"
+  aria-label="同一個事件 evt_1 在一小時內送達五次，每一包依序經過三道關卡：簽章、300 秒時間窗、事件 ID 去重；圖顯示每一包在哪一關被擋下或收下，以及拿到的回應碼。">
+  <div class="stage" aria-hidden="false">
+    <div class="box src" id="src">
+      <div class="ph"><span class="pk" id="pk">T2</span><span class="pw" id="pw">攻擊者</span></div>
+      <div class="pa" id="pa">重放 T1 那包</div>
+      <dl class="kv">
+        <dt>現在時刻</dt><dd id="pnow">10:02:00</dd>
+        <dt>簽進去的時間戳</dt><dd id="pts">10:00:00</dd>
+      </dl>
+      <div class="pres" id="pres"></div>
+    </div>
+    <div class="cn c0" id="c0"><span class="dot"></span></div>
+    <div class="box gate g1" id="g1">
+      <div class="gn">第 1 關</div>
+      <div class="gq">簽章對嗎？</div>
+      <div class="gs">時間戳也簽在裡面</div>
+      <div class="gr"><span class="ic"></span><span class="gt"></span></div>
+    </div>
+    <div class="cn c1" id="c1"><span class="dot"></span></div>
+    <div class="box gate g2" id="g2">
+      <div class="gn">第 2 關</div>
+      <div class="gq">時間戳在 300 秒內嗎？</div>
+      <div class="gs">太舊或太新都拒絕</div>
+      <div class="gr"><span class="ic"></span><span class="gt"></span></div>
+    </div>
+    <div class="cn c2" id="c2"><span class="dot"></span></div>
+    <div class="box gate g3" id="g3">
+      <div class="gn">第 3 關</div>
+      <div class="gq">事件 ID 存過了嗎？</div>
+      <div class="gs">event_id 唯一</div>
+      <div class="gr"><span class="ic"></span><span class="gt"></span></div>
+    </div>
+    <div class="cn c3" id="c3"><span class="dot"></span></div>
+    <div class="box inbox" id="inbox">
+      <div class="ih">收件匣資料表</div>
+      <div class="isub">驗過才寫入</div>
+      <div class="irow" id="irow">evt_1・10:00:00 存入</div>
+    </div>
+  </div>
+
+  <div class="note" id="note" aria-live="polite"></div>
+
+  <div class="ctl">
+    <button class="btn play" id="play" type="button" aria-label="播放">▶ 播放</button>
+    <input class="scrub" id="scrub" type="range" min="0" max="25" step="0.05" value="9.6" aria-label="時間軸：拖曳看五次送達">
+    <span class="clock" id="clock"></span>
+    <button class="btn theme" id="theme" type="button" aria-label="切換深淺色">深色</button>
+  </div>
+
+  <div class="log" id="log" role="group" aria-label="五次送達的回應紀錄，按一下跳到該次的結果"></div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var E = 5, DUR = 25, REST = 9.6;
+  // windows inside one delivery (seconds)
+  var W = { c0:[0.5,1.0], g1:[1.0,1.6], c1:[1.6,2.1], g2:[2.1,2.7], c2:[2.7,3.2], g3:[3.2,3.8], c3:[3.8,4.3] };
+  // facts from 40-Webhook 驗證.md「時間戳與容許時間窗：擋重放」
+  var EP = [
+    { k:"T1", who:"金流商", atk:false, act:"送出 evt_1", now:"10:00:00", ts:"10:00:00", stop:3, fail:false, store:true,
+      g:["簽章對","相差 0 秒","沒有 → 存進收件匣"], resp:"回 2xx，存進收件匣", code:"2xx", ok:true, rest:4.6,
+      note:"第一次送達：三關都過，evt_1 存進收件匣，回 2xx。" },
+    { k:"T2", who:"攻擊者", atk:true, act:"重放 T1 那包", now:"10:02:00", ts:"10:00:00", stop:3, fail:true, store:false,
+      g:["簽章對","相差 120 秒","存過了 → 不再處理"], resp:"回 2xx，不再處理", code:"2xx", ok:true, rest:4.6,
+      note:"重放的那包簽章本來就是對的，相差 120 秒時間窗也擋不住；最後靠事件 ID 存過了，回 2xx、不再處理。" },
+    { k:"T3", who:"攻擊者", atk:true, act:"又重放一次", now:"10:30:00", ts:"10:00:00", stop:2, fail:true, store:false,
+      g:["簽章對","相差 1800 秒，超過 300 秒",""], resp:"回 401", code:"401", ok:false, rest:3.0,
+      note:"同一包隔了 30 分鐘再送：相差 1800 秒，超過 300 秒時間窗，回 401。" },
+    { k:"T4", who:"攻擊者", atk:true, act:"把時間戳改成 10:31:00", now:"10:31:00", ts:"10:31:00", stop:1, fail:true, store:false,
+      g:["時間戳變了，簽章對不上","",""], resp:"回 401", code:"401", ok:false, rest:1.9,
+      note:"想把時間戳改新來騙過時間窗：時間戳也簽在簽章裡，一改簽章就對不上，回 401。" },
+    { k:"T5", who:"金流商", atk:false, act:"重送 evt_1，用當下時間重新簽", now:"11:00:00", ts:"11:00:00", stop:3, fail:true, store:false,
+      g:["簽章對","相差 0 秒","存過了 → 不再處理"], resp:"回 2xx，不再處理", code:"2xx", ok:true, rest:4.6,
+      note:"金流商的正常重送用當下時間重新簽，時間窗不會擋；事件 ID 存過了，回 2xx、不再處理。" }
+  ];
+  function decideAt(ep){ return W["g"+ep.stop][1]; }
+
+  var $ = function(id){ return document.getElementById(id); };
+  var fig = $("webhook-replay-gates");
+  var el = { src:$("src"), pk:$("pk"), pw:$("pw"), pa:$("pa"), pnow:$("pnow"), pts:$("pts"), pres:$("pres"),
+    note:$("note"), irow:$("irow"), inbox:$("inbox"), clock:$("clock"), scrub:$("scrub"), play:$("play"), theme:$("theme"), log:$("log") };
+  var G = [1,2,3].map(function(i){ var n=$("g"+i); return { n:n, ic:n.querySelector(".ic"), gt:n.querySelector(".gt") }; });
+  var C = [0,1,2,3].map(function(i){ return $("c"+i); });
+
+  // build log chips
+  var chips = EP.map(function(ep, j){
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "chip";
+    b.innerHTML = '<b>'+ep.k+'</b><span>'+ep.who+'</span><span class="r">—</span>';
+    b.addEventListener("click", function(){ seek(j*E + ep.rest); });
+    el.log.appendChild(b);
+    return { b:b, r:b.querySelector(".r") };
+  });
+
+  var cache = {};
+  function set(key, node, prop, val){ if (cache[key] !== val){ cache[key] = val; node[prop] = val; } }
+
+  function render(t){
+    t = Math.max(0, Math.min(DUR, t));
+    var k = Math.min(EP.length-1, Math.floor(t / E));
+    var u = t - k*E, ep = EP[k], dAt = decideAt(ep);
+
+    // packet card
+    set("pk", el.pk, "textContent", ep.k);
+    set("pw", el.pw, "textContent", ep.who);
+    set("pa", el.pa, "textContent", ep.act);
+    set("pnow", el.pnow, "textContent", ep.now);
+    set("pts", el.pts, "textContent", ep.ts);
+    set("srcc", el.src, "className", "box src" + (ep.atk ? " attacker" : ""));
+    var o = Math.min(1, 0.25 + u / 0.5 * 0.75);
+    set("srco", el.src.style, "opacity", String(Math.round(o*100)/100));
+    var resolved = u >= dAt;
+    set("presh", el.pres, "innerHTML", resolved ? '<span class="lbl">收到回應</span>' + ep.resp : '<span class="lbl">收到回應</span>⋯');
+    set("presc", el.pres, "className", "pres" + (resolved ? (ep.ok ? " ok" : " bad") : ""));
+
+    // gates
+    for (var i=0;i<3;i++){
+      var gi = i+1, w = W["g"+gi], g = G[i], st, ic = "", txt = "";
+      if (gi > ep.stop || u < w[0]) { st = "idle"; }
+      else if (u < w[1]) { st = "checking"; ic = "?"; txt = "檢查中⋯"; }
+      else {
+        var isStop = gi === ep.stop, failed = isStop && ep.fail;
+        st = (failed ? "fail" : "pass") + (isStop ? " hot" : "");
+        ic = failed ? "✕" : "✓"; txt = ep.g[i];
+      }
+      set("gc"+i, g.n, "className", "box gate g"+gi+" "+st);
+      set("gi"+i, g.ic, "textContent", ic);
+      set("gt"+i, g.gt, "textContent", txt);
+    }
+
+    // connectors
+    for (var c=0;c<4;c++){
+      var cw = W["c"+c], used = c < ep.stop || (c === 3 && ep.store), cls = "cn c"+c, p = 0;
+      if (!used) cls += " off";
+      else if (u >= cw[1]) cls += " done";
+      else if (u >= cw[0]) { cls += " moving"; p = (u - cw[0]) / (cw[1] - cw[0]); }
+      set("cc"+c, C[c], "className", cls);
+      var pv = String(Math.round(p*1000)/1000);
+      if (cache["cp"+c] !== pv){ cache["cp"+c] = pv; C[c].style.setProperty("--p", pv); }
+    }
+
+    // inbox
+    var hasRow = k > 0 || u >= W.c3[1];
+    var hit = (ep.stop === 3 && !ep.store && u >= W.g3[0]) || (ep.store && u >= W.c3[1]);
+    set("irt", el.irow, "textContent", hasRow ? "evt_1・10:00:00 存入" : "（還沒有資料）");
+    set("irc", el.irow, "className", "irow" + (hasRow ? "" : " empty") + (hit && hasRow ? " hit" : ""));
+
+    // note
+    set("note", el.note, "textContent", resolved ? ep.note : ("第 " + (k+1) + " 次送達（" + ep.k + "）：" + ep.who + ep.act + "，進入檢查⋯"));
+
+    // clock
+    set("clock", el.clock, "textContent", ep.k + "・現在 " + ep.now);
+
+    // log chips
+    for (var j=0;j<EP.length;j++){
+      var done = t >= j*E + decideAt(EP[j]);
+      set("chr"+j, chips[j].r, "textContent", done ? EP[j].code : "—");
+      set("chc"+j, chips[j].r, "className", "r" + (done ? (EP[j].ok ? " ok" : " bad") : ""));
+      var cur = j === k ? "true" : "false";
+      if (cache["cha"+j] !== cur){ cache["cha"+j] = cur; chips[j].b.setAttribute("aria-current", cur); }
+      chips[j].b.setAttribute("aria-label", EP[j].k + " " + EP[j].who + (done ? "，" + EP[j].resp : "，尚未送達"));
+    }
+    set("scrub", el.scrub, "value", String(Math.round(t*100)/100));
+  }
+
+  // ---------- playback ----------
+  var T = REST, playing = false, visible = true, raf = 0, last = 0, fresh = true;
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function setPlayUI(){
+    el.play.textContent = playing ? "❚❚ 暫停" : "▶ 播放";
+    el.play.setAttribute("aria-label", playing ? "暫停" : "播放");
+  }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    T += dt;
+    if (T >= DUR){ T = DUR; playing = false; setPlayUI(); render(T); return; }
+    render(T);
+    raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (playing && visible && !raf){ last = 0; raf = requestAnimationFrame(frame); } }
+  function play(){
+    if (fresh || T >= DUR - 0.01){ T = 0; fresh = false; }
+    playing = true; setPlayUI(); render(T); arm();
+  }
+  function pause(){ playing = false; setPlayUI(); if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function seek(t){ pause(); fresh = false; T = Math.max(0, Math.min(DUR, +t || 0)); render(T); }
+
+  el.play.addEventListener("click", function(){ playing ? pause() : play(); });
+  el.scrub.addEventListener("input", function(){ seek(parseFloat(el.scrub.value)); });
+  fig.addEventListener("keydown", function(e){
+    if (e.target !== fig) return;
+    var k = Math.min(EP.length-1, Math.floor(T / E));
+    if (e.key === " " || e.key === "Enter"){ e.preventDefault(); playing ? pause() : play(); }
+    else if (e.key === "ArrowRight"){ e.preventDefault(); var n = Math.min(EP.length-1, (T >= k*E + EP[k].rest - 0.01) ? k+1 : k); seek(n*E + EP[n].rest); }
+    else if (e.key === "ArrowLeft"){ e.preventDefault(); var p = Math.max(0, (T <= k*E + EP[k].rest + 0.01) ? k-1 : k); seek(p*E + EP[p].rest); }
+  });
+
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) arm(); else if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    }, { rootMargin:"120px" }).observe(fig);
+  }
+
+  // ---------- theme ----------
+  var root = document.documentElement;
+  function isDark(){
+    var a = root.getAttribute("data-theme");
+    if (a === "dark") return true; if (a === "light") return false;
+    return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function themeUI(){ var d = isDark(); el.theme.textContent = d ? "淺色" : "深色"; el.theme.setAttribute("aria-label", d ? "切換成淺色" : "切換成深色"); }
+  el.theme.addEventListener("click", function(){ root.setAttribute("data-theme", isDark() ? "light" : "dark"); themeUI(); });
+  new MutationObserver(themeUI).observe(root, { attributes:true, attributeFilter:["data-theme"] });
+  if (window.matchMedia) { var mq = matchMedia("(prefers-color-scheme: dark)"); (mq.addEventListener ? mq.addEventListener("change", themeUI) : mq.addListener(themeUI)); }
+  themeUI();
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return { dur:DUR, rest:REST, keys:EP.map(function(ep,j){ return j*E + ep.rest; }) }; };
+
+  void reduce; // reduced motion: never autoplays; starts paused at REST either way
+  setPlayUI();
+  render(T);
+})();
+</script>
+</body>
+</html>

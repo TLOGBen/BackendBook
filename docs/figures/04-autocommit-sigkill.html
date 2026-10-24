@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>autocommit 被砍斷</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2328; --muted:#5b6470; --faint:#8b949e;
+  --line:#d0d7de; --card:#f6f8fa; --card-2:#ffffff;
+  --solid:#1f6feb; --solid-fill:#ddeafe; --solid-ink:#0b3d91;
+  --pend:#6e7781; --pend-fill:#ffffff;
+  --amber-fill:#fde68a; --amber-line:#b45309; --amber-ink:#78350f;
+  --ok-ink:#1a7f37;
+  --focus:#1f6feb;
+  --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono","SFMono-Regular",Consolas,"Noto Sans Mono CJK TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e6edf3; --muted:#a3adba; --faint:#7d8794;
+    --line:#3b4252; --card:#262b35; --card-2:#1e2129;
+    --solid:#58a6ff; --solid-fill:#14294a; --solid-ink:#cfe3ff;
+    --pend:#8b949e; --pend-fill:#1e2129;
+    --amber-fill:#4d3409; --amber-line:#f59e0b; --amber-ink:#fde68a;
+    --ok-ink:#56d364; --focus:#58a6ff;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e6edf3; --muted:#a3adba; --faint:#7d8794;
+  --line:#3b4252; --card:#262b35; --card-2:#1e2129;
+  --solid:#58a6ff; --solid-fill:#14294a; --solid-ink:#cfe3ff;
+  --pend:#8b949e; --pend-fill:#1e2129;
+  --amber-fill:#4d3409; --amber-line:#f59e0b; --amber-ink:#fde68a;
+  --ok-ink:#56d364; --focus:#58a6ff;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+*{box-sizing:border-box;}
+
+.fig{margin:0;padding:16px;container-type:inline-size;outline:none;font-size:15px;line-height:1.45;}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--focus);border-radius:8px;}
+
+/* 模式切換 */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.mode{min-height:40px;padding:6px 10px;border:1.5px solid var(--line);border-radius:8px;background:var(--card);
+  color:var(--muted);font:600 14px/1.3 var(--sans);cursor:pointer;text-align:center;}
+.mode code{font-family:var(--mono);font-size:13px;font-weight:600;}
+.mode[aria-pressed="true"]{border-color:var(--solid);background:var(--solid-fill);color:var(--solid-ink);}
+.mode:focus-visible,.play:focus-visible,.themebtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}
+
+/* 部署狀態列 */
+.deploy{margin-top:12px;min-height:40px;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;
+  border:1.5px solid var(--line);background:var(--card);font-weight:600;font-size:14px;position:relative;overflow:hidden;}
+.deploy .dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--ok-ink);}
+.deploy.term .dot{background:var(--amber-line);}
+.deploy.kill{background:var(--amber-fill);border-color:var(--amber-line);color:var(--amber-ink);}
+.deploy.kill .dot{background:var(--amber-line);border-radius:2px;}
+.deploy.fresh .dot{background:var(--solid);}
+.deploy .grace{position:absolute;left:0;bottom:0;height:3px;background:var(--amber-line);width:0;}
+.deploy code{font-family:var(--mono);font-size:13px;}
+
+/* 主體：程式欄｜訊息走道｜資料庫欄 */
+.main{margin-top:12px;display:grid;grid-template-columns:minmax(0,1.15fr) 44px minmax(0,1fr);
+  grid-template-rows:auto repeat(3,auto);column-gap:0;row-gap:12px;position:relative;}
+.colhead{font-weight:700;font-size:14px;color:var(--ink);padding:0 2px;align-self:end;}
+.colhead small{display:block;font-weight:500;font-size:12px;color:var(--muted);margin-top:2px;}
+.colhead code{font-family:var(--mono);font-size:12px;}
+.h-prog{grid-column:1;grid-row:1;}
+.h-db{grid-column:3;grid-row:1;}
+
+.txbox{grid-column:1;grid-row:2 / 5;margin:-6px;border:2px dashed var(--solid);border-radius:10px;pointer-events:none;
+  opacity:0;position:relative;}
+.txbox span{position:absolute;top:-11px;right:10px;background:var(--bg);color:var(--solid);font-size:12px;font-weight:700;padding:0 6px;line-height:20px;}
+.fig.tx .txbox{opacity:1;}
+
+.step,.cell{border:1.5px solid var(--line);border-radius:8px;background:var(--card-2);padding:10px 12px;min-height:64px;
+  display:flex;flex-direction:column;gap:4px;position:relative;z-index:1;}
+.step{grid-column:1;}
+.cell{grid-column:3;}
+.step .num{font-size:12px;font-weight:700;color:var(--muted);}
+.step code{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--ink);word-break:break-word;}
+.step .what{font-size:13px;color:var(--muted);}
+.badge,.tag{align-self:flex-start;font-size:12px;font-weight:700;line-height:18px;padding:1px 8px;border-radius:999px;
+  border:1.5px solid var(--line);color:var(--muted);background:var(--card);white-space:nowrap;}
+.s-active{border-color:var(--solid);}
+.b-sending{border-color:var(--solid);color:var(--solid-ink);background:var(--solid-fill);}
+.b-commit{border-color:var(--solid);background:var(--solid);color:var(--bg);}
+.b-pend{border-style:dashed;border-color:var(--pend);color:var(--ink);background:var(--pend-fill);}
+.b-void{border-style:dashed;color:var(--faint);}
+.hot{background:var(--amber-fill)!important;border-color:var(--amber-line)!important;color:var(--amber-ink)!important;}
+.step.hot code,.step.hot .num,.step.hot .what,.cell.hot .k,.cell.hot .v{color:var(--amber-ink);}
+.step.killed{opacity:.55;}
+
+.cell .k{font-size:12px;font-weight:700;color:var(--muted);}
+.cell .v{font-size:16px;font-weight:700;color:var(--ink);}
+.cell.c-commit{border-color:var(--solid);background:var(--solid-fill);}
+.cell.c-commit .v{color:var(--solid-ink);}
+.cell.c-pend{border-style:dashed;border-color:var(--pend);}
+.cell.c-pend .v{color:var(--muted);}
+.t-commit{border-color:var(--solid);background:var(--solid);color:var(--bg);}
+.t-pend{border-style:dashed;border-color:var(--pend);color:var(--ink);background:var(--pend-fill);}
+.t-ok{border-color:var(--ok-ink);color:var(--ok-ink);background:transparent;}
+
+/* 訊息走道 */
+.lane{grid-column:2;position:relative;}
+.lane .ln{position:absolute;left:6px;right:6px;height:0;border-top:1.5px solid var(--line);}
+.lane .req{top:34%;}
+.lane .res{top:66%;border-top-style:dashed;}
+.lane .req::after,.lane .res::before{content:"";position:absolute;top:-5px;border:4px solid transparent;}
+.lane .req::after{right:-2px;border-left:6px solid var(--line);border-right:0;}
+.lane .res::before{left:-2px;border-right:6px solid var(--line);border-left:0;}
+.lane.on .ln{border-top-color:var(--solid);}
+.lane.on .req::after{border-left-color:var(--solid);}
+.lane.on .res::before{border-right-color:var(--solid);}
+.lane.cut .req{border-top-color:var(--amber-line);border-top-style:dotted;}
+.lane.cut .req::after{border-left-color:var(--amber-line);}
+.lane .pk{position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--solid);left:0;top:34%;opacity:0;}
+.lane .x{position:absolute;left:50%;top:34%;transform:translate(-50%,-50%);font:700 14px/1 var(--sans);color:var(--amber-line);opacity:0;}
+.lane.cut .x{opacity:1;}
+
+/* readout */
+.readout{margin-top:12px;min-height:48px;display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:var(--card);
+  border:1.5px solid var(--line);font-size:15px;}
+.readout .beat{flex:none;font:700 12px/20px var(--sans);color:var(--muted);border:1.5px solid var(--line);border-radius:999px;padding:0 8px;margin-top:1px;white-space:nowrap;}
+.readout .txt code{font-family:var(--mono);font-size:13px;}
+.readout.final{border-color:var(--ink);}
+
+/* 控制列 */
+.controls{margin-top:12px;display:flex;align-items:center;gap:10px;}
+.play{flex:none;width:40px;height:40px;border-radius:50%;border:1.5px solid var(--solid);background:var(--solid);color:var(--bg);cursor:pointer;
+  display:grid;place-items:center;padding:0;}
+.play svg{width:16px;height:16px;fill:currentColor;}
+.scrub{flex:1;min-width:0;height:40px;margin:0;accent-color:var(--solid);cursor:pointer;}
+.themebtn{flex:none;width:32px;height:32px;border-radius:8px;border:1.5px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;padding:0;font-size:14px;}
+.embedded .themebtn{display:none;}
+
+@container (max-width: 520px){
+  .fig{font-size:14px;}
+  .main{grid-template-columns:minmax(0,1fr) 22px minmax(0,1fr);row-gap:10px;}
+  .step,.cell{padding:8px 8px;}
+  .step code{font-size:12px;}
+  .step .what{font-size:12px;}
+  .cell .v{font-size:15px;}
+  .badge,.tag{padding:1px 6px;white-space:normal;}
+  .lane .ln{left:2px;right:2px;}
+  .readout{flex-direction:column;gap:6px;font-size:14px;}
+  .mode{font-size:13px;}
+  .mode code{font-size:12px;}
+  .deploy{font-size:13px;}
+  .deploy code{font-size:12px;}
+}
+@media (prefers-reduced-motion: no-preference){
+  .step,.cell,.badge,.tag,.deploy,.txbox,.lane .ln{transition:background-color .25s,border-color .25s,color .25s,opacity .25s;}
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="autocommit-sigkill" data-dur="6" data-rest="6" tabindex="0"
+  aria-label="動畫：兌換程式依序送出三句 SQL，第 2 句之後被 SIGKILL 砍掉。autocommit 模式下前兩句已各自 commit，會員 8 點數少 500、有券卻沒有點數紀錄；切到 with conn.transaction() 模式，同樣被砍，整筆交易當作沒發生。">
+  <div class="modes" role="group" aria-label="切換寫法">
+    <button type="button" class="mode" data-mode="auto" aria-pressed="true">原本：<code>autocommit=True</code></button>
+    <button type="button" class="mode" data-mode="tx" aria-pressed="false">修好：<code>with conn.transaction():</code></button>
+  </div>
+
+  <div class="deploy" id="deploy"><span class="dot"></span><span id="deployTxt">舊版程式正常執行中</span><span class="grace" id="grace"></span></div>
+
+  <div class="main">
+    <div class="colhead h-prog">兌換程式 <code>redeem_coupon()</code><small id="progSub">每句送出就自己 commit</small></div>
+    <div class="colhead h-db">PostgreSQL 裡的會員 8<small>資料庫實際存著的</small></div>
+    <div class="txbox" aria-hidden="true"><span>同一筆交易</span></div>
+
+    <div class="step" id="s1" style="grid-row:2"><span class="num">第 1 句</span><code>UPDATE members</code><span class="what">扣 500 點</span><span class="badge" id="b1">等待</span></div>
+    <div class="lane" id="l1" style="grid-row:2" aria-hidden="true"><i class="ln req"></i><i class="ln res"></i><i class="pk"></i><i class="x">✕</i></div>
+    <div class="cell" id="c1" style="grid-row:2"><span class="k">點數</span><span class="v" id="v1">原本的點數</span><span class="tag" id="t1">還沒動</span></div>
+
+    <div class="step" id="s2" style="grid-row:3"><span class="num">第 2 句</span><code>INSERT INTO coupons</code><span class="what">發一張券</span><span class="badge" id="b2">等待</span></div>
+    <div class="lane" id="l2" style="grid-row:3" aria-hidden="true"><i class="ln req"></i><i class="ln res"></i><i class="pk"></i><i class="x">✕</i></div>
+    <div class="cell" id="c2" style="grid-row:3"><span class="k">優惠券</span><span class="v" id="v2">沒有</span><span class="tag" id="t2">還沒動</span></div>
+
+    <div class="step" id="s3" style="grid-row:4"><span class="num">第 3 句</span><code>INSERT INTO point_logs</code><span class="what">記一筆 -500 紀錄</span><span class="badge" id="b3">等待</span></div>
+    <div class="lane" id="l3" style="grid-row:4" aria-hidden="true"><i class="ln req"></i><i class="ln res"></i><i class="pk"></i><i class="x">✕</i></div>
+    <div class="cell" id="c3" style="grid-row:4"><span class="k">點數紀錄</span><span class="v" id="v3">沒有</span><span class="tag" id="t3">還沒動</span></div>
+  </div>
+
+  <div class="readout" id="readout" aria-live="polite"><span class="beat" id="beat">1／6</span><span class="txt" id="rtxt"></span></div>
+
+  <div class="controls">
+    <button type="button" class="play" id="play" aria-label="播放"><svg viewBox="0 0 16 16" id="playIco"><path d="M4 2.5v11l9-5.5z"/></svg></button>
+    <input type="range" class="scrub" id="scrub" min="0" max="600" step="1" value="600" aria-label="時間軸：拖動看每一步">
+    <button type="button" class="themebtn" id="themebtn" aria-label="切換深淺色">◐</button>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var fig = document.getElementById('fig');
+  var DUR = +fig.dataset.dur, REST = +fig.dataset.rest;
+  var BEAT_SEC = 1.8;
+  var $ = function(id){ return document.getElementById(id); };
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  try { if (window.self !== window.top) document.documentElement.classList.add('embedded'); } catch(e){ document.documentElement.classList.add('embedded'); }
+
+  var mode = 'auto', t = REST, playing = false, visible = true, raf = 0, last = 0;
+
+  var TXT = {
+    auto: [
+      '會員 8 按下「用 500 點換一張券」。連線是 <code>autocommit=True</code>：沒開交易，每句 SQL 送出去就自己 commit。',
+      '第 1 句 <code>UPDATE members</code> 扣 500 點，送出後馬上 commit。',
+      '第 2 句 <code>INSERT INTO coupons</code> 發一張券，也馬上 commit。',
+      '部署開始，舊版程式收到 SIGTERM。它沒做優雅關閉，不會先把手上的兌換做完。',
+      '超過寬限時間，SIGKILL 把程式砍掉。第 3 句 <code>INSERT INTO point_logs</code> 還沒送出。',
+      '結果：點數少 500、有券，卻沒有點數紀錄。前兩句早就各自 commit，資料庫沒有理由退回。'
+    ],
+    tx: [
+      '同樣三句，這次包進 <code>with conn.transaction():</code>，三句屬於同一筆交易。',
+      '第 1 句扣 500 點：寫進去了，但這筆交易還沒 commit。',
+      '第 2 句發券：一樣還沒 commit。',
+      '部署開始，舊版程式收到 SIGTERM。它沒做優雅關閉，不會先把手上的兌換做完。',
+      '超過寬限時間，SIGKILL 把程式砍掉。第 3 句沒送出，COMMIT 也沒送出。',
+      '結果：交易還沒 commit，PostgreSQL 把它整筆當作沒發生。點數、券、紀錄都跟兌換前一樣，沒有缺一角。'
+    ]
+  };
+  var BEAT = ['開始','第 1 句','第 2 句','SIGTERM','SIGKILL','結果'];
+  var VAL0 = ['原本的點數','沒有','沒有'];
+  var VAL1 = ['少 500 點','1 張','-500 紀錄'];
+
+  function setCls(el, base, extra){ var c = base + (extra ? ' ' + extra : ''); if (el.className !== c) el.className = c; }
+  function setTxt(el, s){ if (el.textContent !== s) el.textContent = s; }
+  function setHtml(el, s){ if (el._h !== s){ el.innerHTML = s; el._h = s; } }
+
+  // 一格畫面：完全由 (mode, t) 決定
+  function paint(){
+    var tx = mode === 'tx';
+    var b = Math.min(5, Math.floor(t)), f = t >= DUR ? 1 : t - b;
+    fig.classList.toggle('tx', tx);
+    setTxt($('progSub'), tx ? '三句在同一筆交易裡，最後才 COMMIT' : '每句送出就自己 commit');
+
+    // 部署狀態
+    var dep = $('deploy'), dcls = '', dtxt = '舊版程式正常執行中', grace = 0;
+    if (b === 3){ dcls = 'term'; dtxt = '收到 SIGTERM：請結束，寬限時間倒數中'; grace = f; }
+    else if (b === 4){ dcls = 'kill'; dtxt = '超過寬限時間 → SIGKILL：強制砍掉，停在跑到的那一行'; }
+    else if (b === 5){ dcls = 'fresh'; dtxt = '新版程式啟動，沒人重做這筆兌換'; }
+    setCls(dep, 'deploy', dcls); setTxt($('deployTxt'), dtxt);
+    $('grace').style.width = (grace * 100).toFixed(1) + '%';
+
+    for (var i = 1; i <= 3; i++){
+      var s = $('s'+i), bd = $('b'+i), ln = $('l'+i), c = $('c'+i), v = $('v'+i), tg = $('t'+i);
+      var pk = ln.querySelector('.pk');
+      var sent = i <= 2 && (b > i || (b === i && f >= 0.5));   // 回應已回來
+      var sending = i <= 2 && b === i && f < 0.5;
+      var sCls = '', bCls = '', bTxt = '等待', lCls = '', cCls = '', vTxt = VAL0[i-1], tCls = '', tTxt = '還沒動';
+      var pkOn = 0, pkX = 0, pkY = '34%';
+
+      if (i <= 2){
+        if (b === i){ sCls = 's-active'; lCls = 'on'; pkOn = 1;
+          if (f < 0.5){ pkX = f * 2; pkY = '34%'; } else { pkX = 1 - (f - 0.5) * 2; pkY = '66%'; } }
+        if (sending){ bCls = 'b-sending'; bTxt = '送出中'; }
+        if (sent){
+          if (tx){ bCls = 'b-pend'; bTxt = '已寫入・未 commit'; cCls = 'c-pend'; vTxt = VAL1[i-1]; tCls = 't-pend'; tTxt = '未 commit'; }
+          else { bCls = 'b-commit'; bTxt = '✓ 自動 COMMIT'; cCls = 'c-commit'; vTxt = VAL1[i-1]; tCls = 't-commit'; tTxt = '已 commit'; }
+        }
+        if (b >= 4 && !tx){ sCls = ''; }
+        if (b === 5){
+          if (tx){ bCls = 'b-void'; bTxt = '沒生效'; cCls = ''; vTxt = VAL0[i-1]; tCls = 't-ok'; tTxt = '當作沒發生'; }
+          else { tTxt = '已 commit，退不回'; }
+        }
+      } else {
+        if (b === 3){ bTxt = '還沒送出'; }
+        if (b >= 4){
+          lCls = 'cut';
+          if (tx){ bCls = 'b-void'; bTxt = b === 4 ? '沒送出' : '沒送出'; }
+          else { sCls = 'hot'; bCls = 'hot'; bTxt = '沒送出，程式被砍'; }
+        }
+        if (b === 4 && tx){ sCls = 'hot'; bCls = 'hot'; }
+        if (b === 5){
+          if (tx){ sCls = ''; tCls = 't-ok'; tTxt = '跟兌換前一樣'; }
+          else { cCls = 'hot'; tCls = 'hot'; tTxt = '缺了這筆'; }
+        }
+      }
+      if (b >= 4 && i <= 2 && !tx) sCls = sCls; // 已 commit 的句子維持原樣
+      if (b === 4 && i <= 2) sCls = 'killed';
+      setCls(s, 'step', sCls); setCls(bd, 'badge', bCls); setTxt(bd, bTxt);
+      setCls(ln, 'lane', lCls);
+      setCls(c, 'cell', cCls); setTxt(v, vTxt); setCls(tg, 'tag', tCls); setTxt(tg, tTxt);
+      pk.style.opacity = pkOn; pk.style.left = (pkX * 100).toFixed(1) + '%'; pk.style.top = pkY;
+    }
+
+    setTxt($('beat'), (b + 1) + '／6 ' + BEAT[b]);
+    setHtml($('rtxt'), TXT[mode][b]);
+    $('readout').classList.toggle('final', b === 5);
+    var sv = String(Math.round(t * 100)); if ($('scrub').value !== sv) $('scrub').value = sv;
+  }
+
+  function setPlaying(p){
+    playing = p;
+    var btn = $('play');
+    btn.setAttribute('aria-label', p ? '暫停' : '播放');
+    $('playIco').innerHTML = p ? '<path d="M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z"/>' : '<path d="M4 2.5v11l9-5.5z"/>';
+    if (p) arm(); else stop();
+  }
+  function arm(){ if (!raf && playing && visible){ last = 0; raf = requestAnimationFrame(tick); } }
+  function stop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    if (last){ t = Math.min(DUR, t + (now - last) / 1000 / BEAT_SEC); }
+    last = now;
+    paint();
+    if (t >= DUR){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+
+  function seek(x){ t = Math.max(0, Math.min(DUR, +x || 0)); setPlaying(false); paint(); }
+  window.seek = seek; window.DUR = DUR;
+  window.setMode = function(m){ mode = m === 'tx' ? 'tx' : 'auto'; syncModes(); paint(); };
+
+  function syncModes(){
+    var bs = fig.querySelectorAll('.mode');
+    for (var i = 0; i < bs.length; i++) bs[i].setAttribute('aria-pressed', bs[i].dataset.mode === mode ? 'true' : 'false');
+  }
+  fig.querySelector('.modes').addEventListener('click', function(e){
+    var btn = e.target.closest('.mode'); if (!btn) return;
+    mode = btn.dataset.mode; syncModes(); paint();
+  });
+  $('play').addEventListener('click', function(){
+    if (playing){ setPlaying(false); return; }
+    if (t >= DUR) t = 0;
+    paint(); setPlaying(true);
+  });
+  $('scrub').addEventListener('input', function(){ seek(this.value / 100); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target.closest('.scrub,.mode,.play,.themebtn')) return;
+    if (e.key === 'ArrowRight'){ e.preventDefault(); seek(Math.min(DUR, Math.floor(t) + 1)); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(Math.max(0, Math.ceil(t) - 1)); }
+    else if (e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); $('play').click(); }
+  });
+  $('themebtn').addEventListener('click', function(){
+    var r = document.documentElement, cur = r.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    r.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); else stop(); },
+      { rootMargin: '120px' }).observe(fig);
+  }
+  if (window.matchMedia){
+    var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var onRM = function(){ reduce = mq.matches; if (reduce && playing){ setPlaying(false); } };
+    if (mq.addEventListener) mq.addEventListener('change', onRM);
+  }
+  // 預設停在最能說明重點的一格：autocommit 被砍斷後的結果；不自動播放
+  t = REST; paint();
+})();
+</script>
+</body>
+</html>

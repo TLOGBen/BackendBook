@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>重試風暴</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#5b6472; --line:#d4d8de; --card:#f7f8fa; --track:#e7eaee;
+  --dot:#64748b; --amber-fill:#fde68a; --amber-line:#b45309; --amber-ink:#111111;
+  --danger:#c62828; --danger-fill:#fde2e1; --danger-ink:#7f1d1d; --focus:#2563eb;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2029; --ink:#e6e8ec; --muted:#a3aab6; --line:#3d4250; --card:#262935; --track:#323644;
+    --dot:#a3aab6; --amber-fill:#5a3a07; --amber-line:#f59e0b; --amber-ink:#fde68a;
+    --danger:#f87171; --danger-fill:#4a1c1c; --danger-ink:#fecaca; --focus:#60a5fa;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2029; --ink:#e6e8ec; --muted:#a3aab6; --line:#3d4250; --card:#262935; --track:#323644;
+  --dot:#a3aab6; --amber-fill:#5a3a07; --amber-line:#f59e0b; --amber-ink:#fde68a;
+  --danger:#f87171; --danger-fill:#4a1c1c; --danger-ink:#fecaca; --focus:#60a5fa;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:15px;line-height:1.45;padding:12px 16px}
+.rs{margin:0;max-width:960px;margin-inline:auto;display:flex;flex-direction:column;gap:16px}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+
+/* readout */
+.ro{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:end}
+.ro-label{grid-column:1/-1;font-size:13px;color:var(--muted)}
+.ro-num{font-size:32px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ro-num small{font-size:15px;font-weight:600;color:var(--muted);margin-right:4px}
+.ro-math{font-size:15px;font-weight:600;color:var(--muted);padding-bottom:4px}
+.ro-math.hot{color:var(--amber-line)}
+.gauge{grid-column:1/-1;position:relative;height:12px;border-radius:6px;background:var(--track);margin-top:8px}
+.gauge-fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:6px;background:var(--dot)}
+.gauge-fill.hot{background:var(--amber-line)}
+.gauge-fill.fail{background:var(--danger)}
+.gauge-fill.hatch{background:repeating-linear-gradient(135deg,var(--amber-line) 0 4px,transparent 4px 8px);border:1px solid var(--amber-line)}
+.gauge-fill.hatch.calm{background:repeating-linear-gradient(135deg,var(--dot) 0 4px,transparent 4px 8px);border-color:var(--dot)}
+.gauge-over{position:absolute;right:-2px;top:50%;transform:translateY(-50%);font-size:13px;font-weight:700;color:var(--amber-line);opacity:0;background:var(--bg);padding:0 2px;line-height:1}
+.gauge-over.on{opacity:1}
+.gauge-ticks{grid-column:1/-1;display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+
+/* route */
+.route{display:flex;align-items:stretch}
+.node{flex:0 0 auto;width:104px;min-height:96px;border:1.5px solid var(--line);border-radius:8px;background:var(--card);
+  padding:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center}
+.node.user{width:72px}
+.node.db{width:128px}
+.node-name{font-size:15px;font-weight:700;line-height:1.2}
+.node-sub{font-size:13px;color:var(--muted);line-height:1.25}
+.node.hot{background:var(--amber-fill);border-color:var(--amber-line);color:var(--amber-ink)}
+.node.hot .node-sub{color:var(--amber-ink)}
+.node.fail{background:var(--danger-fill);border-color:var(--danger);color:var(--danger-ink)}
+.node.fail .node-sub{color:var(--danger-ink)}
+.chip{font-size:12px;line-height:1;padding:4px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap;background:var(--bg)}
+.chip.on{background:var(--amber-fill);border-color:var(--amber-line);color:var(--amber-ink);font-weight:700}
+.chip.cut{border-style:dashed;color:var(--ink)}
+.pool{display:grid;grid-template-columns:repeat(10,8px);gap:2px;margin-top:2px}
+.pool i{display:block;width:8px;height:8px;border-radius:2px;border:1px solid var(--muted);opacity:.6}
+.pool i.used{background:var(--amber-line);border-color:var(--amber-line);opacity:1}
+.pool i.used.f{background:var(--danger);border-color:var(--danger)}
+.pool-label{font-size:12px;color:inherit;opacity:.85}
+
+.link{flex:1 1 0;min-width:40px;position:relative;display:flex;flex-direction:column;justify-content:center}
+.track{position:relative;height:28px;margin:0 2px}
+.track::before{content:"";position:absolute;left:0;right:6px;top:50%;height:2px;background:var(--line);transform:translateY(-50%)}
+.track::after{content:"";position:absolute;right:0;top:50%;width:0;height:0;border-left:7px solid var(--line);border-top:5px solid transparent;border-bottom:5px solid transparent;transform:translateY(-50%)}
+.dot{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--dot);
+  left:calc(var(--p,0) * (100% - 12px));top:calc(50% - 3px + var(--l,0) * 7px);visibility:hidden}
+.dot.on{visibility:visible}
+.link.hot .dot{background:var(--amber-line)}
+.link.fail .dot{background:var(--danger)}
+.count{text-align:center;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--muted);line-height:1.2;min-height:16px;white-space:nowrap}
+.link.hot .count{color:var(--amber-line)}
+.link.fail .count{color:var(--danger)}
+
+/* event */
+.event{display:flex;gap:12px;align-items:flex-start;border-left:4px solid var(--line);padding:4px 0 4px 12px;min-height:52px}
+.event.hot{border-left-color:var(--amber-line)}
+.event.fail{border-left-color:var(--danger)}
+.ev-step{flex:0 0 auto;font-size:13px;font-weight:700;color:var(--muted);padding-top:1px;white-space:nowrap}
+.ev-text{font-size:15px}
+
+/* controls */
+.ctl{display:flex;flex-direction:column;gap:8px}
+.ctl-row{display:flex;align-items:center;gap:8px}
+.btn{flex:0 0 auto;width:40px;height:40px;border-radius:8px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.btn:hover{border-color:var(--muted)}
+.btn svg{width:18px;height:18px;fill:currentColor}
+.btn:focus-visible,.tick:focus-visible,.scrub:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.scrub{flex:1 1 auto;min-width:0;height:32px;accent-color:var(--amber-line);margin:0;cursor:pointer}
+.ticks{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
+.tick{height:32px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;padding:0}
+.tick.past{color:var(--ink)}
+.tick.cur{background:var(--amber-fill);border-color:var(--amber-line);color:var(--amber-ink);font-weight:700}
+
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--amber-line);background:var(--amber-fill)}
+.sw.h{background:repeating-linear-gradient(135deg,var(--amber-line) 0 3px,transparent 3px 6px)}
+
+/* narrow: vertical route */
+@media (max-width: 679px){
+  .ro-num{font-size:28px}
+  .route{flex-direction:column;align-items:stretch}
+  .node,.node.user,.node.db{width:auto;min-height:0;flex-direction:row;flex-wrap:wrap;justify-content:space-between;text-align:left;padding:8px 12px;gap:4px 8px}
+  .node-name{flex:1 1 auto}
+  .node .pool-wrap{flex-basis:100%;display:flex;align-items:center;gap:8px}
+  .link{flex:0 0 auto;min-width:0;height:52px;flex-direction:row;align-items:stretch;justify-content:flex-start;padding-left:24px}
+  .track{width:28px;height:auto;margin:2px 0}
+  .track::before{left:50%;right:auto;top:0;bottom:6px;width:2px;height:auto;transform:translateX(-50%)}
+  .track::after{left:50%;right:auto;top:auto;bottom:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid var(--line);border-bottom:0;transform:translateX(-50%)}
+  .dot{left:calc(50% - 3px + var(--l,0) * 7px);top:calc(var(--p,0) * (100% - 12px))}
+  .count{align-self:center;text-align:left;padding-left:12px}
+}
+@media (min-width: 680px){ .node .pool-wrap{display:flex;flex-direction:column;align-items:center;gap:2px} }
+</style>
+</head>
+<body>
+<figure class="rs fig" id="rs" data-fig="retry-storm" data-dur="20" data-rest="9.5"
+  aria-label="重試風暴的時間軸：一個結帳請求依序經過 API 閘道、訂單服務、庫存服務到 PostgreSQL。資料庫變慢後，三層各自最多重試 3 次，次數相乘，資料庫每秒收到的查詢從平常的 500 衝到最多 13,500，也就是 27 倍，最後連線池被借光。">
+
+  <div class="ro" aria-live="polite">
+    <div class="ro-label">每秒打到資料庫的查詢</div>
+    <div class="ro-num" id="num"><small>最多</small>13,500</div>
+    <div class="ro-math hot" id="math">×3 ×3 ×3 = ×27（500 × 27）</div>
+    <div class="gauge" aria-hidden="true"><div class="gauge-fill hot" id="gfill" style="width:100%"></div><span class="gauge-over" id="gover">＋</span></div>
+    <div class="gauge-ticks" aria-hidden="true"><span>平常 500</span><span>13,500</span></div>
+  </div>
+
+  <div class="route" id="route" aria-hidden="true">
+    <div class="node user" id="n-user"><div class="node-name">使用者</div><div class="node-sub" id="user-sub">每秒 500 個結帳</div></div>
+    <div class="link" data-i="0"><div class="count"></div><div class="track"></div></div>
+    <div class="node" id="n-gw"><div class="node-name">API 閘道</div><span class="chip" id="c-gw">最多 3 次</span></div>
+    <div class="link" data-i="1"><div class="count"></div><div class="track"></div></div>
+    <div class="node" id="n-order"><div class="node-name">訂單服務</div><div class="node-sub mono">timeout=5</div><span class="chip" id="c-order">最多 3 次</span></div>
+    <div class="link" data-i="2"><div class="count"></div><div class="track"></div></div>
+    <div class="node" id="n-inv"><div class="node-name">庫存服務</div><span class="chip" id="c-inv">最多 3 次</span></div>
+    <div class="link" data-i="3"><div class="count"></div><div class="track"></div></div>
+    <div class="node db hot" id="n-db"><div class="node-name">PostgreSQL</div><div class="node-sub" id="db-sub">回應 2 秒</div>
+      <div class="pool-wrap"><span class="pool-label">連線池</span><div class="pool" id="pool"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
+
+  <div class="event hot" id="event"><span class="ev-step" id="ev-step">第 4 步</span><span class="ev-text" id="ev-text">API 閘道等不到訂單服務，也再轉送一次 POST /orders，最多 3 次。</span></div>
+
+  <div class="ctl">
+    <div class="ctl-row">
+      <button class="btn" id="play" type="button" aria-label="播放"><svg viewBox="0 0 20 20" id="ico"><path d="M6 4l10 6-10 6z"/></svg></button>
+      <button class="btn" id="prev" type="button" aria-label="上一步"><svg viewBox="0 0 20 20"><path d="M5 4h2v12H5zM16 4v12L8 10z"/></svg></button>
+      <button class="btn" id="next" type="button" aria-label="下一步"><svg viewBox="0 0 20 20"><path d="M13 4h2v12h-2zM4 4l8 6-8 6z"/></svg></button>
+      <input class="scrub" id="scrub" type="range" min="0" max="20" step="0.05" value="9.5" aria-label="時間軸">
+    </div>
+    <div class="ticks" id="ticks" role="group" aria-label="跳到第幾步"></div>
+  </div>
+
+  <div class="legend">
+    <span>連線上的數字：1 個結帳請求在這一段造成幾次呼叫</span>
+    <span><i class="sw"></i>琥珀：重試正在發生的地方</span>
+    <span><i class="sw h"></i>斜線：文章沒有給確切數字</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var DUR = 20, STEP = 2.5, REST = 9.5, NDOT = 27;
+  // Every number and sentence below comes from docs/26-重試機制.md (the incident table, steps 1–8).
+  var S = [
+    {pre:'',     num:'500',            math:'平常：每個結帳請求查 1 次資料庫', g:500/13500, gk:'',      c:[1,1,1,1],  hot:[],                    db:'',     resp:'回應 20ms',     pool:2,  user:'每秒 500 個結帳', ev:'平常：500 個結帳請求，每個查一次資料庫。'},
+    {pre:'最多', num:'1,500',          math:'×3',                     g:1500/13500,  gk:'hot',   c:[1,1,1,3],  hot:['inv'],               db:'hot',  resp:'回應 20ms → 2 秒', pool:4,  user:'每秒 500 個結帳', ev:'慢查詢讓資料庫從 20ms 變成 2 秒，庫存服務的查詢逾時失敗，自己再試，每個請求最多 3 次。'},
+    {pre:'最多', num:'4,500',          math:'×3 ×3 = ×9',             g:4500/13500,  gk:'hot',   c:[1,1,3,9],  hot:['inv','order'],       db:'hot',  resp:'回應 2 秒',     pool:7,  user:'每秒 500 個結帳', ev:'訂單服務等庫存服務等到 5 秒逾時，照它的 for 迴圈再呼叫，最多 3 次；每次都會讓庫存服務再試 3 次。'},
+    {pre:'最多', num:'13,500',         math:'×3 ×3 ×3 = ×27（500 × 27）', g:1,        gk:'hot',   c:[1,3,9,27], hot:['inv','order','gw'],  db:'hot',  resp:'回應 2 秒',     pool:10, user:'每秒 500 個結帳', ev:'API 閘道等不到訂單服務，也再轉送一次 POST /orders，最多 3 次。'},
+    {pre:'',     num:'再往上加',        math:'使用者自己又按一次',          g:1, over:true, gk:'hot',   c:[2,3,9,27], hot:['inv','order','gw'],  db:'hot',  resp:'回應 2 秒',     pool:10, user:'又按一次「結帳」', ev:'使用者看畫面一直轉，自己又按一次「結帳」。'},
+    {pre:'',     num:'幾乎全部失敗',     math:'失敗又觸發更多重試',          g:1,           gk:'fail',  c:[2,3,9,27], hot:['inv','order','gw'],  db:'fail', resp:'完全不能用',     pool:10, fail:true, user:'又按一次「結帳」', ev:'資料庫的連線池被借光，原本只是「有點慢」，變成「完全不能用」。'},
+    {pre:'',     num:'仍是平常的好幾倍', math:'慢查詢修好了，重試還在灌',     g:0.5,         gk:'hatch', c:[1,3,9,27], hot:['inv','order','gw'],  db:'hot',  resp:'慢查詢已修好',   pool:10, user:'每秒 500 個結帳', ev:'慢查詢修好了，但重試流量還是一直灌進來，資料庫爬不起來。'},
+    {pre:'',     num:'降到應付得了的量', math:'前後掛了 40 分鐘',            g:0.15,        gk:'hatch calm', c:[1,1,1,1], half:true, hot:[], db:'', resp:'恢復',           pool:4,  user:'每秒 500 個結帳', cut:true, ev:'團隊先把閘道的流量關掉一半，資料庫才恢復；前後掛了 40 分鐘。'}
+  ];
+  var NUMV = [500,1500,4500,13500];
+  var $ = function(id){ return document.getElementById(id); };
+  var fig = $('rs'), num = $('num'), math = $('math'), gfill = $('gfill'), gover = $('gover');
+  var evBox = $('event'), evStep = $('ev-step'), evText = $('ev-text'), dbSub = $('db-sub'), userSub = $('user-sub');
+  var nodes = {gw:$('n-gw'), order:$('n-order'), inv:$('n-inv'), db:$('n-db')};
+  var chips = {gw:$('c-gw'), order:$('c-order'), inv:$('c-inv')};
+  var poolCells = $('pool').children;
+  var scrub = $('scrub'), play = $('play'), ico = $('ico'), ticksBox = $('ticks');
+  var links = [].slice.call(document.querySelectorAll('.link'));
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // build dots once (27 per link, shown as needed)
+  var dots = links.map(function(l){
+    var tr = l.querySelector('.track'), arr = [];
+    for (var i = 0; i < NDOT; i++){ var d = document.createElement('span'); d.className = 'dot'; d.style.setProperty('--l', (i % 3) - 1); tr.appendChild(d); arr.push(d); }
+    return arr;
+  });
+  var tickBtns = S.map(function(_, i){
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'tick'; b.textContent = String(i + 1);
+    b.setAttribute('aria-label', '跳到第 ' + (i + 1) + ' 步');
+    b.addEventListener('click', function(){ stop(); seek(i * STEP + 1.5); });
+    ticksBox.appendChild(b); return b;
+  });
+
+  function fmt(n){ return Math.round(n).toLocaleString('en-US'); }
+  function ease(x){ x = Math.max(0, Math.min(1, x)); return 1 - Math.pow(1 - x, 3); }
+  var lastIdx = -1;
+
+  function seek(t){
+    t = Math.max(0, Math.min(DUR, +t || 0)); cur = t;
+    var idx = Math.min(S.length - 1, Math.floor(t / STEP)), local = t - idx * STEP, s = S[idx];
+    if (idx !== lastIdx){
+      lastIdx = idx;
+      math.textContent = s.math; math.className = 'ro-math' + (s.gk ? ' hot' : '');
+      if (s.fail) math.style.color = 'var(--danger)'; else math.style.color = '';
+      gfill.className = 'gauge-fill ' + s.gk; gover.className = 'gauge-over' + (s.over ? ' on' : '');
+      evStep.textContent = '第 ' + (idx + 1) + ' 步'; evText.textContent = s.ev;
+      evBox.className = 'event' + (s.fail ? ' fail' : (s.gk && s.gk.indexOf('calm') < 0 ? ' hot' : ''));
+      dbSub.textContent = s.resp; userSub.textContent = s.user;
+      ['gw','order','inv'].forEach(function(k){
+        var on = s.hot.indexOf(k) >= 0;
+        nodes[k].className = 'node';
+        chips[k].className = 'chip' + (on ? ' on' : '') + (k === 'gw' && s.cut ? ' cut' : '');
+        chips[k].textContent = (k === 'gw' && s.cut) ? '流量關掉一半' : (on ? '×3 重試中' : '最多 3 次');
+      });
+      nodes.db.className = 'node db' + (s.db ? ' ' + s.db : '');
+      for (var p = 0; p < poolCells.length; p++) poolCells[p].className = p < s.pool ? ('used' + (s.fail ? ' f' : '')) : '';
+      links.forEach(function(l, i){
+        var c = s.c[i], hot = c > 1 && !s.half;
+        l.className = 'link' + (s.fail && i === 3 ? ' fail' : (hot ? ' hot' : ''));
+        l.querySelector('.count').textContent = s.half ? '' : (i === 0 && c === 2 ? '又按一次' : c + ' 次');
+      });
+      tickBtns.forEach(function(b, i){ b.className = 'tick' + (i === idx ? ' cur' : (i < idx ? ' past' : '')); b.setAttribute('aria-pressed', i === idx ? 'true' : 'false'); });
+    }
+    // number: count up during the first 0.8 s of steps 2–4
+    if (idx < NUMV.length){
+      var from = idx ? NUMV[idx - 1] : NUMV[0], to = NUMV[idx];
+      var v = reduce ? to : from + (to - from) * ease(local / 0.8);
+      num.innerHTML = (s.pre ? '<small>' + s.pre + '</small>' : '') + fmt(v);
+      var gv = reduce ? s.g : (from + (to - from) * ease(local / 0.8)) / 13500;
+      gfill.style.width = (gv * 100).toFixed(2) + '%';
+    } else {
+      num.textContent = s.num;
+      var gPrev = S[idx - 1].g, gg = reduce ? s.g : gPrev + (s.g - gPrev) * ease(local / 0.8);
+      gfill.style.width = (gg * 100).toFixed(2) + '%';
+    }
+    // dots: deterministic stream, phase from t (static under reduced motion)
+    var tt = reduce ? 0.37 : t;
+    links.forEach(function(l, i){
+      var n = s.c[i];
+      for (var k = 0; k < NDOT; k++){
+        var d = dots[i][k];
+        if (k < n){
+          var ph = (tt / 1.1 + k / n + i * 0.13) % 1;
+          d.className = 'dot on'; d.style.setProperty('--p', ph.toFixed(4));
+          if (n === 1) d.style.setProperty('--l', 0); else d.style.setProperty('--l', (k % 3) - 1);
+        } else if (d.className !== 'dot') d.className = 'dot';
+      }
+    });
+    if (Math.abs(+scrub.value - t) > 0.001) scrub.value = t.toFixed(2);
+  }
+
+  // playback: rAF only while playing and on screen
+  var cur = REST, playing = false, raf = 0, last = 0, visible = true, stepTimer = 0;
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0; last = now;
+    if (reduce){
+      stepTimer += dt;
+      if (stepTimer >= STEP){ stepTimer = 0; var ni = Math.floor(cur / STEP) + 1; if (ni >= S.length){ stop(); return; } seek(ni * STEP + 1.5); }
+    } else {
+      var nt = cur + dt; if (nt >= DUR){ seek(DUR); stop(); return; } seek(nt);
+    }
+    raf = requestAnimationFrame(frame);
+  }
+  function start(){
+    if (cur >= DUR - 0.05) seek(0);
+    playing = true; last = 0; stepTimer = 0;
+    play.setAttribute('aria-label', '暫停'); ico.innerHTML = '<path d="M5 4h4v12H5zM11 4h4v12h-4z"/>';
+    if (!raf && visible) raf = requestAnimationFrame(frame);
+  }
+  function stop(){
+    playing = false; if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    play.setAttribute('aria-label', '播放'); ico.innerHTML = '<path d="M6 4l10 6-10 6z"/>';
+  }
+  play.addEventListener('click', function(){ playing ? stop() : start(); });
+  $('prev').addEventListener('click', function(){ stop(); var i = Math.floor(cur / STEP); if (cur - i * STEP < 1.6) i--; seek(Math.max(0, i) * STEP + 1.5); });
+  $('next').addEventListener('click', function(){ stop(); var i = Math.min(S.length - 1, Math.floor(cur / STEP) + 1); seek(i * STEP + 1.5); });
+  scrub.addEventListener('input', function(){ stop(); seek(+scrub.value); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target === scrub) return;
+    if (e.key === 'ArrowRight'){ e.preventDefault(); $('next').click(); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); $('prev').click(); }
+  });
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible && playing && !raf){ last = 0; raf = requestAnimationFrame(frame); }
+    }, {rootMargin:'120px'}).observe(fig);
+  }
+  window.seek = seek;
+  seek(REST);
+})();
+</script>
+</body>
+</html>

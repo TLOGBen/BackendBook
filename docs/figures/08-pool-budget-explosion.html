@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>連線池總數爆量</title>
+<style>
+:root {
+  --paper: #ffffff;
+  --card: #f8fafc;
+  --ink: #1f2937;
+  --muted: #4b5563;
+  --soft: #5b6472;
+  --rule: rgba(31, 41, 55, 0.14);
+  --rule-solid: #cbd5e1;
+  --cell-line: #b8c2d0;
+  --base: #2f5596;
+  --ovf: #8fb0dc;
+  --hot-fill: #fde68a;
+  --hot-stroke: #b45309;
+  --hot-text: #92400e;
+  --ok: #15803d;
+  --ok-fill: #dcfce7;
+  --btn: #eef2f7;
+  --btn-hover: #e2e8f0;
+  --focus: #2563eb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1e2029;
+    --card: #262a36;
+    --ink: #e5e7eb;
+    --muted: #c3c8d2;
+    --soft: #a7afbd;
+    --rule: rgba(229, 231, 235, 0.14);
+    --rule-solid: #4b5568;
+    --cell-line: #566179;
+    --base: #86aef0;
+    --ovf: #41639b;
+    --hot-fill: #5a3a0e;
+    --hot-stroke: #f59e0b;
+    --hot-text: #fcd34d;
+    --ok: #4ade80;
+    --ok-fill: #12361f;
+    --btn: #2d3241;
+    --btn-hover: #373d4f;
+    --focus: #93c5fd;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1e2029;
+  --card: #262a36;
+  --ink: #e5e7eb;
+  --muted: #c3c8d2;
+  --soft: #a7afbd;
+  --rule: rgba(229, 231, 235, 0.14);
+  --rule-solid: #4b5568;
+  --cell-line: #566179;
+  --base: #86aef0;
+  --ovf: #41639b;
+  --hot-fill: #5a3a0e;
+  --hot-stroke: #f59e0b;
+  --hot-text: #fcd34d;
+  --ok: #4ade80;
+  --ok-fill: #12361f;
+  --btn: #2d3241;
+  --btn-hover: #373d4f;
+  --focus: #93c5fd;
+  color-scheme: dark;
+}
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Heiti TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+.fig {
+  margin: 0;
+  padding: 12px 16px 12px;
+  box-sizing: border-box;
+  width: 100%;
+  outline: none;
+}
+.fig:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); border-radius: 8px; }
+.fig .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Noto Sans TC", "Microsoft JhengHei", monospace; }
+
+/* readout */
+.fig .readout { display: grid; gap: 4px; margin-bottom: 12px; }
+.fig .row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fig .chip {
+  font-size: 13px; font-weight: 600; line-height: 20px;
+  padding: 2px 10px; border-radius: 999px;
+  background: var(--btn); color: var(--muted);
+  border: 1px solid var(--rule-solid);
+}
+.fig .chip.hot { background: var(--hot-fill); color: var(--hot-text); border-color: var(--hot-stroke); }
+.fig .chip.ok { background: var(--ok-fill); color: var(--ok); border-color: var(--ok); }
+.fig .formula {
+  font-size: clamp(18px, 4.4vw, 26px); font-weight: 600; line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+.fig .formula .op { color: var(--soft); font-weight: 400; padding: 0 2px; }
+.fig .formula .unit { font-size: 0.68em; color: var(--muted); font-weight: 500; margin-left: 2px; }
+.fig .formula .tot { padding: 0 6px; border-radius: 6px; }
+.fig .formula .tot.hot { background: var(--hot-fill); color: var(--hot-text); box-shadow: inset 0 0 0 2px var(--hot-stroke); }
+.fig .formula .tot.ok { background: var(--ok-fill); color: var(--ok); box-shadow: inset 0 0 0 2px var(--ok); }
+.fig .formula .tot.warm { font-size: 0.8em; }
+.fig .say { font-size: 15px; line-height: 22px; color: var(--muted); min-height: 44px; }
+
+/* main area */
+.fig .main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+.fig .wall { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.fig .pod {
+  box-sizing: border-box; min-width: 0;
+  border: 1px solid var(--rule-solid); border-radius: 6px;
+  background: var(--card);
+  padding: 4px 5px 3px;
+  transform-origin: 50% 60%;
+}
+.fig .pod .nm { font-size: 12px; line-height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.fig .pod svg { display: block; width: 100%; height: auto; margin: 3px 0 2px; }
+.fig .pod .st { font-size: 12px; line-height: 16px; height: 16px; white-space: nowrap; overflow: hidden; color: var(--hot-text); font-weight: 600; }
+.fig .pod.s-rej, .fig .pod.s-restart { border-color: var(--hot-stroke); background: var(--hot-fill); }
+.fig .pod.s-rej .nm, .fig .pod.s-restart .nm { color: var(--hot-text); }
+.fig .pod.s-restart { border-style: dashed; }
+.fig .pod.s-ghost { border-style: dashed; background: transparent; }
+.fig .pod.s-ghost .st { color: var(--soft); font-weight: 400; }
+.fig .pod.s-fix { border-color: var(--ok); }
+
+.fig rect.k-off, .fig rect.k-gone { opacity: 0; }
+.fig rect.k-empty { fill: transparent; stroke: var(--cell-line); }
+.fig rect.k-base { fill: var(--base); stroke: var(--base); }
+.fig rect.k-ovf { fill: var(--ovf); stroke: var(--ovf); }
+.fig rect.k-rej { fill: var(--paper); stroke: var(--hot-stroke); }
+.fig rect.k-fix { fill: var(--ok); stroke: var(--ok); }
+
+/* side: db + chart */
+.fig .side { display: grid; gap: 8px; min-width: 0; }
+.fig .db {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  border: 1px solid var(--rule-solid); border-radius: 8px; padding: 6px 10px;
+  font-size: 13px; line-height: 18px; background: var(--card);
+}
+.fig .db b { font-weight: 600; }
+.fig .db .cpu { font-size: 13px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--hot-fill); color: var(--hot-text); border: 1px solid var(--hot-stroke); }
+.fig .chartbox { position: relative; height: 200px; padding-left: 36px; }
+.fig .plot { position: relative; height: 100%; border-left: 1px solid var(--rule-solid); border-bottom: 1px solid var(--rule-solid); }
+.fig .plot svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+.fig .tick { position: absolute; left: 0; width: 32px; text-align: right; font-size: 12px; line-height: 14px; color: var(--soft); transform: translateY(-50%); }
+.fig .tick.cap { color: var(--ink); font-weight: 700; }
+.fig .vl { position: absolute; transform: translate(-50%, 0); font-size: 12px; line-height: 14px; color: var(--muted); white-space: nowrap; pointer-events: none; }
+.fig .vl.hot { color: var(--hot-text); font-weight: 700; }
+.fig .vl.ok { color: var(--ok); font-weight: 700; }
+.fig .capnote { font-size: 12px; line-height: 16px; color: var(--muted); }
+.fig .capnote i { display: inline-block; width: 18px; height: 0; border-top: 3px solid var(--ink); vertical-align: middle; margin-right: 6px; }
+.fig .axis { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-left: 36px; gap: 0; }
+.fig .axis button {
+  min-height: 32px; font: inherit; font-size: 12px; color: var(--soft);
+  background: none; border: 0; border-radius: 6px; cursor: pointer; padding: 0;
+}
+.fig .axis button[aria-current="step"] { color: var(--ink); font-weight: 700; background: var(--btn); }
+.fig .axis button:hover { background: var(--btn-hover); }
+.fig .axis button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+.fig rect.bar-lo { fill: var(--ovf); }
+.fig rect.bar-hi { fill: var(--hot-fill); stroke: var(--hot-stroke); }
+.fig rect.bar-ext { fill: var(--hot-fill); fill-opacity: 0.35; stroke: var(--hot-stroke); stroke-dasharray: 4 3; }
+.fig rect.bar-ok { fill: var(--ok); }
+.fig rect.bar-cur { stroke: var(--ink); stroke-width: 2; }
+.fig line.capline { stroke: var(--ink); stroke-width: 3; }
+.fig line.grid { stroke: var(--rule); stroke-width: 1; }
+
+/* log, legend, controls */
+.fig .log {
+  margin-top: 12px; min-height: 40px; box-sizing: border-box;
+  border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; line-height: 18px; white-space: pre-wrap; word-break: break-word;
+  border: 1px solid transparent;
+}
+.fig .log.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-text); }
+.fig .log.ok { background: var(--ok-fill); border-color: var(--ok); color: var(--ok); }
+.fig .log.calm { background: var(--card); border-color: var(--rule-solid); color: var(--muted); }
+.fig .log .lbl { font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; font-weight: 700; margin-right: 6px; }
+.fig .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12px; line-height: 18px; color: var(--muted); }
+.fig .legend span { display: inline-flex; align-items: center; gap: 6px; }
+.fig .sw { width: 12px; height: 12px; border-radius: 2px; box-sizing: border-box; display: inline-block; }
+.fig .sw.base { background: var(--base); }
+.fig .sw.ovf { background: var(--ovf); }
+.fig .sw.empty { border: 1px solid var(--cell-line); }
+.fig .sw.rej { background: var(--hot-fill); border: 1.5px solid var(--hot-stroke); }
+.fig .sw.fix { background: var(--ok); }
+.fig .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.fig .ctl button {
+  min-height: 36px; min-width: 36px; padding: 0 12px;
+  font: inherit; font-size: 14px; color: var(--ink);
+  background: var(--btn); border: 1px solid var(--rule-solid); border-radius: 8px; cursor: pointer;
+}
+.fig .ctl button:hover { background: var(--btn-hover); }
+.fig .ctl button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.fig .ctl #pbe-play { min-width: 88px; font-weight: 600; }
+.fig .ctl input[type=range] { flex: 1 1 140px; min-width: 120px; height: 32px; accent-color: var(--hot-stroke); margin: 0; }
+
+@media (max-width: 639px) {
+  .fig .main { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .fig .wall { gap: 4px; }
+  .fig .pod { padding: 3px 3px 2px; border-radius: 5px; }
+  .fig .say { min-height: 66px; }
+  .fig .formula { min-height: 2.7em; }
+  .fig .chartbox { height: 160px; }
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="pbe" data-fig="pool-budget-explosion" data-dur="16.8" data-rest="14" tabindex="0"
+  aria-label="動畫：限時搶購時 HPA 把 Pod 從 6 個加到 20 個，每個 Pod 4 個 worker 行程、每個行程一個最多 15 條的連線池，連線上限總數從 360 被乘到 1200，越過 PostgreSQL max_connections 500，新 Pod 被拒絕連線；最後一格是把每個池改成 4 條、總數 320 的修法。">
+  <div class="readout" aria-live="polite">
+    <div class="row1"><span class="chip" id="pbe-chip">步驟 1／6</span><span class="chip" id="pbe-capchip">資料庫上限 500</span></div>
+    <div class="formula" id="pbe-formula"></div>
+    <div class="say" id="pbe-say"></div>
+  </div>
+  <div class="main">
+    <div class="wall" id="pbe-wall" aria-hidden="true"></div>
+    <div class="side">
+      <div class="db"><span><b>PostgreSQL</b>　16 核心</span><span class="cpu" id="pbe-cpu">CPU 95%</span></div>
+      <div class="chartbox">
+        <div class="plot" id="pbe-plot">
+          <svg id="pbe-chart" viewBox="0 0 700 1300" preserveAspectRatio="none" role="img" aria-labelledby="pool-budget-explosion-title pool-budget-explosion-desc">
+            <title id="pool-budget-explosion-title">連線上限總數 vs max_connections</title>
+            <desc id="pool-budget-explosion-desc">每一步的連線上限總數長條：360、360、540、持續增加、持續增加、1200，修法後 320；粗線是資料庫上限 500。</desc>
+            <g id="pbe-grid"></g>
+            <g id="pbe-bars"></g>
+            <line class="capline" x1="0" x2="700" y1="800" y2="800" vector-effect="non-scaling-stroke"></line>
+          </svg>
+          <div id="pbe-vls"></div>
+        </div>
+        <div class="tick" style="top:100%">0</div>
+        <div class="tick cap" style="top:61.54%">500</div>
+        <div class="tick" style="top:23.08%">1000</div>
+      </div>
+      <div class="axis" id="pbe-axis"></div>
+      <div class="capnote"><i></i>粗線＝資料庫同時最多接受 500 條連線（max_connections）</div>
+    </div>
+  </div>
+  <div class="log" id="pbe-log"></div>
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw base"></i>平常保留（pool_size 5）</span>
+    <span><i class="sw ovf"></i>忙時臨時多開（max_overflow 10）</span>
+    <span><i class="sw empty"></i>還沒用到</span>
+    <span><i class="sw rej"></i>想連但被資料庫拒絕</span>
+    <span><i class="sw fix"></i>修法後的池（4 條）</span>
+  </div>
+  <div class="ctl">
+    <button type="button" id="pbe-prev" aria-label="上一步">◀</button>
+    <button type="button" id="pbe-play" aria-label="播放">▶ 播放</button>
+    <button type="button" id="pbe-next" aria-label="下一步">▶</button>
+    <input type="range" id="pbe-scrub" min="0" max="1680" step="1" value="0" aria-label="時間軸">
+    <button type="button" id="pbe-theme" aria-label="切換深淺色">◐</button>
+  </div>
+</figure>
+<script>
+(function () {
+  "use strict";
+  var fig = document.getElementById("pbe");
+  var STEP = 2.4, N = 7, DUR = 16.8, REST = 14.0, PODS = 20, WORKERS = 4, CELLS = 15;
+
+  // Facts from 08-連線池.md — the scenario table and the fix.
+  var S = [
+    { pods: 6, cap: 15, used: 2, total: 360, f: [6, 4, 15],
+      say: "平常日：6 個 Pod，每個池實際只用幾條，相安無事。" },
+    { pods: 6, cap: 15, used: 15, total: 360, f: [6, 4, 15],
+      say: "搶購開跑：每個池從 5 條開到 15 條，把 overflow 用滿，360 條的上限真的快用滿了。" },
+    { pods: 9, cap: 15, used: 15, bad: "rej", total: 540, f: [9, 4, 15], log: "err",
+      say: "HPA 加到 9 個 Pod：上限總數 540 超過 500，池一開滿，一定有連線被資料庫拒絕。" },
+    { pods: 9, ghosts: 3, cap: 15, used: 15, bad: "restart", total: null, f: null, log: "err",
+      say: "新 Pod 連不上資料庫，readiness 檢查失敗被重啟；重啟後又去搶連線，Pod 數持續增加。" },
+    { pods: 9, ghosts: 3, cap: 15, used: 15, bad: "restart", total: null, f: null, log: "err", cpu: true,
+      say: "資料庫 CPU 衝到 95%：查詢變慢，每條連線被佔更久，各個池又開更多 overflow。" },
+    { pods: 20, cap: 15, used: 15, bad: "rej", total: 1200, f: [20, 4, 15], log: "err", cpu: true,
+      say: "HPA 把 Pod 拉到 20 個：20 × 4 × 15 = 1200，遠遠超過 500。每個池單看都很合理，問題出在沒人算總數。" },
+    { pods: 20, cap: 4, used: 4, fix: true, total: 320, f: [20, 4, 4], log: "fix",
+      say: "修法：每個行程的池改成 pool_size=4、max_overflow=0，20 × 4 × 4 = 320，塞得進 500。" }
+  ];
+  var BAR = [360, 360, 540, null, null, 1200, 320];
+  var AXIS = ["1", "2", "3", "4", "5", "6", "修法"];
+
+  // ---------- build DOM once ----------
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var wall = document.getElementById("pbe-wall");
+  var pods = [];
+  for (var k = 0; k < PODS; k++) {
+    var card = document.createElement("div");
+    card.className = "pod";
+    var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = "Pod " + (k + 1);
+    var svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("viewBox", "0 0 154 43");
+    svg.setAttribute("aria-hidden", "true");
+    var cells = [];
+    for (var w = 0; w < WORKERS; w++) {
+      for (var c = 0; c < CELLS; c++) {
+        var r = document.createElementNS(SVGNS, "rect");
+        r.setAttribute("x", c * 10 + (c >= 5 ? 4 : 0) + 0.5);
+        r.setAttribute("y", w * 11 + 0.5);
+        r.setAttribute("width", 9);
+        r.setAttribute("height", 9);
+        r.setAttribute("rx", 1.5);
+        r.setAttribute("stroke-width", 1);
+        r.setAttribute("vector-effect", "non-scaling-stroke");
+        svg.appendChild(r);
+        cells.push({ el: r, c: c, w: w, k: "" });
+      }
+    }
+    var st = document.createElement("div"); st.className = "st";
+    card.appendChild(nm); card.appendChild(svg); card.appendChild(st);
+    wall.appendChild(card);
+    pods.push({ el: card, st: st, cells: cells, cls: "", txt: null, op: null, tf: null });
+  }
+
+  var grid = document.getElementById("pbe-grid");
+  [250, 750, 1000].forEach(function (v) {
+    var l = document.createElementNS(SVGNS, "line");
+    l.setAttribute("class", "grid"); l.setAttribute("x1", 0); l.setAttribute("x2", 700);
+    l.setAttribute("y1", 1300 - v); l.setAttribute("y2", 1300 - v);
+    l.setAttribute("vector-effect", "non-scaling-stroke");
+    grid.appendChild(l);
+  });
+  var barsG = document.getElementById("pbe-bars");
+  var vls = document.getElementById("pbe-vls");
+  var axis = document.getElementById("pbe-axis");
+  var cols = [];
+  function mkRect(cls) {
+    var r = document.createElementNS(SVGNS, "rect");
+    r.setAttribute("class", cls);
+    r.setAttribute("vector-effect", "non-scaling-stroke");
+    barsG.appendChild(r);
+    return r;
+  }
+  for (var j = 0; j < N; j++) {
+    var x = j * 100 + 18;
+    var col = { lo: mkRect(j === 6 ? "bar-ok" : "bar-lo"), hi: mkRect("bar-hi"), ext: mkRect("bar-ext"), x: x };
+    [col.lo, col.hi, col.ext].forEach(function (r) { r.setAttribute("x", x); r.setAttribute("width", 64); });
+    var vl = document.createElement("div"); vl.className = "vl mono";
+    vl.style.left = ((x + 32) / 7) + "%";
+    vls.appendChild(vl); col.vl = vl;
+    var b = document.createElement("button"); b.type = "button"; b.textContent = AXIS[j];
+    b.setAttribute("aria-label", j === 6 ? "跳到修法" : "跳到步驟 " + (j + 1));
+    (function (jj) { b.addEventListener("click", function () { goStep(jj); }); })(j);
+    axis.appendChild(b); col.btn = b;
+    col.last = "";
+    cols.push(col);
+  }
+
+  var elChip = document.getElementById("pbe-chip");
+  var elFormula = document.getElementById("pbe-formula");
+  var elSay = document.getElementById("pbe-say");
+  var elCpu = document.getElementById("pbe-cpu");
+  var elLog = document.getElementById("pbe-log");
+  var elPlay = document.getElementById("pbe-play");
+  var elScrub = document.getElementById("pbe-scrub");
+
+  // ---------- model ----------
+  function podStatus(s, k) {
+    var q = S[s];
+    if (k < q.pods) {
+      if (q.bad && k >= 6) return q.bad;
+      return q.fix ? "fix" : "ok";
+    }
+    if (k < q.pods + (q.ghosts || 0)) return "ghost";
+    return "none";
+  }
+  function cellKind(s, k, c) {
+    var q = S[s], ps = podStatus(s, k);
+    if (ps === "none" || ps === "ghost") return "off";
+    if (c >= q.cap) return "gone";
+    if (ps === "restart") return "empty";
+    if (ps === "rej") return "rej";
+    if (q.fix) return "fix";
+    if (c < q.used) return c < 5 ? "base" : "ovf";
+    return "empty";
+  }
+  var STATUS_TXT = { ok: "", fix: "", rej: "連不上", restart: "重啟中", ghost: "啟動中", none: "" };
+  function spring(tau) { var w = 8; return tau <= 0 ? 0 : 1 - (1 + w * tau) * Math.exp(-w * tau); }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+  function formulaHTML(q, totShown) {
+    var hot = q.total === null || q.total > 500;
+    var cls = q.fix ? "ok" : (hot ? "hot" : "");
+    if (!q.f) {
+      return '<span>Pod 數持續增加</span><span class="op">×</span>4<span class="unit">行程</span><span class="op">×</span>15<span class="unit">條</span><span class="op">=</span><span class="tot hot warm">持續增加</span>';
+    }
+    return q.f[0] + '<span class="unit">Pod</span><span class="op">×</span>' + q.f[1] + '<span class="unit">行程</span><span class="op">×</span>' +
+      q.f[2] + '<span class="unit">條</span><span class="op">=</span><span class="tot ' + cls + '">' + totShown + '</span>';
+  }
+
+  // ---------- draw(t): a pure function of t ----------
+  var lastStep = -1, lastTot = null, lastLog = null, lastCpu = null;
+  function draw(t) {
+    t = Math.max(0, Math.min(DUR, t));
+    var i = Math.min(N - 1, Math.floor(t / STEP + 1e-9));
+    var local = t - i * STEP;
+    var p = i === 0 ? 1 : spring(local);
+    var prev = i === 0 ? 0 : i - 1;
+    var q = S[i], qa = S[prev];
+
+    // pods
+    for (var k = 0; k < PODS; k++) {
+      var P = pods[k];
+      var A = podStatus(prev, k), B = podStatus(i, k);
+      var th = A === B ? 0 : Math.min(0.75, Math.max(0, (k - 5)) * 0.045);
+      var cur = p >= th ? B : A;
+      var op = 1, sc = 1;
+      if (A === "none" && B !== "none") { op = clamp01((p - th) / 0.25); sc = 0.9 + 0.1 * op; }
+      else if (cur === "none") { op = 0; }
+      var cls = "pod s-" + cur;
+      if (P.cls !== cls) { P.el.className = cls; P.cls = cls; }
+      var txt = STATUS_TXT[cur];
+      if (P.txt !== txt) { P.st.textContent = txt; P.txt = txt; }
+      var opS = op.toFixed(3);
+      if (P.op !== opS) { P.el.style.opacity = opS; P.op = opS; }
+      var tf = sc === 1 ? "" : "scale(" + sc.toFixed(3) + ")";
+      if (P.tf !== tf) { P.el.style.transform = tf; P.tf = tf; }
+      for (var n = 0; n < P.cells.length; n++) {
+        var C = P.cells[n];
+        var ka = cellKind(prev, k, C.c), kb = cellKind(i, k, C.c);
+        var kk = kb;
+        if (ka !== kb) {
+          var cth = th * 0.6 + (C.c / CELLS) * 0.45 + C.w * 0.03;
+          kk = p >= cth ? kb : ka;
+        }
+        if (C.k !== kk) { C.el.setAttribute("class", "k-" + kk); C.k = kk; }
+      }
+    }
+
+    // bars
+    for (var j = 0; j < N; j++) {
+      var col = cols[j];
+      var g = j < i ? 1 : j === i ? p : 0;
+      var v = BAR[j];
+      var hSolid, ext = 0;
+      if (j > i) hSolid = 0;
+      else if (v === null) { hSolid = 540; ext = 660 * g; } // known: at least 540, still climbing
+      else hSolid = v * g;
+      var lo = j === 6 ? hSolid : Math.min(hSolid, 500);
+      var hi = j === 6 ? 0 : Math.max(0, hSolid - 500);
+      var curCls = j === i ? " bar-cur" : "";
+      var key = [lo.toFixed(1), hi.toFixed(1), ext.toFixed(1), curCls].join("|");
+      if (col.last !== key) {
+        col.lo.setAttribute("y", 1300 - lo); col.lo.setAttribute("height", lo);
+        col.hi.setAttribute("y", 1300 - 500 - hi); col.hi.setAttribute("height", hi);
+        col.ext.setAttribute("y", 1300 - 540 - ext); col.ext.setAttribute("height", ext);
+        col.lo.setAttribute("class", (j === 6 ? "bar-ok" : "bar-lo") + (hi > 0 ? "" : curCls));
+        col.hi.setAttribute("class", "bar-hi" + curCls);
+        col.last = key;
+      }
+      var show = j <= i;
+      var label = !show ? "" : (v === null ? "↑" : String(v));
+      var top = v === null ? 540 + ext : hSolid;
+      var vcls = "vl mono" + (v === null || (v > 500 && j !== 6) ? " hot" : j === 6 ? " ok" : "");
+      if (col.vlTxt !== label) { col.vl.textContent = label; col.vlTxt = label; }
+      if (col.vlCls !== vcls) { col.vl.className = vcls; col.vlCls = vcls; }
+      var bottom = (top / 1300 * 100).toFixed(2) + "%";
+      if (col.vlB !== bottom) { col.vl.style.bottom = "calc(" + bottom + " + 2px)"; col.vlB = bottom; }
+      var curAttr = j === i ? "step" : "false";
+      if (col.cur !== curAttr) { col.btn.setAttribute("aria-current", curAttr); col.cur = curAttr; }
+    }
+
+    // readout
+    var totShown;
+    if (q.total === null) totShown = null;
+    else if (qa.total === null || i === 0) totShown = q.total;
+    else totShown = Math.round(qa.total + (q.total - qa.total) * p);
+    if (i !== lastStep || totShown !== lastTot) {
+      elFormula.innerHTML = formulaHTML(q, totShown);
+      lastTot = totShown;
+    }
+    if (i !== lastStep) {
+      elChip.textContent = i === 6 ? "修法" : "步驟 " + (i + 1) + "／6";
+      elChip.className = "chip" + (i === 6 ? " ok" : (q.total === null || q.total > 500) ? " hot" : "");
+      elSay.textContent = q.say;
+      lastStep = i;
+    }
+    var cpu = q.cpu ? "visible" : "hidden";
+    if (cpu !== lastCpu) { elCpu.style.visibility = cpu; lastCpu = cpu; }
+    var lg = q.log || "calm";
+    if (lg !== lastLog) {
+      if (lg === "err") {
+        elLog.className = "log hot mono";
+        elLog.innerHTML = '<span class="lbl">新 Pod 日誌</span>FATAL:  sorry, too many clients already';
+      } else if (lg === "fix") {
+        elLog.className = "log ok";
+        elLog.innerHTML = '<span class="lbl">一起做</span>HPA 上限設在連線塞得下的範圍、pool_timeout 縮到 3 秒（取不到就回 503）、前面加一層 PgBouncer';
+      } else {
+        elLog.className = "log calm";
+        elLog.innerHTML = '<span class="lbl">資料庫</span>還有名額，沒有錯誤';
+      }
+      lastLog = lg;
+    }
+    var sv = String(Math.round(t * 100));
+    if (elScrub.value !== sv) elScrub.value = sv;
+    T = t;
+  }
+
+  // ---------- clock: one rAF loop, only while playing and visible ----------
+  var T = 0, playing = false, stopAt = DUR, raf = 0, lastNow = 0, visible = true, started = false;
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function setPlayUI() {
+    elPlay.textContent = playing ? "⏸ 暫停" : (T >= DUR - 1e-6 ? "↻ 重播" : "▶ 播放");
+    elPlay.setAttribute("aria-label", playing ? "暫停" : "播放");
+  }
+  function frame(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : 0;
+    lastNow = now;
+    var nt = T + dt;
+    if (nt >= stopAt) { nt = stopAt; playing = false; }
+    draw(nt);
+    setPlayUI();
+    if (playing) arm();
+  }
+  function arm() { if (!raf && playing && visible) { lastNow = 0; raf = requestAnimationFrame(frame); } }
+  function play(to) {
+    if (T >= DUR - 1e-6) draw(0);
+    stopAt = to == null ? DUR : to;
+    playing = true; started = true; setPlayUI(); arm();
+  }
+  function pause() { playing = false; if (raf) { cancelAnimationFrame(raf); raf = 0; } setPlayUI(); }
+  function seek(t) { pause(); started = true; draw(t); setPlayUI(); }
+  function curStep() { return Math.min(N - 1, Math.floor(T / STEP + 1e-9)); }
+  function goStep(s) {
+    s = Math.max(0, Math.min(N - 1, s));
+    if (reduce || s === 0) { seek(s * STEP + STEP - 0.4); return; }
+    pause(); draw(s * STEP); play(s * STEP + STEP - 0.4);
+  }
+
+  elPlay.addEventListener("click", function () { if (playing) pause(); else play(); });
+  document.getElementById("pbe-prev").addEventListener("click", function () {
+    var s = curStep(); var settled = T - s * STEP >= STEP - 0.5;
+    goStep(settled || s === 0 ? s - 1 : s - 1);
+  });
+  document.getElementById("pbe-next").addEventListener("click", function () { goStep(curStep() + 1); });
+  elScrub.addEventListener("input", function () { seek(Number(elScrub.value) / 100); });
+  fig.addEventListener("keydown", function (e) {
+    if (e.target && e.target.tagName === "INPUT") return;
+    if (e.key === "ArrowRight") { e.preventDefault(); goStep(curStep() + 1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); goStep(curStep() - 1); }
+    else if (e.key === " " && e.target === fig) { e.preventDefault(); if (playing) pause(); else play(); }
+    else if (e.key === "Home") { e.preventDefault(); seek(0); }
+    else if (e.key === "End") { e.preventDefault(); seek(REST); }
+  });
+
+  // theme switch
+  var root = document.documentElement;
+  var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  document.getElementById("pbe-theme").addEventListener("click", function () {
+    var dark = root.getAttribute("data-theme") ? root.getAttribute("data-theme") === "dark" : !!(mq && mq.matches);
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+
+  // visibility
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(function (es) {
+      visible = es[es.length - 1].isIntersecting;
+      if (visible && !started && !reduce) play();
+      else if (visible) arm();
+    }, { rootMargin: "120px" }).observe(fig);
+  } else if (!reduce) { play(); }
+
+  // height to a host page (once per resize, at most one message per frame)
+  var hPending = false;
+  function postHeight() {
+    if (hPending || window.parent === window) return;
+    hPending = true;
+    requestAnimationFrame(function () {
+      hPending = false;
+      try { window.parent.postMessage({ type: "figure-height", fig: "pool-budget-explosion", height: document.documentElement.scrollHeight }, "*"); } catch (e) {}
+    });
+  }
+  window.addEventListener("resize", postHeight);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(postHeight);
+
+  // public hooks
+  window.DUR = DUR;
+  window.timeline = function () { return DUR; };
+  window.seek = seek;
+
+  draw(reduce ? REST : 0);
+  setPlayUI();
+  postHeight();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>快取踩踏時間軸</title>
+<style>
+  :root {
+    --paper: #ffffff;
+    --paper-2: #f4f4f5;
+    --ink: #1f2937;
+    --muted: #4b5563;
+    --soft: #5b6472;
+    --rule: #d4d4d8;
+    --line: #6b7280;
+    --hot-fill: #fde68a;
+    --hot-stroke: #b45309;
+    --hot-ink: #111111;
+    --hot-text: #b45309;
+    --ok: #15803d;
+    --dot: #4b5563;
+    --focus: #2563eb;
+    --sans: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: ui-monospace, 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Noto Sans TC', 'Microsoft JhengHei', monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #1e2129;
+      --paper-2: #272b36;
+      --ink: #e5e7eb;
+      --muted: #c3c8d1;
+      --soft: #a1a8b5;
+      --rule: #3d4250;
+      --line: #9aa1ae;
+      --hot-fill: #4a3410;
+      --hot-stroke: #f59e0b;
+      --hot-ink: #fde68a;
+      --hot-text: #fbbf24;
+      --ok: #4ade80;
+      --dot: #c3c8d1;
+      --focus: #60a5fa;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #1e2129;
+    --paper-2: #272b36;
+    --ink: #e5e7eb;
+    --muted: #c3c8d1;
+    --soft: #a1a8b5;
+    --rule: #3d4250;
+    --line: #9aa1ae;
+    --hot-fill: #4a3410;
+    --hot-stroke: #f59e0b;
+    --hot-ink: #fde68a;
+    --hot-text: #fbbf24;
+    --ok: #4ade80;
+    --dot: #c3c8d1;
+    --focus: #60a5fa;
+    color-scheme: dark;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--sans); }
+
+  .fig { margin: 0; padding: 8px 0 12px; min-width: 0; outline: none; }
+  .fig:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: 6px; }
+  .fig-stage { width: 100%; min-width: 0; }
+  .mono-in { font-family: var(--mono); font-weight: 500; }
+  .fig-stage svg { font-family: var(--sans); display: block; width: 100%; height: auto; overflow: visible; }
+
+  /* SVG roles */
+  .card { fill: var(--paper-2); stroke: var(--rule); stroke-width: 1; }
+  .card.hot { fill: var(--hot-fill); stroke: var(--hot-stroke); stroke-width: 2; }
+  .t-name { fill: var(--ink); font-size: 14px; font-weight: 600; }
+  .t-big { fill: var(--ink); font-weight: 700; }
+  .t-sub { fill: var(--muted); font-size: 12px; }
+  .t-mono { fill: var(--muted); font-size: 12px; font-family: var(--mono); }
+  .hot .t-name, .hot-text-on { fill: var(--hot-ink); }
+  g.hot .t-sub, g.hot .t-mono, g.hot .t-big { fill: var(--hot-ink); }
+  .t-hot { fill: var(--hot-text); font-weight: 600; }
+  g.hot .t-hot { fill: var(--hot-ink); }
+  .t-ok { fill: var(--ok); font-weight: 600; }
+  .conn { fill: none; stroke: var(--line); stroke-width: 1.5; }
+  .arrowhead { fill: var(--line); }
+  .mask { fill: var(--paper); }
+  .lbl { fill: var(--soft); font-size: 12px; font-weight: 500; }
+  .track { fill: var(--paper-2); stroke: var(--rule); stroke-width: 1; }
+  .bar-hot { fill: var(--hot-stroke); }
+  .bar-cpu { fill: var(--muted); }
+  .bar-cpu.full { fill: var(--hot-stroke); }
+  .bar-ttl { fill: var(--ok); }
+  .tick { fill: var(--soft); font-size: 12px; font-family: var(--mono); }
+  .tick-line { stroke: var(--rule); stroke-width: 1; }
+  .expect { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 3 3; }
+  .slot { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  .slot.on { fill: var(--hot-stroke); stroke: var(--hot-stroke); }
+  .chip { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+  .chip.blocked { fill: var(--paper); stroke: var(--hot-stroke); stroke-width: 1.5; stroke-dasharray: 4 3; }
+  .chip-t { fill: var(--ink); font-size: 12px; }
+  .chip-t.blocked { fill: var(--hot-text); text-decoration: line-through; }
+  .loop-chip { fill: var(--paper); stroke: var(--rule); stroke-width: 1; }
+  .loop-chip.on { fill: var(--hot-fill); stroke: var(--hot-stroke); stroke-width: 1.5; }
+  .loop-chip.pulse { stroke-width: 3; }
+  .loop-t { fill: var(--soft); font-size: 12px; }
+  .loop-t.on { fill: var(--hot-ink); font-weight: 600; }
+  .dot { fill: var(--dot); }
+  .dot.hit { fill: var(--ok); }
+  .dot.miss { fill: var(--hot-fill); stroke: var(--hot-stroke); stroke-width: 1.5; }
+  .dot-a { fill: var(--hot-stroke); stroke: var(--paper); stroke-width: 2; }
+  .a-lbl { fill: var(--hot-text); font-size: 12px; font-weight: 700; }
+
+  /* controls (HTML) */
+  .ctl { display: flex; align-items: center; gap: 12px; margin: 8px 16px 0; }
+  .btn {
+    min-height: 36px; min-width: 36px; padding: 0 12px; border-radius: 6px;
+    border: 1px solid var(--rule); background: var(--paper-2); color: var(--ink);
+    font: 600 14px/1 var(--sans); cursor: pointer;
+  }
+  .btn:hover { border-color: var(--line); }
+  .btn:focus-visible, .scrub:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .btn.play { width: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+  .btn.play svg { width: 14px; height: 14px; fill: currentColor; }
+  .scrub { flex: 1 1 auto; min-width: 0; height: 32px; accent-color: var(--hot-stroke); cursor: pointer; }
+  .clock { flex: 0 0 auto; font: 12px/1 var(--mono); color: var(--soft); min-width: 44px; text-align: right; }
+  .stages { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin: 8px 16px 0; }
+  .stages .btn { padding: 0 4px; font-weight: 500; font-size: 13px; min-height: 32px; }
+  .stages .btn[aria-pressed="true"] { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); font-weight: 700; }
+  .readout { margin: 10px 16px 0; font-size: 14px; line-height: 1.6; color: var(--ink); min-height: 3.2em; }
+  .readout b { color: var(--hot-text); font-weight: 700; margin-right: 6px; }
+  .theme { margin-left: auto; }
+  .theme[hidden] { display: none; }
+  @media (max-width: 400px) {
+    .stages .btn { font-size: 12px; }
+    .readout { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<figure class="fig" id="cs-fig" data-fig="cache-stampede" data-dur="22" data-rest="13.5" tabindex="0"
+  aria-label="快取踩踏動畫：熱門商品的快取 product:42 過期後，每秒 3000 個請求全部落空、一起去查 PostgreSQL，相同查詢累積到約 2400 支，每支查詢從 0.8 秒拖到約 15 秒，r.get 拿到 None 到 r.set 寫回之間的空窗也跟著拉長到約 15 秒。可用播放鈕、時間軸拖桿或 T1 到 T5 按鈕切換階段；左右方向鍵切換階段，空白鍵播放或暫停。">
+  <div class="fig-stage" id="cs-stage">
+    <noscript>快取 product:42 過期後，每秒 3000 個請求在 r.get 拿到 None 到 r.set 寫回之間的空窗裡全部去查 PostgreSQL；相同查詢約 2400 支、每支從 0.8 秒拖到約 15 秒，空窗也拉長到約 15 秒。</noscript>
+  </div>
+  <div class="ctl">
+    <button class="btn play" id="cs-play" type="button" aria-label="播放"></button>
+    <input class="scrub" id="cs-scrub" type="range" min="0" max="22" step="0.01" value="13.5" aria-label="時間軸">
+    <span class="clock" id="cs-clock" aria-hidden="true"></span>
+    <button class="btn theme" id="cs-theme" type="button" aria-label="切換深淺色" hidden>◐</button>
+  </div>
+  <div class="stages" id="cs-stages" role="group" aria-label="跳到階段"></div>
+  <div class="readout" id="cs-readout" aria-live="polite"></div>
+</figure>
+
+<script>
+(function () {
+  'use strict';
+  var DUR = 22, REST = 13.5;
+  var T_EXPIRE = 3, T_T2 = 5, T_T3 = 9, T_T4 = 14.5, T_T5 = 18, T_SET = 15.2;
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  var STAGES = [
+    { k: '開賣', t: 0,    at: 1.6,  tag: '晚上 8 點開賣後', text: '每秒 3000 個請求，全部在 Redis 讀到 product:42，直接回傳，資料庫沒事。' },
+    { k: 'T1',  t: T_EXPIRE, at: 4.2, tag: 'T1｜20:02:00.000', text: 'product:42 剛好過期。請求 A 的 r.get 拿到 None，開始查資料庫（平常約 0.8 秒）。' },
+    { k: 'T2',  t: T_T2,  at: 8.6,  tag: 'T2｜之後 0.8 秒內', text: '每秒 3000 個請求全部落空、各自去查：3000 × 0.8 ≈ 2400 支相同查詢，CPU 100%。' },
+    { k: 'T3',  t: T_T3,  at: REST, tag: 'T3｜0.8 秒後', text: '連線池被占滿，「加入購物車」「結帳」也拿不到連線；每支查詢從 0.8 秒拖到約 15 秒，空窗跟著拉長。' },
+    { k: 'T4',  t: T_T4,  at: 16.4, tag: 'T4｜約 15 秒', text: '請求 A 終於拿到結果，r.set 寫回 Redis。但很多請求已經逾時，前端自動重試，流量再翻倍。' },
+    { k: 'T5',  t: T_T5,  at: 20.5, tag: 'T5、T6｜之後', text: '新請求讀到快取了，但排隊的查詢和重試流量還在；健康檢查又重啟一批實例，資料庫持續滿載。' }
+  ];
+
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function stageAt(t) { var i = 0; for (var k = 0; k < STAGES.length; k++) if (t >= STAGES[k].t) i = k; return i; }
+  function keyPresent(t) { return t < T_EXPIRE || t >= T_SET; }
+  // story seconds of the window: r.get None (T1) -> r.set (about 15 s)
+  function windowSec(t) {
+    if (t < T_T2) return 0;
+    if (t < T_T3) return 0.8 * (t - T_T2) / (T_T3 - T_T2);
+    if (t < T_T4) return 0.8 + 14.2 * (t - T_T3) / (T_T4 - T_T3);
+    return 15;
+  }
+  function queries(t) {
+    if (t < T_EXPIRE) return '0 支';
+    if (t < T_T2) return '1 支';
+    if (t < T_T3) return Math.round(1 + 2399 * (t - T_T2) / (T_T3 - T_T2)) + ' 支';
+    if (t < T_T4) return '2400+ 支';
+    return '上千支';
+  }
+  function cpu(t) {
+    if (t < T_EXPIRE) return 0.04;
+    if (t < T_T2) return 0.08;
+    return clamp(0.08 + 0.92 * (t - T_T2) / 3, 0, 1);
+  }
+  function slotsOn(t) {
+    if (t < T_EXPIRE) return 0;
+    if (t < T_T2) return 1;
+    return clamp(1 + Math.floor(9 * (t - T_T2) / 3.5), 1, 10);
+  }
+  function queryTime(t) {
+    if (t < T_EXPIRE) return '平常約 0.8 秒';
+    if (t < T_T3) return '約 0.8 秒';
+    if (t < 14) return '變慢中…';
+    return '約 15 秒';
+  }
+
+  // ---------- request dots: deterministic spawn table ----------
+  var A_SPAWN = 2.3;
+  var SPAWNS = (function () {
+    var out = [], s = -1.6;
+    while (s < DUR) {
+      var gap = s >= T_T4 ? 0.07 : 0.14;
+      // T1 is a zoomed-in instant: other requests have not arrived yet
+      if (!(s >= A_SPAWN - 0.05 && s < T_T2 - 0.7)) out.push(+s.toFixed(3));
+      s += gap;
+    }
+    return out;
+  })();
+  var POOL = 44;
+
+  // ---------- layout ----------
+  function rpath(pts, r) {
+    var d = 'M' + pts[0][0] + ' ' + pts[0][1];
+    for (var i = 1; i < pts.length - 1; i++) {
+      var p0 = pts[i - 1], p = pts[i], p1 = pts[i + 1];
+      var dx0 = Math.sign(p[0] - p0[0]), dy0 = Math.sign(p[1] - p0[1]);
+      var dx1 = Math.sign(p1[0] - p[0]), dy1 = Math.sign(p1[1] - p[1]);
+      d += ' L' + (p[0] - dx0 * r) + ' ' + (p[1] - dy0 * r) + ' Q' + p[0] + ' ' + p[1] + ' ' + (p[0] + dx1 * r) + ' ' + (p[1] + dy1 * r);
+    }
+    var e = pts[pts.length - 1];
+    return d + ' L' + e[0] + ' ' + e[1];
+  }
+  function arrowHead(p, dir) {
+    var x = p[0], y = p[1];
+    if (dir === 'r') return (x) + ',' + y + ' ' + (x - 8) + ',' + (y - 4) + ' ' + (x - 8) + ',' + (y + 4);
+    if (dir === 'd') return x + ',' + y + ' ' + (x - 4) + ',' + (y - 8) + ' ' + (x + 4) + ',' + (y - 8);
+    return '';
+  }
+  function txt(x, y, cls, s, extra) { return '<text x="' + x + '" y="' + y + '" class="' + cls + '"' + (extra || '') + '>' + s + '</text>'; }
+
+  function layout(W) {
+    var wide = W >= 680, L = { W: W, wide: wide };
+    if (wide) {
+      L.req = { x: 16, y: 136, w: 112, h: 88 };
+      L.api = { x: 176, y: 136, w: 128, h: 88 };
+      L.redis = { x: 368, y: 16, w: W - 384, h: 88 };
+      L.db = { x: 368, y: 136, w: W - 384, h: 196 };
+      L.ruler = { x: 16, y: 356, w: W - 32, h: 88 };
+      L.loop = { x: 16, y: 460, w: W - 32 };
+      L.H = 520;
+      L.cReq = [[128, 180], [176, 180]];
+      L.cRedis = [[304, 160], [336, 160], [336, 60], [368, 60]];
+      L.cDb = [[304, 200], [368, 200]];
+      L.apiHidden = [[176, 180], [304, 160]];
+      L.apiHiddenDb = [[304, 160], [304, 200]];
+      L.park = [356, 200];
+      L.dbLabel = { x: 336, y: 184, w: 56 };
+    } else {
+      L.req = { x: 16, y: 16, w: W - 32, h: 56 };
+      L.api = { x: 16, y: 112, w: 96, h: 88 };
+      L.redis = { x: 152, y: 112, w: W - 168, h: 88 };
+      L.db = { x: 152, y: 232, w: W - 168, h: 272 };
+      L.ruler = { x: 16, y: 528, w: W - 32, h: 88 };
+      L.loop = { x: 16, y: 636, w: W - 32 };
+      L.H = 740;
+      L.cReq = [[64, 72], [64, 112]];
+      L.cRedis = [[112, 156], [152, 156]];
+      L.cDb = [[64, 200], [64, 368], [152, 368]];
+      L.apiHidden = [[64, 112], [112, 156]];
+      L.apiHiddenDb = [[112, 156], [64, 200]];
+      L.park = [140, 368];
+      L.dbLabel = { x: 72, y: 276, w: 56, side: true };
+    }
+    return L;
+  }
+
+  function buildSVG(L) {
+    var W = L.W, H = L.H, s = [];
+    s.push('<svg xmlns="' + SVGNS + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-labelledby="cache-stampede-title cache-stampede-desc">');
+    s.push('<title id="cache-stampede-title">快取踩踏：空窗怎麼被拉長</title>');
+    s.push('<desc id="cache-stampede-desc">product:42 過期後，每秒 3000 個請求在 r.get 拿到 None 到 r.set 寫回之間全部去查 PostgreSQL，相同查詢約 2400 支，每支查詢從 0.8 秒拖到約 15 秒，空窗跟著拉長到約 15 秒。</desc>');
+
+    // connectors first
+    s.push('<path class="conn" d="' + rpath(L.cReq, 8) + '"/>');
+    s.push('<polygon class="arrowhead" points="' + arrowHead(L.cReq[1], L.wide ? 'r' : 'd') + '"/>');
+    s.push('<path class="conn" d="' + rpath(L.cRedis, 8) + '"/>');
+    s.push('<polygon class="arrowhead" points="' + arrowHead(L.cRedis[L.cRedis.length - 1], 'r') + '"/>');
+    s.push('<path class="conn" id="cs-cdb" d="' + rpath(L.cDb, 8) + '"/>');
+    s.push('<polygon class="arrowhead" id="cs-cdb-head" points="' + arrowHead(L.cDb[L.cDb.length - 1], 'r') + '"/>');
+    var dl = L.dbLabel;
+    if (dl.side) {
+      s.push('<rect class="mask" x="' + dl.x + '" y="' + (dl.y - 14) + '" width="' + dl.w + '" height="20"/>');
+      s.push(txt(dl.x + 2, dl.y, 'lbl', '落空才查'));
+    } else {
+      s.push('<rect class="mask" x="' + (dl.x - dl.w / 2) + '" y="' + (dl.y - 14) + '" width="' + dl.w + '" height="18"/>');
+      s.push(txt(dl.x, dl.y, 'lbl', '落空才查', ' text-anchor="middle"'));
+    }
+
+    // request card
+    var r = L.req;
+    s.push('<g id="cs-req"><rect class="card" x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '" rx="8"/>');
+    if (L.wide) {
+      s.push(txt(r.x + 12, r.y + 24, 't-name', '使用者請求'));
+      s.push(txt(r.x + 12, r.y + 50, 't-big', '每秒 3000 個', ' font-size="14"'));
+      s.push(txt(r.x + 12, r.y + 72, 't-sub', '平常每秒 30 個', ' id="cs-req-sub"'));
+    } else {
+      s.push(txt(r.x + 12, r.y + 24, 't-name', '使用者請求　<tspan class="t-big">每秒 3000 個</tspan>'));
+      s.push(txt(r.x + 12, r.y + 44, 't-sub', '平常每秒 30 個', ' id="cs-req-sub"'));
+    }
+    s.push('</g>');
+
+    // API card
+    var a = L.api;
+    s.push('<g><rect class="card" x="' + a.x + '" y="' + a.y + '" width="' + a.w + '" height="' + a.h + '" rx="8"/>');
+    if (L.wide) {
+      s.push(txt(a.x + 12, a.y + 24, 't-name', 'API 伺服器'));
+      s.push(txt(a.x + 12, a.y + 48, 't-mono', 'r.get → r.set'));
+      s.push(txt(a.x + 12, a.y + 72, 't-sub', '先讀快取'));
+    } else {
+      s.push(txt(a.x + 10, a.y + 24, 't-name', 'API'));
+      s.push(txt(a.x + 10, a.y + 42, 't-name', '伺服器'));
+      s.push(txt(a.x + 10, a.y + 64, 't-mono', 'r.get'));
+      s.push(txt(a.x + 10, a.y + 80, 't-sub', '先讀快取'));
+    }
+    s.push('</g>');
+
+    // Redis card
+    var R = L.redis, rx = R.x + 12;
+    s.push('<g id="cs-redis"><rect class="card" id="cs-redis-card" x="' + R.x + '" y="' + R.y + '" width="' + R.w + '" height="' + R.h + '" rx="8"/>');
+    s.push(txt(rx, R.y + 24, 't-name', 'Redis'));
+    s.push(txt(L.wide ? rx + 60 : rx, L.wide ? R.y + 24 : R.y + 42, 't-mono', 'product:42'));
+    s.push(txt(rx, L.wide ? R.y + 50 : R.y + 62, 't-big', '', ' id="cs-redis-state" font-size="14"'));
+    s.push(txt(L.wide ? rx + 136 : rx, L.wide ? R.y + 50 : R.y + 78, 't-sub', '', ' id="cs-redis-sub"'));
+    if (L.wide) {
+      s.push('<rect class="track" x="' + rx + '" y="' + (R.y + 64) + '" width="' + (R.w - 24) + '" height="8" rx="4" id="cs-ttl-track"/>');
+      s.push('<rect class="bar-ttl" x="' + rx + '" y="' + (R.y + 64) + '" width="0" height="8" rx="4" id="cs-ttl"/>');
+    }
+    s.push('</g>');
+
+    // PostgreSQL card
+    var D = L.db, x0 = D.x + 12, iw = D.w - 24, y = D.y;
+    s.push('<g id="cs-db"><rect class="card" id="cs-db-card" x="' + D.x + '" y="' + D.y + '" width="' + D.w + '" height="' + D.h + '" rx="8"/>');
+    s.push(txt(x0, y + 24, 't-name', 'PostgreSQL'));
+    s.push(txt(x0, y + 48, 't-sub', '同時跑的相同查詢'));
+    s.push(txt(x0, y + (L.wide ? 80 : 76), 't-big', '0 支', ' id="cs-q" font-size="' + (L.wide ? 28 : 22) + '"'));
+    var slotsX, slotsY, rowLen = 10, chipY, blockX, blockY;
+    if (L.wide) {
+      s.push(txt(x0, y + 106, 't-sub', 'CPU', ' id="cs-cpu-t"'));
+      s.push('<rect class="track" x="' + (x0 + 72) + '" y="' + (y + 96) + '" width="' + (iw - 72) + '" height="10" rx="5"/>');
+      s.push('<rect class="bar-cpu" id="cs-cpu" x="' + (x0 + 72) + '" y="' + (y + 96) + '" width="0" height="10" rx="5"/>');
+      s.push(txt(x0, y + 130, 't-sub', '每支查詢'));
+      s.push(txt(x0 + 72, y + 130, 't-hot', '', ' id="cs-qt" font-size="12"'));
+      s.push(txt(x0, y + 154, 't-sub', '連線池'));
+      slotsX = x0 + 72; slotsY = y + 143; rowLen = 10;
+      s.push(txt(x0 + 72 + 10 * 15 + 6, y + 154, 't-hot', '', ' id="cs-pool-t" font-size="12"'));
+      chipY = y + 166; blockY = y + 183;
+    } else {
+      s.push(txt(x0, y + 104, 't-sub', 'CPU', ' id="cs-cpu-t"'));
+      s.push('<rect class="track" x="' + x0 + '" y="' + (y + 112) + '" width="' + iw + '" height="8" rx="4"/>');
+      s.push('<rect class="bar-cpu" id="cs-cpu" x="' + x0 + '" y="' + (y + 112) + '" width="0" height="8" rx="4"/>');
+      s.push(txt(x0, y + 144, 't-sub', '每支查詢 <tspan class="t-hot" id="cs-qt"></tspan>'));
+      s.push(txt(x0, y + 170, 't-sub', '連線池 <tspan class="t-hot" id="cs-pool-t"></tspan>'));
+      slotsX = x0; slotsY = y + 178; rowLen = 5;
+      chipY = y + 216; blockY = y + 258;
+    }
+    s.push('<g id="cs-slots">');
+    for (var i = 0; i < 10; i++) {
+      var col = i % rowLen, row = Math.floor(i / rowLen);
+      var step = L.wide ? 15 : 16;
+      s.push('<rect class="slot" x="' + (slotsX + col * step) + '" y="' + (slotsY + row * 16) + '" width="12" height="12" rx="2"/>');
+    }
+    s.push('</g>');
+    // chips
+    s.push('<rect class="chip" id="cs-chip1" x="' + x0 + '" y="' + chipY + '" width="80" height="24" rx="12"/>');
+    s.push(txt(x0 + 40, chipY + 16, 'chip-t', '加入購物車', ' id="cs-chip1-t" text-anchor="middle"'));
+    s.push('<rect class="chip" id="cs-chip2" x="' + (x0 + 86) + '" y="' + chipY + '" width="44" height="24" rx="12"/>');
+    s.push(txt(x0 + 108, chipY + 16, 'chip-t', '結帳', ' id="cs-chip2-t" text-anchor="middle"'));
+    if (L.wide) s.push(txt(x0 + 140, chipY + 16, 't-hot', '', ' id="cs-block" font-size="12"'));
+    else s.push(txt(x0, blockY, 't-hot', '', ' id="cs-block" font-size="12"'));
+    s.push('</g>');
+
+    // window ruler
+    var U = L.ruler, tx = U.x, tw = U.w, ty = U.y + 24;
+    var sx = function (sec) { return tx + tw * sec / 16; };
+    s.push(txt(tx, U.y + 12, 't-name', '空窗（<tspan class="mono-in">r.get</tspan> 拿到 None → <tspan class="mono-in">r.set</tspan> 寫回）', ' font-size="13"'));
+    s.push('<rect class="track" x="' + tx + '" y="' + ty + '" width="' + tw + '" height="16" rx="3"/>');
+    s.push('<rect class="bar-hot" id="cs-win" x="' + tx + '" y="' + ty + '" width="0" height="16" rx="3"/>');
+    s.push(txt(sx(15) - 6, ty + 12, 'hot-text-on', '', ' id="cs-win-t" text-anchor="end" font-size="12" font-weight="700" style="fill:var(--paper)"'));
+    [0, 5, 10, 15].forEach(function (v) {
+      s.push('<line class="tick-line" x1="' + sx(v) + '" y1="' + (ty + 16) + '" x2="' + sx(v) + '" y2="' + (ty + 22) + '"/>');
+      s.push(txt(sx(v), ty + 36, 'tick', v + (v === 15 ? ' 秒' : ''), ' text-anchor="' + (v === 0 ? 'start' : 'middle') + '"'));
+    });
+    var ex = sx(0.8);
+    s.push('<line class="expect" x1="' + ex + '" y1="' + (ty - 4) + '" x2="' + ex + '" y2="' + (ty + 46) + '"/>');
+    s.push(txt(ex + 6, ty + 56, 't-sub', '虛線：原本以為只有 0.8 秒'));
+
+    // feedback loop
+    var P = L.loop, names = ['落空的請求變多', '相同查詢變多', '每支查詢變慢', '空窗拉長'];
+    var boxes = [];
+    if (L.wide) {
+      var cw = Math.floor((P.w - 3 * 32) / 4);
+      for (var k = 0; k < 4; k++) boxes.push({ x: P.x + k * (cw + 32), y: P.y, w: cw, h: 32 });
+      for (var k2 = 0; k2 < 3; k2++) {
+        var b = boxes[k2], ax = b.x + b.w, ay = b.y + 16;
+        s.push('<line class="conn" x1="' + ax + '" y1="' + ay + '" x2="' + (ax + 30) + '" y2="' + ay + '"/>');
+        s.push('<polygon class="arrowhead" points="' + arrowHead([ax + 32, ay], 'r') + '"/>');
+      }
+      var lb = boxes[3], fb = boxes[0], yb = P.y + 48;
+      var back = [[lb.x + lb.w / 2, lb.y + 32], [lb.x + lb.w / 2, yb], [fb.x + fb.w / 2, yb], [fb.x + fb.w / 2, fb.y + 34]];
+      s.push('<path class="conn" d="' + rpath(back, 8) + '"/>');
+      s.push('<polygon class="arrowhead" points="' + (fb.x + fb.w / 2) + ',' + (fb.y + 32) + ' ' + (fb.x + fb.w / 2 - 4) + ',' + (fb.y + 40) + ' ' + (fb.x + fb.w / 2 + 4) + ',' + (fb.y + 40) + '"/>');
+      var mid = (fb.x + lb.x + lb.w) / 2;
+      s.push('<rect class="mask" x="' + (mid - 92) + '" y="' + (yb - 9) + '" width="184" height="18"/>');
+      s.push(txt(mid, yb + 4, 'lbl', '正回饋：一圈比一圈嚴重', ' text-anchor="middle"'));
+    } else {
+      var cw2 = Math.floor((P.w - 32) / 2);
+      boxes = [
+        { x: P.x, y: P.y, w: cw2, h: 32 },
+        { x: P.x + cw2 + 32, y: P.y, w: cw2, h: 32 },
+        { x: P.x + cw2 + 32, y: P.y + 56, w: cw2, h: 32 },
+        { x: P.x, y: P.y + 56, w: cw2, h: 32 }
+      ];
+      var b0 = boxes[0], b1 = boxes[1], b2 = boxes[2], b3 = boxes[3];
+      s.push('<line class="conn" x1="' + (b0.x + b0.w) + '" y1="' + (b0.y + 16) + '" x2="' + (b1.x - 2) + '" y2="' + (b0.y + 16) + '"/>');
+      s.push('<polygon class="arrowhead" points="' + arrowHead([b1.x, b0.y + 16], 'r') + '"/>');
+      s.push('<line class="conn" x1="' + (b1.x + b1.w / 2) + '" y1="' + (b1.y + 32) + '" x2="' + (b1.x + b1.w / 2) + '" y2="' + (b2.y - 2) + '"/>');
+      s.push('<polygon class="arrowhead" points="' + arrowHead([b1.x + b1.w / 2, b2.y], 'd') + '"/>');
+      s.push('<line class="conn" x1="' + b2.x + '" y1="' + (b2.y + 16) + '" x2="' + (b3.x + b3.w + 2) + '" y2="' + (b2.y + 16) + '"/>');
+      var lx = b3.x + b3.w, ly = b2.y + 16;
+      s.push('<polygon class="arrowhead" points="' + lx + ',' + ly + ' ' + (lx + 8) + ',' + (ly - 4) + ' ' + (lx + 8) + ',' + (ly + 4) + '"/>');
+      s.push('<line class="conn" x1="' + (b3.x + b3.w / 2) + '" y1="' + b3.y + '" x2="' + (b3.x + b3.w / 2) + '" y2="' + (b0.y + 34) + '"/>');
+      var ux = b3.x + b3.w / 2, uy = b0.y + 32;
+      s.push('<polygon class="arrowhead" points="' + ux + ',' + uy + ' ' + (ux - 4) + ',' + (uy + 8) + ' ' + (ux + 4) + ',' + (uy + 8) + '"/>');
+    }
+    boxes.forEach(function (b, k) {
+      s.push('<rect class="loop-chip" id="cs-loop' + k + '" x="' + b.x + '" y="' + b.y + '" width="' + b.w + '" height="' + b.h + '" rx="6"/>');
+      s.push(txt(b.x + b.w / 2, b.y + 21, 'loop-t', names[k], ' id="cs-loopt' + k + '" text-anchor="middle"'));
+    });
+
+    // dots layer (on top)
+    s.push('<g id="cs-dots">');
+    for (var d = 0; d < POOL; d++) s.push('<circle class="dot" r="4" cx="-20" cy="-20" opacity="0"/>');
+    s.push('</g>');
+    s.push('<g id="cs-a" opacity="0"><circle class="dot-a" r="7" cx="0" cy="0"/><text class="a-lbl" x="0" y="22" text-anchor="middle">A</text></g>');
+    s.push('</svg>');
+    return s.join('');
+  }
+
+  // polyline helpers
+  function plen(pts) { var l = 0; for (var i = 1; i < pts.length; i++) l += Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1]); return l; }
+  function pat(pts, f) {
+    f = clamp(f, 0, 1);
+    var total = plen(pts), want = total * f;
+    for (var i = 1; i < pts.length; i++) {
+      var seg = Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1]);
+      if (want <= seg || i === pts.length - 1) {
+        var u = seg ? want / seg : 0;
+        return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * u, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * u];
+      }
+      want -= seg;
+    }
+    return pts[pts.length - 1];
+  }
+  function rev(p) { return p.slice().reverse(); }
+  var easeIO = function (u) { u = clamp(u, 0, 1); return u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; };
+
+  // dot pose at local time u (seconds since spawn)
+  function dotPose(L, u, arrive) {
+    if (u < 0) return null;
+    if (u < 0.30) return { p: pat(L.cReq, u / 0.30), c: 'dot', o: 1 };
+    if (u < 0.36) return null;
+    if (u < 0.70) return { p: pat(L.cRedis, (u - 0.36) / 0.34), c: 'dot', o: 1 };
+    if (keyPresent(arrive)) {
+      if (u < 1.0) return { p: pat(rev(L.cRedis), (u - 0.70) / 0.30), c: 'dot hit', o: 1 - (u - 0.70) / 0.30 * 0.6 };
+      return null;
+    }
+    if (u < 0.95) return { p: pat(rev(L.cRedis), (u - 0.70) / 0.25), c: 'dot miss', o: 1 };
+    if (u < 1.0) return null;
+    if (u < 1.3) return { p: pat(L.cDb, (u - 1.0) / 0.30), c: 'dot miss', o: 1 };
+    if (u < 1.45) return { p: L.cDb[L.cDb.length - 1], c: 'dot miss', o: 1 - (u - 1.3) / 0.15 };
+    return null;
+  }
+  function aPose(L, t) {
+    var u = t - A_SPAWN;
+    if (u < 0) return null;
+    if (t < T_T4) {
+      if (u < 1.0) { var p = dotPose(L, u, T_EXPIRE); return p ? { p: p.p, o: 1 } : { p: L.cReq[1], o: 0 }; }
+      if (u < 1.3) return { p: pat(L.cDb, (u - 1.0) / 0.30 * 0.97), o: 1 };
+      return { p: L.park, o: 1 };
+    }
+    var v = t - T_T4;
+    if (v < 0.3) return { p: pat(rev(L.cDb), v / 0.3), o: 1 };
+    if (v < 0.35) return { p: L.cDb[0], o: 0 };
+    if (v < 0.7) return { p: pat(L.cRedis, (v - 0.35) / 0.35), o: 1 };
+    if (v < 1.2) return { p: L.cRedis[L.cRedis.length - 1], o: 1 - (v - 0.7) / 0.5 };
+    return null;
+  }
+
+  // ---------- figure ----------
+  var fig = document.getElementById('cs-fig');
+  var stage = document.getElementById('cs-stage');
+  var playBtn = document.getElementById('cs-play');
+  var scrub = document.getElementById('cs-scrub');
+  var clock = document.getElementById('cs-clock');
+  var readout = document.getElementById('cs-readout');
+  var stagesEl = document.getElementById('cs-stages');
+  var themeBtn = document.getElementById('cs-theme');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var L = null, E = {}, t = REST, playing = false, visible = true, raf = 0, last = 0, firstPlay = true, lastStage = -1, curW = 0;
+  var ICON_PLAY = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 1.5v11l9-5.5z"/></svg>';
+  var ICON_PAUSE = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 1.5h3v11H3zM8 1.5h3v11H8z"/></svg>';
+
+  STAGES.forEach(function (st, i) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn'; b.textContent = st.k;
+    b.setAttribute('aria-label', '跳到 ' + st.tag);
+    b.addEventListener('click', function () { pause(); seek(st.at); });
+    stagesEl.appendChild(b);
+  });
+  var stageBtns = stagesEl.querySelectorAll('button');
+
+  function q(id) { return stage.querySelector('#' + id); }
+  function rebuild(W) {
+    L = layout(W);
+    stage.innerHTML = buildSVG(L);
+    E = {
+      reqSub: q('cs-req-sub'), redisCard: q('cs-redis-card'), redisG: q('cs-redis'), redisState: q('cs-redis-state'), redisSub: q('cs-redis-sub'),
+      ttl: q('cs-ttl'), ttlTrack: q('cs-ttl-track'), dbCard: q('cs-db-card'), dbG: q('cs-db'), qn: q('cs-q'), cpuT: q('cs-cpu-t'), cpu: q('cs-cpu'),
+      qt: q('cs-qt'), poolT: q('cs-pool-t'), slots: stage.querySelectorAll('#cs-slots rect'),
+      chip1: q('cs-chip1'), chip1t: q('cs-chip1-t'), chip2: q('cs-chip2'), chip2t: q('cs-chip2-t'), block: q('cs-block'),
+      win: q('cs-win'), winT: q('cs-win-t'), loops: [0, 1, 2, 3].map(function (k) { return [q('cs-loop' + k), q('cs-loopt' + k)]; }),
+      dots: stage.querySelectorAll('#cs-dots circle'), a: q('cs-a')
+    };
+    E.cpuW = L.wide ? (L.db.w - 24 - 72) : (L.db.w - 24);
+    E.ttlW = L.wide ? (L.redis.w - 24) : 0;
+    lastStage = -1;
+    draw(t);
+  }
+  function setText(el, s) { if (el && el.textContent !== s) el.textContent = s; }
+  function setCls(el, c) { if (el && el.getAttribute('class') !== c) el.setAttribute('class', c); }
+
+  function draw(tt) {
+    if (!L) return;
+    // request card
+    setText(E.reqSub, tt >= T_T4 ? (L.wide ? '流量再翻倍' : '逾時重試，流量再翻倍') : '平常每秒 30 個');
+    setCls(E.reqSub, tt >= T_T4 ? 't-hot' : 't-sub');
+    if (E.reqSub) E.reqSub.setAttribute('font-size', '12');
+    // redis
+    var has = keyPresent(tt);
+    setCls(E.redisCard, has ? 'card' : 'card hot');
+    setCls(E.redisG, has ? '' : 'hot');
+    setText(E.redisState, tt < T_EXPIRE ? '有值' : has ? '有值了' : '沒有（剛過期）');
+    setCls(E.redisState, has ? 't-big t-ok' : 't-big');
+    setText(E.redisSub, tt < T_EXPIRE ? 'TTL 60 秒快到了' : has ? 'r.set 寫回' : 'r.get 拿到 None');
+    if (E.ttl) {
+      var f = tt < T_EXPIRE ? 0.18 * (T_EXPIRE - tt) / T_EXPIRE : has ? 1 : 0;
+      E.ttl.setAttribute('width', (E.ttlW * f).toFixed(1));
+      E.ttlTrack.setAttribute('opacity', has ? 1 : 0.5);
+    }
+    // db
+    var busy = tt >= T_EXPIRE;
+    setCls(E.dbCard, busy ? 'card hot' : 'card');
+    setCls(E.dbG, busy ? 'hot' : '');
+    setText(E.qn, queries(tt));
+    var c = cpu(tt);
+    E.cpu.setAttribute('width', (E.cpuW * c).toFixed(1));
+    setCls(E.cpu, c >= 1 ? 'bar-cpu full' : 'bar-cpu');
+    setText(E.cpuT, c >= 1 ? 'CPU 100%' : 'CPU');
+    setText(E.qt, queryTime(tt));
+    var on = slotsOn(tt);
+    for (var i = 0; i < E.slots.length; i++) setCls(E.slots[i], i < on ? 'slot on' : 'slot');
+    setText(E.poolT, on >= 10 ? '被占滿' : '');
+    var blocked = tt >= T_T3;
+    setCls(E.chip1, blocked ? 'chip blocked' : 'chip'); setCls(E.chip2, blocked ? 'chip blocked' : 'chip');
+    setCls(E.chip1t, blocked ? 'chip-t blocked' : 'chip-t'); setCls(E.chip2t, blocked ? 'chip-t blocked' : 'chip-t');
+    setText(E.block, blocked ? '拿不到連線' : '');
+    // window ruler
+    var ws = windowSec(tt), tw = L.ruler.w;
+    E.win.setAttribute('width', tt >= T_EXPIRE ? Math.max(3, tw * ws / 16).toFixed(1) : '0');
+    setText(E.winT, tt >= T_T4 ? '約 15 秒' : '');
+    // loop chips
+    var lit = tt < T_T2 ? 0 : tt < T_T3 ? 2 : tt < T_T3 + 0.8 ? 3 : 4;
+    var pulse = (tt >= T_T3 + 0.8 && tt < T_T4) ? Math.floor((tt - T_T3 - 0.8) / 0.7) % 4 : -1;
+    for (var k = 0; k < 4; k++) {
+      setCls(E.loops[k][0], 'loop-chip' + (k < lit ? ' on' : '') + (k === pulse ? ' pulse' : ''));
+      setCls(E.loops[k][1], 'loop-t' + (k < lit ? ' on' : ''));
+    }
+    // dots
+    var n = 0, lo = 0, hi = SPAWNS.length;
+    while (lo < hi) { var m = (lo + hi) >> 1; if (SPAWNS[m] < tt - 1.5) lo = m + 1; else hi = m; }
+    for (var j = lo; j < SPAWNS.length && SPAWNS[j] <= tt && n < E.dots.length; j++) {
+      var s0 = SPAWNS[j], pose = dotPose(L, tt - s0, s0 + 0.70);
+      if (!pose) continue;
+      var dEl = E.dots[n++];
+      dEl.setAttribute('cx', pose.p[0].toFixed(1)); dEl.setAttribute('cy', pose.p[1].toFixed(1));
+      dEl.setAttribute('opacity', pose.o.toFixed(2)); setCls(dEl, pose.c);
+    }
+    for (; n < E.dots.length; n++) if (E.dots[n].getAttribute('opacity') !== '0') E.dots[n].setAttribute('opacity', '0');
+    var ap = aPose(L, tt);
+    if (ap) { E.a.setAttribute('transform', 'translate(' + ap.p[0].toFixed(1) + ' ' + ap.p[1].toFixed(1) + ')'); E.a.setAttribute('opacity', ap.o.toFixed(2)); }
+    else E.a.setAttribute('opacity', '0');
+
+    // HTML side
+    var si = stageAt(tt);
+    if (si !== lastStage) {
+      lastStage = si;
+      var st = STAGES[si];
+      readout.innerHTML = '<b>' + st.tag + '</b>' + st.text;
+      for (var b = 0; b < stageBtns.length; b++) stageBtns[b].setAttribute('aria-pressed', b === si ? 'true' : 'false');
+      fig.setAttribute('aria-valuetext', st.tag);
+    }
+    clock.textContent = tt.toFixed(1) + ' / ' + DUR;
+    if (document.activeElement !== scrub || !scrub.matches(':active')) scrub.value = tt.toFixed(2);
+  }
+
+  function seek(v) { t = clamp(+v || 0, 0, DUR); draw(t); return t; }
+  function setPlayIcon() { playBtn.innerHTML = playing ? ICON_PAUSE : ICON_PLAY; playBtn.setAttribute('aria-label', playing ? '暫停' : '播放'); }
+  function tick(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    t += dt;
+    if (t >= DUR) { t = DUR; draw(t); pause(); return; }
+    draw(t);
+    raf = requestAnimationFrame(tick);
+  }
+  function arm() { if (!raf && playing && visible) { last = 0; raf = requestAnimationFrame(tick); } }
+  function play() {
+    if (firstPlay || t >= DUR - 0.01) t = 0;
+    firstPlay = false; playing = true; setPlayIcon(); arm();
+  }
+  function pause() { playing = false; firstPlay = false; if (raf) cancelAnimationFrame(raf); raf = 0; setPlayIcon(); }
+
+  playBtn.addEventListener('click', function () { playing ? pause() : play(); });
+  scrub.addEventListener('input', function () { pause(); seek(scrub.value); });
+  fig.addEventListener('keydown', function (e) {
+    if (e.target === scrub) return;
+    var si = stageAt(t);
+    if (e.key === 'ArrowRight') { pause(); seek(STAGES[Math.min(STAGES.length - 1, si + 1)].at); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { pause(); seek(STAGES[Math.max(0, si - 1)].at); e.preventDefault(); }
+    else if (e.key === 'Home') { pause(); seek(0); e.preventDefault(); }
+    else if (e.key === 'End') { pause(); seek(DUR); e.preventDefault(); }
+    else if ((e.key === ' ' || e.key === 'Enter') && e.target === fig) { playing ? pause() : play(); e.preventDefault(); }
+  });
+
+  // theme switch: only when opened on its own (the host site sets data-theme itself)
+  var embedded = false;
+  try { embedded = window.self !== window.top; } catch (err) { embedded = true; }
+  if (!embedded) {
+    themeBtn.hidden = false;
+    themeBtn.addEventListener('click', function () {
+      var root = document.documentElement, cur = root.getAttribute('data-theme');
+      var dark = cur ? cur === 'dark' : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      root.setAttribute('data-theme', dark ? 'light' : 'dark');
+    });
+  }
+
+  // size: read once per resize
+  function widthNow(w) { return Math.max(320, Math.min(960, Math.round(w))); }
+  if (window.ResizeObserver) {
+    new ResizeObserver(function (entries) {
+      var w = widthNow(entries[0].contentRect.width || 320);
+      if (w !== curW) { curW = w; rebuild(w); }
+    }).observe(stage);
+  }
+  curW = widthNow(stage.clientWidth || 320);
+
+  if (window.IntersectionObserver) {
+    new IntersectionObserver(function (es) { visible = es[0].isIntersecting; if (visible) arm(); }, { rootMargin: '120px' }).observe(fig);
+  }
+
+  window.seek = function (v) { pause(); return seek(v); };
+  window.DUR = DUR;
+  window.timeline = function () { return { dur: DUR, rest: REST, stages: STAGES.map(function (s) { return { key: s.k, t: s.t }; }) }; };
+
+  // mount: skeleton now, controller wiring on the next frame
+  rebuild(curW);
+  setPlayIcon();
+  void reduce; // reduced motion: never autoplays; starts paused at REST (same as default)
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { draw(t); });
+})();
+</script>
+</body>
+</html>

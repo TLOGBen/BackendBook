@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>優惠碼穿過六層</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f5f6f8;
+    --chip: #ffffff;
+    --ink: #1f2430;
+    --muted: #4f5d75;
+    --soft: #5f6878;
+    --rule: rgba(31, 36, 48, 0.14);
+    --rule-strong: rgba(31, 36, 48, 0.36);
+    --hot-fill: #fde68a;
+    --hot-stroke: #b45309;
+    --hot-ink: #78350f;
+    --ok: #1d6f43;
+    --ok-fill: #dcf1e4;
+    --a: #2456a6;
+    --a-fill: #e3ecfb;
+    --b: #7a3a9e;
+    --b-fill: #f1e6f8;
+    --btn: #2e5aa8;
+    --btn-ink: #ffffff;
+    --font: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", "Noto Sans TC", "Microsoft JhengHei", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1e2129;
+      --panel: #272b36;
+      --chip: #1e2129;
+      --ink: #e8eaf0;
+      --muted: #b4bccb;
+      --soft: #a3abbc;
+      --rule: rgba(232, 234, 240, 0.14);
+      --rule-strong: rgba(232, 234, 240, 0.36);
+      --hot-fill: #4a3410;
+      --hot-stroke: #f59e0b;
+      --hot-ink: #fde68a;
+      --ok: #7fd6a4;
+      --ok-fill: #173a29;
+      --a: #8db4f2;
+      --a-fill: #1f2f4d;
+      --b: #d4a3ee;
+      --b-fill: #3a2648;
+      --btn: #7aa5ea;
+      --btn-ink: #10131a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1e2129;
+    --panel: #272b36;
+    --chip: #1e2129;
+    --ink: #e8eaf0;
+    --muted: #b4bccb;
+    --soft: #a3abbc;
+    --rule: rgba(232, 234, 240, 0.14);
+    --rule-strong: rgba(232, 234, 240, 0.36);
+    --hot-fill: #4a3410;
+    --hot-stroke: #f59e0b;
+    --hot-ink: #fde68a;
+    --ok: #7fd6a4;
+    --ok-fill: #173a29;
+    --a: #8db4f2;
+    --a-fill: #1f2f4d;
+    --b: #d4a3ee;
+    --b-fill: #3a2648;
+    --btn: #7aa5ea;
+    --btn-ink: #10131a;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 12px 16px 16px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .cs-fig { max-width: 720px; margin: 0 auto; }
+  .cs-fig:focus-visible { outline: 2px solid var(--btn); outline-offset: 4px; border-radius: 8px; }
+
+  .cs-tabs { display: flex; gap: 8px; margin-bottom: 8px; }
+  .cs-tab {
+    flex: 1 1 0; min-height: 36px; padding: 6px 10px;
+    border: 1.5px solid var(--rule-strong); border-radius: 8px;
+    background: var(--chip); color: var(--muted);
+    font: 600 13px/1.3 var(--font); cursor: pointer;
+  }
+  .cs-tab[aria-selected="true"] { border-color: var(--btn); color: var(--ink); box-shadow: inset 0 -3px 0 var(--btn); }
+
+  .cs-ctx { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+  .cs-ctx b { color: var(--ink); font-family: var(--mono); }
+
+  .cs-stage { position: relative; }
+  .cs-head, .cs-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 104px 104px;
+    column-gap: 8px;
+    align-items: center;
+  }
+  .cs-head { padding: 0 12px 4px; font: 600 12px/1.3 var(--mono); color: var(--soft); }
+  .cs-head .h-a { color: var(--a); text-align: center; }
+  .cs-head .h-b { color: var(--b); text-align: center; }
+  .cs-row {
+    position: static;
+    min-height: 64px; padding: 8px 12px; margin-bottom: 20px;
+    border: 1.5px solid var(--rule-strong); border-radius: 8px; background: var(--chip);
+  }
+  .cs-row:last-child { margin-bottom: 0; }
+  .cs-row.pass { border-style: dashed; background: var(--panel); }
+  .cs-row.swapgap { margin-bottom: 40px; }
+  .cs-row.active { border-color: var(--btn); border-style: solid; box-shadow: 0 0 0 2px color-mix(in srgb, var(--btn) 25%, transparent); }
+  .cs-row.hot.active, .cs-row.hot.seen { background: var(--hot-fill); border-color: var(--hot-stroke); border-style: solid; }
+  .cs-row.hot.active { box-shadow: 0 0 0 2px color-mix(in srgb, var(--hot-stroke) 30%, transparent); }
+  .cs-row.hot.seen .cs-desc, .cs-row.hot.active .cs-desc, .cs-row.hot.seen .cs-name, .cs-row.hot.active .cs-name { color: var(--hot-ink); }
+  .cs-row.flat { min-height: 80px; align-items: end; }
+
+  .cs-nm { min-width: 0; align-self: center; }
+  .cs-name { display: flex; align-items: baseline; gap: 6px; font: 600 13px/1.35 var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+  .cs-no {
+    flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 10px;
+    background: var(--rule); font: 600 12px/1 var(--font); color: var(--muted); transform: translateY(-1px);
+  }
+  .cs-desc { margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+  .cs-tag {
+    display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 4px;
+    border: 1px dashed var(--rule-strong); font-size: 12px; line-height: 18px; color: var(--soft); white-space: nowrap;
+  }
+  .cs-tag.work { border-style: solid; border-color: var(--ink); color: var(--ink); }
+
+  .cs-slot {
+    height: 32px; border-radius: 16px; border: 1.5px dashed var(--rule-strong);
+    display: grid; place-items: center; font: 600 13px/1 var(--mono); color: transparent;
+    align-self: center;
+  }
+  .cs-row.flat .cs-slot { align-self: end; }
+  .cs-slot.shown.va { color: var(--a); }
+  .cs-slot.shown.vb { color: var(--b); }
+  .cs-slot.shown.wrong { border-color: var(--hot-stroke); border-style: solid; background: color-mix(in srgb, var(--hot-fill) 55%, transparent); }
+  .cs-calc {
+    grid-column: 2 / span 2; align-self: center; text-align: center;
+    padding: 6px 8px; border-radius: 8px; border: 1.5px solid var(--rule-strong);
+    font: 600 13px/1.4 var(--mono); color: var(--muted);
+  }
+  .cs-row.active .cs-calc, .cs-row.seen .cs-calc { border-color: var(--ok); color: var(--ok); background: var(--ok-fill); }
+
+  .cs-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .cs-links path { fill: none; stroke: var(--rule-strong); stroke-width: 1.5; }
+  .cs-links path.la { stroke: var(--a); opacity: .55; }
+  .cs-links path.lb { stroke: var(--b); opacity: .55; }
+  .cs-links.hot path.x { opacity: 1; stroke-width: 2.5; }
+  .cs-links .xlabel { font: 600 12px/1 var(--font); fill: var(--soft); }
+  .cs-links.hot .xlabel { fill: var(--hot-stroke); }
+
+  .cs-pill {
+    position: absolute; left: 0; top: 0; height: 32px; border-radius: 16px;
+    display: grid; place-items: center; font: 700 13px/1 var(--mono);
+    border: 2px solid; will-change: transform; z-index: 3;
+  }
+  .cs-pill.pa { color: var(--a); border-color: var(--a); background: var(--a-fill); }
+  .cs-pill.pb { color: var(--b); border-color: var(--b); background: var(--b-fill); }
+  .cs-pack {
+    position: absolute; left: 0; top: 0; border: 2px solid var(--ok); border-radius: 20px;
+    background: color-mix(in srgb, var(--ok-fill) 60%, transparent); z-index: 2; will-change: transform;
+  }
+  .cs-pack span {
+    position: absolute; left: 10px; top: -20px; padding: 0 6px; border-radius: 4px;
+    background: var(--ok); color: var(--bg); font: 600 12px/18px var(--mono); white-space: nowrap;
+  }
+  .cs-hide { display: none; }
+
+  .cs-result { display: grid; margin-top: 12px; }
+  .cs-result > div { grid-area: 1 / 1; transition: none; }
+  .cs-wait {
+    border: 1.5px dashed var(--rule-strong); border-radius: 8px; padding: 10px 12px;
+    font-size: 13px; color: var(--soft); display: grid; place-items: center; text-align: center;
+  }
+  .cs-card { border: 1.5px solid var(--rule-strong); border-radius: 8px; padding: 10px 12px; background: var(--chip); }
+  .cs-card.bad { border-color: var(--hot-stroke); }
+  .cs-card.good { border-color: var(--ok); }
+  .cs-money { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .cs-money div { border-radius: 6px; padding: 6px 8px; background: var(--panel); }
+  .cs-money small { display: block; font-size: 12px; color: var(--muted); }
+  .cs-money b { font: 700 18px/1.3 var(--mono); }
+  .cs-money .hotbox { background: var(--hot-fill); color: var(--hot-ink); outline: 1.5px solid var(--hot-stroke); }
+  .cs-money .hotbox small { color: var(--hot-ink); }
+  .cs-money .okbox { background: var(--ok-fill); color: var(--ok); outline: 1.5px solid var(--ok); }
+  .cs-money .okbox small { color: var(--ok); }
+  .cs-card ul { margin: 0; padding-left: 18px; font-size: 13px; }
+  .cs-card li { margin: 2px 0; }
+  .cs-card code { font-family: var(--mono); font-size: 13px; }
+
+  .cs-status { margin: 10px 0 0; min-height: 4.5em; font-size: 14px; line-height: 1.6; }
+  .cs-status code { font: 600 13px var(--mono); overflow-wrap: anywhere; background: var(--panel); padding: 0 4px; border-radius: 4px; }
+
+  .cs-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  .cs-btn {
+    min-height: 36px; padding: 6px 12px; border-radius: 8px; border: 1.5px solid var(--btn);
+    background: var(--chip); color: var(--btn); font: 600 13px/1 var(--font); cursor: pointer;
+  }
+  .cs-btn.primary { background: var(--btn); color: var(--btn-ink); min-width: 76px; }
+  .cs-btn:focus-visible, .cs-tab:focus-visible, .cs-range:focus-visible { outline: 2px solid var(--btn); outline-offset: 2px; }
+  .cs-range { flex: 1 1 140px; min-width: 120px; height: 32px; accent-color: var(--btn); margin: 0; }
+  .cs-stepno { font-size: 12px; color: var(--muted); min-width: 84px; text-align: right; }
+
+  .cs-cmp { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 8px; }
+  .cs-cmp-h { font-size: 12px; color: var(--soft); margin-bottom: 4px; }
+  .cs-cmp table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .cs-cmp th, .cs-cmp td { padding: 4px 4px; text-align: left; vertical-align: middle; }
+  .cs-cmp th { font-weight: 600; color: var(--muted); }
+  .cs-cmp td.lab { color: var(--ink); }
+  .cs-cmp td.val { white-space: nowrap; width: 1%; }
+  .cs-cmp .n { font: 700 13px var(--mono); display: inline-block; min-width: 2.6em; }
+  .cs-blocks { display: inline-flex; gap: 2px; vertical-align: middle; }
+  .cs-blocks i { width: 7px; height: 12px; border-radius: 2px; background: var(--muted); display: block; }
+  .cs-cmp .deep .cs-blocks i { background: var(--hot-stroke); }
+  .cs-cmp .flat .cs-blocks i { background: var(--ok); }
+
+  @media (max-width: 459px) {
+    .cs-head, .cs-row { grid-template-columns: minmax(0, 1fr) 92px 92px; column-gap: 6px; }
+    .cs-row { padding: 8px 8px; }
+    .cs-head { padding: 0 8px 4px; }
+    .cs-name { font-size: 12px; }
+    .cs-nm { grid-column: 1 / -1; grid-row: 1; }
+    .cs-row .cs-slot.s0 { grid-column: 2; grid-row: 2; margin-top: 6px; }
+    .cs-row .cs-slot.s1 { grid-column: 3; grid-row: 2; margin-top: 6px; }
+    .cs-calc { grid-row: 2; grid-column: 1 / -1; margin-top: 6px; }
+    .cs-row.flat { min-height: 0; }
+    .cs-row.flat .cs-slot { margin-top: 28px; }
+    .cs-pill, .cs-slot { font-size: 12px; }
+    .cs-money b { font-size: 16px; }
+    .cs-stepno { min-width: 0; }
+    .cs-blocks i { width: 5px; }
+  }
+</style>
+</head>
+<body>
+<div class="cs-fig fig" id="cs-fig" tabindex="0" role="group" data-fig="coupon-swapped-six-layers" data-dur="6" data-rest="3"
+     aria-label="優惠碼穿過六層只轉傳的類別：過度加深版裡 customerId 和 couponCode 一層層原封不動往下傳，第 4 層 OrderProcessor 呼叫下一層時把兩個 String 放反，照樣編譯過，最後不折扣、用 WELCOME100 當客戶扣款 960 元；收斂版把兩個值裝進 PlaceOrderCommand，只在 controller 建立一次，扣款 860 元。">
+  <div class="cs-tabs" role="tablist" aria-label="切換版本">
+    <button class="cs-tab" role="tab" id="cs-tab-deep" data-mode="deep" aria-selected="true">過度加深版：6 層</button>
+    <button class="cs-tab" role="tab" id="cs-tab-flat" data-mode="flat" aria-selected="false">收斂版：3 站</button>
+  </div>
+  <p class="cs-ctx">客戶 <b>c-42</b> 買 2 個馬克杯（每個 450）：小計 900＋運費 60＝960，輸入優惠碼 <b>WELCOME100</b> 應付 <b>860</b></p>
+
+  <div class="cs-stage" id="cs-stage">
+    <div class="cs-head" aria-hidden="true"><span>這一層</span><span class="h-a">customerId</span><span class="h-b">couponCode</span></div>
+    <div id="cs-rows"></div>
+    <svg class="cs-links" id="cs-links" aria-hidden="true"></svg>
+    <div class="cs-pack cs-hide" id="cs-pack" aria-hidden="true"><span>PlaceOrderCommand</span></div>
+    <div class="cs-pill pa" id="cs-pa" aria-hidden="true">c-42</div>
+    <div class="cs-pill pb" id="cs-pb" aria-hidden="true">WELCOME100</div>
+  </div>
+
+  <div class="cs-result" id="cs-result"></div>
+
+  <p class="cs-status" id="cs-status" aria-live="polite"></p>
+
+  <div class="cs-ctl">
+    <button class="cs-btn" id="cs-prev" type="button" aria-label="上一步">◀ 上一步</button>
+    <button class="cs-btn primary" id="cs-play" type="button">▶ 播放</button>
+    <button class="cs-btn" id="cs-next" type="button" aria-label="下一步">下一步 ▶</button>
+    <input class="cs-range" id="cs-scrub" type="range" min="0" max="6" step="0.01" value="3" aria-label="時間軸">
+    <span class="cs-stepno" id="cs-stepno"></span>
+  </div>
+
+  <div class="cs-cmp">
+    <div class="cs-cmp-h">兩個版本實際量出來的數字（文章實驗二、三）</div>
+    <table>
+      <thead><tr><th></th><th>過度加深版</th><th>收斂版</th></tr></thead>
+      <tbody id="cs-cmp-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var A = "c-42", B = "WELCOME100";
+
+  var MODES = {
+    deep: {
+      rest: 3,
+      rows: [
+        { name: "OrderController<wbr>.createOrder", desc: "檢查購物車不是空的，往下傳", kind: "" },
+        { name: "OrderFacade<wbr>.placeOrder", desc: "原封不動往下傳", kind: "pass", tag: "只轉傳" },
+        { name: "OrderManager<wbr>.handleOrder", desc: "原封不動往下傳", kind: "pass", tag: "只轉傳" },
+        { name: "OrderProcessor<wbr>.processOrder", desc: "呼叫下一層時把兩個值放反", kind: "pass hot", tag: "只轉傳", swapAfter: true },
+        { name: "OrderHelper<wbr>.doOrder", desc: "原封不動往下傳，順便帶上三個 port", kind: "pass", tag: "只轉傳" },
+        { name: "OrderUtil<wbr>.executeOrder", desc: "不認得優惠碼 c-42，不折扣；用 WELCOME100 當客戶建立訂單、扣款 960 元", kind: "", tag: "真正做事", work: true }
+      ],
+      // column of each value at each row: 0 = customerId, 1 = couponCode
+      colA: [0, 0, 0, 0, 1, 1],
+      colB: [1, 1, 1, 1, 0, 0],
+      travelRows: 6,
+      status: [
+        "使用者輸入優惠碼按下單。第 1 層 <code>OrderController</code> 檢查購物車不是空的，把 c-42 和 WELCOME100 往下傳。",
+        "第 2 層 <code>OrderFacade</code> 只有一行：把收到的參數原封不動交給下一層。",
+        "第 3 層 <code>OrderManager</code> 也只有一行：原封不動交給下一層。",
+        "第 4 層 <code>OrderProcessor</code> 寫成 <code>helper.doOrder(couponCode, lines, customerId)</code>：兩個都是 String，位置放反照樣編譯過。",
+        "第 5 層 <code>OrderHelper</code> 拿到的 customerId 已經是 WELCOME100，它照樣原封不動往下傳，順便帶上三個 port。",
+        "第 6 層 <code>OrderUtil</code> 才真正做事：不認得優惠碼 c-42，不折扣；用 WELCOME100 當客戶建立訂單、扣款 960 元。",
+        "使用者被扣 960 元、「我的訂單」找不到這筆；工程師這邊編譯過、原本的測試全綠。前 5 層什麼都沒做，每一層都是一個可能寫錯的地方。"
+      ]
+    },
+    flat: {
+      rest: 0,
+      rows: [
+        { name: "OrderController<wbr>.createOrder", desc: "檢查請求，把兩個值裝進 PlaceOrderCommand，只建這一次", kind: "flat" },
+        { name: "PlaceOrderService<wbr>.execute", desc: "收到整包 cmd，照順序做事：檢查庫存、建立訂單、扣款", kind: "flat" },
+        { name: "Order", desc: "算小計、運費、總額", kind: "", calc: "900 + 60 − 100 = 860" }
+      ],
+      colA: [0, 0],
+      colB: [1, 1],
+      travelRows: 2,
+      status: [
+        "<code>OrderController</code> 檢查請求，把 c-42 和 WELCOME100 裝進 <code>PlaceOrderCommand</code>。兩個 String 只在建立它的這一行並排出現。",
+        "<code>PlaceOrderService</code> 收到整包 cmd，照順序做事，中間沒有只轉傳的層。",
+        "<code>Order</code> 算金額：小計 900，未滿 1000 加運費 60，優惠碼 WELCOME100 折 100，總額 860。",
+        "向 c-42 扣款 860 元，訂單在 c-42 名下。加優惠碼時，這一版改 3 個簽名；過度加深版要改 7 個。"
+      ]
+    }
+  };
+
+  var CMP = [
+    ["呼叫深度（從入口走到扣款）", 6, 2, ""],
+    ["加優惠碼要改的簽名", 7, 3, " 個"],
+    ["兩個 String 並排、可能放反的呼叫", 6, 2, " 處"]
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var fig = $("cs-fig"), stage = $("cs-stage"), rowsEl = $("cs-rows"), links = $("cs-links");
+  var pa = $("cs-pa"), pb = $("cs-pb"), pack = $("cs-pack");
+  var resultEl = $("cs-result"), statusEl = $("cs-status"), scrub = $("cs-scrub"), stepno = $("cs-stepno");
+  var playBtn = $("cs-play");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var mode = "deep", M = MODES.deep, t = M.rest, last = -1;
+  var rowNodes = [], slotPos = [], lastActive = -2, lastArrived = -2;
+  var playing = false, raf = 0, prevTs = 0, onScreen = true, rmAcc = 0;
+  var STEP_SEC = 1.7;
+
+  // comparison table
+  (function () {
+    var html = "";
+    CMP.forEach(function (r) {
+      function cell(n, cls) {
+        var b = ""; for (var i = 0; i < n; i++) b += "<i></i>";
+        return '<td class="val ' + cls + '"><span class="n">' + n + r[3] + '</span><span class="cs-blocks">' + b + "</span></td>";
+      }
+      html += '<tr><td class="lab">' + r[0] + "</td>" + cell(r[1], "deep") + cell(r[2], "flat") + "</tr>";
+    });
+    $("cs-cmp-body").innerHTML = html;
+  })();
+
+  function maxT() { return M.status.length - 1; }
+
+  function buildRows() {
+    var html = "";
+    M.rows.forEach(function (r, i) {
+      var cls = "cs-row " + (r.kind || "") + (r.swapAfter ? " swapgap" : "");
+      var tag = r.tag ? '<span class="cs-tag' + (r.work ? " work" : "") + '">' + r.tag + "</span>" : "";
+      html += '<div class="' + cls + '" data-i="' + i + '">' +
+        '<div class="cs-nm"><div class="cs-name"><span class="cs-no">' + (i + 1) + "</span><span>" + r.name + "</span></div>" +
+        '<div class="cs-desc">' + r.desc + tag + "</div></div>";
+      if (r.calc) {
+        html += '<div class="cs-calc">' + r.calc + "</div>";
+      } else {
+        var va = M.colA[i] === 0 ? A : B, vb = M.colA[i] === 0 ? B : A;
+        var wrongA = mode === "deep" && M.colA[i] === 1;
+        html += '<div class="cs-slot s0 ' + (va === A ? "va" : "vb") + (wrongA ? " wrong" : "") + '">' + va + "</div>" +
+                '<div class="cs-slot s1 ' + (vb === A ? "va" : "vb") + (wrongA ? " wrong" : "") + '">' + vb + "</div>";
+      }
+      html += "</div>";
+    });
+    rowsEl.innerHTML = html;
+    rowNodes = Array.prototype.slice.call(rowsEl.children);
+
+    var deep = mode === "deep";
+    var res = deep
+      ? '<div class="cs-wait" id="cs-wait">還沒走到真正做事的那一層</div>' +
+        '<div class="cs-card bad" id="cs-card"><div class="cs-money">' +
+        '<div><small>應該付</small><b>860</b></div>' +
+        '<div class="hotbox"><small>實際扣款</small><b>960</b></div></div>' +
+        "<ul><li>訂單的客戶編號是 <code>WELCOME100</code>，「我的訂單」找不到這筆</li>" +
+        "<li>編譯通過，原本的測試全綠（原本沒有測優惠碼）</li></ul></div>"
+      : '<div class="cs-wait" id="cs-wait">還沒扣款</div>' +
+        '<div class="cs-card good" id="cs-card"><div class="cs-money">' +
+        '<div><small>應該付</small><b>860</b></div>' +
+        '<div class="okbox"><small>實際扣款</small><b>860</b></div></div>' +
+        "<ul><li>扣款對象 <code>c-42</code>，訂單在 c-42 名下</li>" +
+        "<li><code>couponCode</code> 只在 controller 放進 <code>PlaceOrderCommand</code> 一次</li></ul></div>";
+    resultEl.innerHTML = res;
+    pack.classList.toggle("cs-hide", deep);
+    scrub.max = String(maxT());
+    lastActive = -2; lastArrived = -2; last = -1;
+  }
+
+  function measure() {
+    slotPos = rowNodes.map(function (row) {
+      var s = row.querySelectorAll(".cs-slot");
+      if (!s.length) return null;
+      return [0, 1].map(function (c) {
+        var el = s[c];
+        return { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
+      });
+    });
+    var W = stage.offsetWidth, H = stage.offsetHeight;
+    links.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var p = "";
+    for (var i = 0; i < M.travelRows - 1; i++) {
+      var a = slotPos[i], b = slotPos[i + 1];
+      if (!a || !b) continue;
+      var rowBottom = rowNodes[i].offsetTop + rowNodes[i].offsetHeight;
+      var nextTop = rowNodes[i + 1].offsetTop;
+      [0, 1].forEach(function (c) {
+        var from = a[c];
+        var srcVal = (M.colA[i] === c) ? "a" : "b";
+        var dstCol = srcVal === "a" ? M.colA[i + 1] : M.colB[i + 1];
+        var x1 = from.x + from.w / 2, x2 = b[dstCol].x + b[dstCol].w / 2;
+        var cls = "l" + srcVal + (x1 !== x2 ? " x" : "");
+        if (x1 === x2) {
+          p += '<path class="' + cls + '" d="M' + x1 + " " + rowBottom + " V" + nextTop + '"/>';
+        } else {
+          var my = (rowBottom + nextTop) / 2;
+          p += '<path class="' + cls + '" d="M' + x1 + " " + rowBottom + " C" + x1 + " " + my + " " + x2 + " " + my + " " + x2 + " " + nextTop + '"/>';
+        }
+      });
+      if (M.rows[i].swapAfter) {
+        p += '<text class="xlabel" x="' + (rowNodes[i].offsetLeft + 12) + '" y="' + (rowBottom + (nextTop - rowBottom) / 2 + 4) + '">放反了</text>';
+      }
+    }
+    links.innerHTML = p;
+    var pw = slotPos[0][0].w;
+    pa.style.width = pw + "px"; pb.style.width = pw + "px";
+    last = -1;
+    render(true);
+  }
+
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function ease(x) { return x * x * (3 - 2 * x); }
+
+  // position of a value at time t
+  function where(tt) {
+    var lastRow = M.travelRows - 1;
+    var i = Math.floor(tt), f = tt - i;
+    if (i >= lastRow) return { from: lastRow, to: lastRow, p: 1, active: Math.min(Math.round(tt) >= M.rows.length ? M.rows.length - 1 : i, M.rows.length - 1), arrived: lastRow };
+    var p = reduce ? (f >= 0.5 ? 1 : 0) : ease(clamp((f - 0.35) / 0.5, 0, 1));
+    var arrived = p >= 1 ? i + 1 : i;
+    return { from: i, to: i + 1, p: p, active: arrived, arrived: arrived };
+  }
+
+  function posOf(colArr, w) {
+    var a = slotPos[w.from][colArr[w.from]], b = slotPos[w.to][colArr[w.to]];
+    return { x: a.x + (b.x - a.x) * w.p, y: a.y + (b.y - a.y) * w.p };
+  }
+
+  function render(force) {
+    if (!slotPos.length) return;
+    if (!force && t === last) return;
+    last = t;
+    var w = where(t);
+    // active row: past the last travel row, follow the step index
+    var stepIdx = Math.round(t);
+    var activeRow = t >= M.travelRows - 1 ? Math.min(Math.floor(t + 1e-6), M.rows.length - 1) : w.active;
+    if (t >= M.rows.length) activeRow = -1; // result step: no row active
+    var A1 = posOf(M.colA, w), B1 = posOf(M.colB, w);
+    pa.style.transform = "translate(" + A1.x + "px," + A1.y + "px)";
+    pb.style.transform = "translate(" + B1.x + "px," + B1.y + "px)";
+    if (mode === "flat") {
+      var x0 = Math.min(A1.x, B1.x) - 6, y0 = A1.y - 6;
+      var x1 = Math.max(A1.x, B1.x) + slotPos[0][0].w + 6;
+      pack.style.width = (x1 - x0) + "px"; pack.style.height = (slotPos[0][0].h + 12) + "px";
+      pack.style.transform = "translate(" + x0 + "px," + y0 + "px)";
+    }
+    if (activeRow !== lastActive || w.arrived !== lastArrived) {
+      lastActive = activeRow; lastArrived = w.arrived;
+      var reached = t >= M.rows.length ? M.rows.length - 1 : Math.max(activeRow, w.arrived);
+      rowNodes.forEach(function (row, i) {
+        row.classList.toggle("active", i === activeRow);
+        row.classList.toggle("seen", i <= reached && i !== activeRow);
+        row.querySelectorAll(".cs-slot").forEach(function (s) { s.classList.toggle("shown", i <= w.arrived); });
+      });
+      var swapRow = -1;
+      M.rows.forEach(function (r, i) { if (r.swapAfter) swapRow = i; });
+      links.classList.toggle("hot", swapRow >= 0 && reached >= swapRow);
+    }
+    var endP = clamp((t - (maxT() - 0.6)) / 0.5, 0, 1);
+    if (reduce) endP = t >= maxT() - 0.5 ? 1 : 0;
+    var card = $("cs-card"), wait = $("cs-wait");
+    card.style.opacity = endP; wait.style.opacity = 1 - endP;
+    card.style.visibility = endP > 0 ? "visible" : "hidden";
+    wait.style.visibility = endP < 1 ? "visible" : "hidden";
+
+    var s = clamp(Math.floor(t + 0.15), 0, maxT());
+    if (statusEl._s !== s + mode) { statusEl.innerHTML = M.status[s]; statusEl._s = s + mode; }
+    stepno.textContent = "第 " + (s + 1) + " 步／共 " + (maxT() + 1) + " 步";
+    if (document.activeElement !== scrub) scrub.value = String(t);
+  }
+
+  function setT(v) { t = clamp(v, 0, maxT()); render(); }
+
+  function loop(ts) {
+    raf = 0;
+    if (!playing || !onScreen) return;
+    var dt = prevTs ? (ts - prevTs) / 1000 : 0; prevTs = ts;
+    if (dt > 0.1) dt = 0.1;
+    if (reduce) {
+      rmAcc += dt;
+      if (rmAcc >= STEP_SEC) { rmAcc = 0; setT(Math.floor(t) + 1); }
+    } else {
+      setT(t + dt / STEP_SEC);
+    }
+    if (t >= maxT()) { stop(); return; }
+    raf = requestAnimationFrame(loop);
+  }
+  function start() {
+    if (t >= maxT()) setT(0);
+    playing = true; prevTs = 0; rmAcc = 0;
+    playBtn.textContent = "❚❚ 暫停"; playBtn.setAttribute("aria-pressed", "true");
+    if (!raf) raf = requestAnimationFrame(loop);
+  }
+  function stop() {
+    playing = false;
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    playBtn.textContent = "▶ 播放"; playBtn.setAttribute("aria-pressed", "false");
+  }
+  function stepBy(d) {
+    stop();
+    var k = d > 0 ? Math.floor(t + 1e-6) + 1 : Math.ceil(t - 1e-6) - 1;
+    setT(k);
+  }
+
+  function setMode(m) {
+    stop();
+    mode = m; M = MODES[m];
+    document.querySelectorAll(".cs-tab").forEach(function (b) { b.setAttribute("aria-selected", b.dataset.mode === m ? "true" : "false"); });
+    buildRows();
+    t = M.rest;
+    requestAnimationFrame(measure);
+  }
+
+  playBtn.addEventListener("click", function () { playing ? stop() : start(); });
+  $("cs-prev").addEventListener("click", function () { stepBy(-1); });
+  $("cs-next").addEventListener("click", function () { stepBy(1); });
+  scrub.addEventListener("input", function () { stop(); t = clamp(parseFloat(scrub.value), 0, maxT()); render(); });
+  scrub.addEventListener("change", function () { setT(Math.round(t)); scrub.value = String(t); });
+  document.querySelectorAll(".cs-tab").forEach(function (b) {
+    b.addEventListener("click", function () { if (b.dataset.mode !== mode) setMode(b.dataset.mode); });
+  });
+  fig.addEventListener("keydown", function (e) {
+    if (e.target === scrub) return;
+    if (e.key === "ArrowRight") { e.preventDefault(); stepBy(1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); stepBy(-1); }
+    else if (e.key === " " && e.target === fig) { e.preventDefault(); playing ? stop() : start(); }
+  });
+
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(function (es) {
+      onScreen = es[0].isIntersecting;
+      if (onScreen && playing && !raf) { prevTs = 0; raf = requestAnimationFrame(loop); }
+    }, { rootMargin: "120px" }).observe(fig);
+  }
+  var lastW = -1;
+  if ("ResizeObserver" in window) {
+    new ResizeObserver(function () {
+      var w = stage.offsetWidth;
+      if (w !== lastW) { lastW = w; measure(); }
+    }).observe(stage);
+  } else {
+    window.addEventListener("resize", measure);
+  }
+
+  // test / host hook: seek to a time in the current mode
+  window.seek = function (v, m) { if (m && m !== mode) { setMode(m); measure(); } stop(); t = clamp(v, 0, maxT()); render(true); };
+
+  buildRows();
+  t = M.rest;
+  requestAnimationFrame(function () { measure(); lastW = stage.offsetWidth; });
+})();
+</script>
+</body>
+</html>

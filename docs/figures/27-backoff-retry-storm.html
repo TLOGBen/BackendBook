@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>重試風暴</title>
+<style>
+:root{
+  --paper:#ffffff; --paper-2:#f3f4f6; --panel:#fafafa;
+  --ink:#1f2937; --muted:#4b5563; --soft:#5f6b7a;
+  --rule:rgba(31,41,55,.16); --rule-solid:#c7ccd4;
+  --bad:#b91c1c; --good:#15803d; --idle:#d5d9e0; --off:#eef0f3;
+  --amber-fill:#fde68a; --amber-line:#b45309; --amber-ink:#111111;
+  --band:rgba(31,41,55,.06);
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SFMono-Regular",Consolas,"Noto Sans TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --paper-2:#272b35; --panel:#232731;
+    --ink:#e5e7eb; --muted:#c3c8d0; --soft:#a3aab5;
+    --rule:rgba(229,231,235,.16); --rule-solid:#4a5160;
+    --bad:#f87171; --good:#4ade80; --idle:#434a59; --off:#2c313c;
+    --amber-fill:#5a3f0c; --amber-line:#f59e0b; --amber-ink:#fde68a;
+    --band:rgba(229,231,235,.06);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --paper-2:#272b35; --panel:#232731;
+  --ink:#e5e7eb; --muted:#c3c8d0; --soft:#a3aab5;
+  --rule:rgba(229,231,235,.16); --rule-solid:#4a5160;
+  --bad:#f87171; --good:#4ade80; --idle:#434a59; --off:#2c313c;
+  --amber-fill:#5a3f0c; --amber-line:#f59e0b; --amber-ink:#fde68a;
+  --band:rgba(229,231,235,.06);
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.5;overflow-x:hidden}
+*{box-sizing:border-box}
+
+.fig{margin:0;padding:8px 0;outline:none;max-width:100%}
+.fig:focus-visible{outline:2px solid var(--amber-line);outline-offset:2px;border-radius:8px}
+
+.sys{display:grid;grid-template-columns:minmax(0,1.4fr) 96px minmax(0,1fr) 32px minmax(0,.8fr);
+  grid-template-areas:"w l s a d";align-items:stretch;gap:0}
+.pn{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px;min-width:0;
+  transition:background-color .25s,border-color .25s}
+.pn.hot{background:var(--amber-fill);border-color:var(--amber-line);border-width:2px;padding:11px}
+.pn.hot, .pn.hot .k, .pn.hot .v, .pn.hot .big, .pn.hot .note{color:var(--amber-ink)}
+.pn h3{margin:0 0 4px;font-size:14px;font-weight:600;line-height:1.3}
+.pn .sub{font-size:12px;color:var(--soft)}
+.pw{grid-area:w}.ps{grid-area:s}.pd{grid-area:d}
+.lnk{grid-area:l;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;gap:6px}
+.lnk2{grid-area:a;display:flex;align-items:center;justify-content:center}
+.arrow{width:100%;height:12px;display:block}
+.arrow line{stroke:var(--muted);stroke-width:1.5}
+.arrow path{fill:var(--muted)}
+.chip{font-size:12px;line-height:1.35;text-align:center;border:1px solid var(--rule-solid);border-radius:6px;padding:4px 6px;
+  color:var(--soft);background:var(--paper);width:100%}
+.chip.on{border-color:var(--good);color:var(--ink)}
+.chip b{font-weight:600}
+
+.dots{display:block;width:100%;height:auto;margin:6px 0 6px}
+.dots circle{fill:var(--idle)}
+.dots circle.ok{fill:var(--good)}
+.dots circle.fail{fill:var(--bad)}
+.dots circle.off{fill:var(--off);stroke:var(--rule-solid);stroke-width:.8}
+.wtxt{font-size:13px;color:var(--muted);min-height:40px}
+.pn.hot .wtxt{color:var(--amber-ink)}
+
+.big{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2;white-space:nowrap}
+.big small{font-size:12px;font-weight:500;color:var(--soft);margin-left:4px}
+.pn.hot .big small{color:var(--amber-ink)}
+.cap-bar{position:relative;height:12px;background:var(--paper-2);border-radius:4px;margin:6px 0 2px;overflow:visible;border:1px solid var(--rule)}
+.cap-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--good);width:0}
+.cap-bar i.over{background:var(--bad)}
+.cap-bar u{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink)}
+.cap-lbl{font-size:12px;color:var(--soft);position:relative;height:18px}
+.cap-lbl span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.pn.hot .cap-lbl{color:var(--amber-ink)}
+.rows{margin:4px 0 0;display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:13px}
+.rows .k{color:var(--soft)}
+.rows .v{font-weight:600;min-width:0}
+.note{font-size:12px;color:var(--muted);margin-top:6px;min-height:18px}
+.db-st{font-size:14px;font-weight:600;margin-top:6px}
+.db-st.down{color:var(--bad)}
+.db-st.up{color:var(--good)}
+.pn.hot .db-st{color:var(--amber-ink)}
+
+.chart-wrap{margin-top:16px;position:relative}
+.chart{display:block;width:100%}
+.chart text{font-family:var(--font);font-size:12px;fill:var(--soft)}
+.chart .ax{stroke:var(--rule-solid);stroke-width:1}
+.chart .grid{stroke:var(--rule);stroke-width:1}
+.chart .capl{stroke:var(--ink);stroke-width:1.5;stroke-dasharray:5 4}
+.chart .capt{fill:var(--ink);font-weight:600}
+.chart .band{fill:var(--band)}
+.chart .hotband{fill:var(--amber-fill);stroke:var(--amber-line);stroke-width:1.5;opacity:.9}
+.chart .hott{fill:var(--amber-ink);font-weight:600}
+.chart .ln{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.chart .ln.fixed{stroke:var(--bad)}
+.chart .ln.backoff{stroke:var(--good)}
+.chart .ln.ghost{stroke-width:1.5;opacity:.35;stroke-dasharray:4 4}
+.chart .ln.main{stroke-width:3}
+.chart .ln.base{stroke-width:3;opacity:.18}
+.chart .ph{stroke:var(--ink);stroke-width:1;opacity:.45}
+.chart .pdot{stroke:var(--paper);stroke-width:2}
+.chart .brk{stroke:var(--soft);stroke-width:1.5}
+.chart .lowt{fill:var(--good);font-weight:600}
+
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--soft);margin-top:4px;align-items:center}
+.legend .it{display:inline-flex;align-items:center;gap:6px}
+.legend .sw{display:inline-block;width:20px;height:0;border-top:3px solid}
+.legend .sw.f{border-color:var(--bad)}.legend .sw.b{border-color:var(--good)}
+.legend .it.dim{opacity:.55}
+.legend .sw.c{border-top:2px dashed var(--ink)}
+.legend .sw.h{height:10px;border:1.5px solid var(--amber-line);background:var(--amber-fill);width:16px}
+.legend .note2{margin-left:auto}
+
+.cap{margin-top:10px;min-height:48px;padding:8px 12px;border-left:4px solid var(--rule-solid);background:var(--paper-2);
+  border-radius:0 6px 6px 0;font-size:14px;color:var(--ink)}
+.cap.hot{border-left-color:var(--amber-line);background:var(--amber-fill);color:var(--amber-ink)}
+
+.ctl{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--rule-solid);border-radius:8px;overflow:hidden;flex:0 1 auto;min-width:0}
+.seg button{border:0;border-radius:0;background:var(--paper);color:var(--ink);min-height:36px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--rule-solid)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:600}
+.btn{border:1px solid var(--rule-solid);border-radius:8px;background:var(--paper);color:var(--ink);min-height:36px;min-width:36px;
+  padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:focus-visible,.seg button:focus-visible,.scrub:focus-visible{outline:2px solid var(--amber-line);outline-offset:2px}
+.play svg{width:12px;height:12px;fill:currentColor}
+.tl{display:flex;align-items:center;gap:8px;flex:1 1 220px;min-width:0}
+.scrub{flex:1 1 auto;min-width:0;height:36px;accent-color:var(--ink);margin:0}
+.tlab{font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:76px;text-align:right;color:var(--muted)}
+.theme{margin-left:auto}
+
+@media (max-width:639px){
+  .sys{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"w w" "l l" "s d";row-gap:0;column-gap:8px}
+  .lnk{flex-direction:row;padding:6px 0;justify-content:flex-start}
+  .lnk .arrow{width:24px;height:24px;flex:0 0 24px}
+  .lnk .chip{text-align:left}
+  .lnk2{display:none}
+  .seg{width:100%}
+  .seg button{flex:1 1 50%}
+  .theme{margin-left:0}
+}
+@media (prefers-reduced-motion: reduce){
+  .pn,.cap{transition:none}
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="retry-storm" data-fig="retry-storm" data-dur="22" data-rest="9.69" tabindex="0"
+  aria-label="動畫：PostgreSQL failover 約 45 秒期間，1200 個 worker 固定每 100ms 重試，讓打到庫存服務的流量衝到 12000 req/s（容量 4000），資料庫恢復後仍降不下來，約 40 分鐘後才靠人工恢復；切換成指數退避加斷路器時，流量降到不到 100 req/s，資料庫恢復後幾十秒內收尾。">
+
+  <div class="sys">
+    <div class="pn pw" id="pw">
+      <h3>1200 個 worker</h3>
+      <div class="sub">每個點代表 10 個 worker，亮起＝正在打庫存服務</div>
+      <svg class="dots" id="dots" viewBox="0 0 200 60" aria-hidden="true"></svg>
+      <div class="wtxt" id="wtxt"></div>
+    </div>
+
+    <div class="lnk" aria-hidden="false">
+      <svg class="arrow" viewBox="0 0 80 12" preserveAspectRatio="none" aria-hidden="true" id="arrow1"><line x1="0" y1="6" x2="72" y2="6"/><path d="M72 1 L80 6 L72 11 Z"/></svg>
+      <div class="chip" id="chip"></div>
+    </div>
+
+    <div class="pn ps" id="ps">
+      <h3>庫存服務</h3>
+      <div class="big" id="qnum">1500<small>req/s</small></div>
+      <div class="cap-bar" aria-hidden="true"><i id="qbar"></i><u id="capmark"></u></div>
+      <div class="cap-lbl" aria-hidden="true"><span id="caplbl">容量 4000</span></div>
+      <div class="rows">
+        <span class="k">回應</span><span class="v" id="resp"></span>
+        <span class="k">狀態</span><span class="v" id="state"></span>
+      </div>
+      <div class="note" id="snote"></div>
+    </div>
+
+    <div class="lnk2" aria-hidden="true">
+      <svg class="arrow" viewBox="0 0 32 12" preserveAspectRatio="none"><line x1="0" y1="6" x2="24" y2="6"/><path d="M24 1 L32 6 L24 11 Z"/></svg>
+    </div>
+
+    <div class="pn pd" id="pd">
+      <h3>PostgreSQL</h3>
+      <div class="sub">庫存服務讀寫的資料庫</div>
+      <div class="db-st" id="dbst"></div>
+    </div>
+  </div>
+
+  <div class="chart-wrap">
+    <svg class="chart" id="chart" role="img" aria-labelledby="retry-storm-title retry-storm-desc">
+      <title id="retry-storm-title">打到庫存服務的流量</title>
+      <desc id="retry-storm-desc">兩條流量曲線：固定 100ms 重試在 failover 期間衝到 12000 req/s，資料庫恢復後仍停在容量 4000 之上，約 40 分鐘後才回落；指數退避加斷路器則降到不到 100 req/s，資料庫恢復後很快回到平常的 1500 req/s。</desc>
+      <g id="cg"></g>
+    </svg>
+    <div class="legend" id="legend">
+      <span class="it" id="lg-f"><span class="sw f"></span>固定 100ms 重試</span>
+      <span class="it" id="lg-b"><span class="sw b"></span>指數退避＋斷路器</span>
+      <span class="it"><span class="sw c"></span>容量 4000 req/s</span>
+      <span class="note2">曲線形狀為示意，數字取自情境</span>
+    </div>
+  </div>
+
+  <div class="cap" id="cap" aria-live="polite"></div>
+
+  <div class="ctl">
+    <div class="seg" role="group" aria-label="重試寫法">
+      <button type="button" id="m-fixed" aria-pressed="true">固定 100ms 重試</button>
+      <button type="button" id="m-backoff" aria-pressed="false">指數退避＋斷路器</button>
+    </div>
+    <div class="tl">
+      <button type="button" class="btn play" id="play" aria-label="播放"><svg viewBox="0 0 12 12" id="playico"><path d="M2 1 L11 6 L2 11 Z"/></svg><span id="playtxt">播放</span></button>
+      <input type="range" class="scrub" id="scrub" min="0" max="22" step="0.01" value="9.69" aria-label="時間軸">
+      <span class="tlab" id="tlab"></span>
+    </div>
+    <button type="button" class="btn theme" id="theme" aria-label="切換深淺色">深色</button>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var DUR = 22, LIN_S = 18, T0 = -10, T1 = 120, B0 = 2380, B1 = 2460, REST_S = 9.69;
+  var root = document.documentElement;
+  var fig = document.getElementById('retry-storm');
+  var $ = function(id){ return document.getElementById(id); };
+
+  // ---------- time mapping ----------
+  function s2t(s){ return s <= LIN_S ? T0 + (T1 - T0) * s / LIN_S : B0 + (B1 - B0) * (s - LIN_S) / (DUR - LIN_S); }
+  function clamp(x,a,b){ return x < a ? a : x > b ? b : x; }
+  function ss(a,b,x){ x = clamp((x - a) / (b - a), 0, 1); return x * x * (3 - 2 * x); }
+
+  // ---------- traffic models (shape illustrative; labelled numbers from the article) ----------
+  function qFixed(t){
+    if (t < 0) return 1500;
+    if (t < 2400) return 1500 + 10500 * ss(0, 1.2, t);
+    if (t < 2410) return 12000 * (1 - ss(2400, 2408, t));
+    var k = Math.floor((t - 2410) / 8);           // worker 一批一批加回來
+    return Math.min(1500, 300 * (k + 1));
+  }
+  function qBackoff(t){
+    if (t < 0) return 1500;
+    if (t < 45) return 60 + 1440 * Math.exp(-t / 2.2);
+    if (t < 80) return 60 + 2340 * ss(45, 50, t) - 900 * ss(52, 80, t);
+    return 1500;
+  }
+  var Q = { fixed: qFixed, backoff: qBackoff };
+
+  // ---------- backoff schedule: delay = min(cap, base * 2^attempt), base 0.2s, cap 30s, 8 retries ----------
+  var D = [], CUM = [], acc = 0;
+  for (var k = 0; k < 8; k++){ var d = Math.min(30, 0.2 * Math.pow(2, k)); D.push(d); acc += d; CUM.push(acc); }
+
+  // ---------- seeded per-dot values ----------
+  var seed = 20261024;
+  function rnd(){ seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+  var N = 120, COLS = 20, ROWS = 6, dots = [], ph = [], jit = [];
+  var dsvg = $('dots'), NS = 'http://www.w3.org/2000/svg';
+  for (var i = 0; i < N; i++){
+    var c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', 5 + (i % COLS) * 10); c.setAttribute('cy', 5 + Math.floor(i / COLS) * 10); c.setAttribute('r', 3.6);
+    dsvg.appendChild(c); dots.push(c); ph.push(rnd()); jit.push(0.55 + 0.45 * rnd());
+  }
+  var dotState = new Array(N);
+  function frac(x){ return x - Math.floor(x); }
+  function dotFor(mode, t, i){
+    var p = ph[i];
+    if (t < 0) return frac(t * 0.15 + p) < 0.12 ? 'ok' : '';
+    if (mode === 'fixed'){
+      if (t < 2400) return 'fail';
+      if (t < 2410) return 'off';
+      var n = Math.min(N, 24 * (Math.floor((t - 2410) / 8) + 1));
+      if (i >= n) return 'off';
+      return frac(t * 0.15 + p) < 0.12 ? 'ok' : '';
+    }
+    if (t < 45){
+      if (t < 0.3) return 'fail';
+      for (var k = 0; k < 8; k++){
+        var r = CUM[k] * jit[i];
+        if (t >= r && t - r < 1.2) return 'fail';
+        if (r > t) break;
+      }
+      return '';
+    }
+    if (t < 80) return frac(t * 0.3 + p) < 0.3 ? 'ok' : '';
+    return frac(t * 0.15 + p) < 0.12 ? 'ok' : '';
+  }
+
+  // ---------- phases ----------
+  function phase(mode, t){
+    if (t < 0) return 'normal';
+    if (mode === 'fixed'){
+      if (t < 45) return 'outage';
+      if (t < 75) return 'stuck';
+      if (t < 2400) return 'restart';
+      if (t < 2450) return 'manual';
+      return 'recovered';
+    }
+    if (t < 45) return 'backoff';
+    if (t < 80) return 'drain';
+    return 'ok';
+  }
+  var NORMAL_CAP = '平常：worker 大部分時間在做別的事，打到庫存服務約 1500 req/s，容量 4000 很有餘裕。';
+  var P = {
+    fixed: {
+      normal:   {cap:NORMAL_CAP, resp:'約 20ms', state:'正常', note:'', db:'正常', dbc:'up', w:'大部分時間在做別的事，偶爾呼叫一次', hot:false},
+      outage:   {cap:'第 0 秒 PostgreSQL 主節點故障，開始 failover。每個 worker 失敗就睡 0.1 秒再打：1200 個 × 每秒 10 次 = 12000 req/s，平常的 8 倍。', resp:'一直回錯誤', state:'每個請求都失敗', note:'', db:'主節點故障，failover 切換中', dbc:'down', w:'每 100ms 打一次，次次失敗，永不放棄', hot:false},
+      stuck:    {cap:'第 45 秒資料庫已經好了，可是 12000 req/s 還在：連線池瞬間被借光，回應從 20ms 拉長到好幾秒，失敗率接近 100%。', resp:'20ms → 好幾秒', state:'失敗率接近 100%', note:'連線池被借光', db:'切換完成，恢復正常', dbc:'up', w:'等超過 1 秒的逾時就當失敗，100ms 後再打', hot:true},
+      restart:  {cap:'觸發原因消失了，系統卻自己爬不出來（亞穩態故障）：健康檢查也忙到逾時，Kubernetes 開始重啟 pod，剩下的 pod 分到更多流量。', resp:'好幾秒', state:'失敗率接近 100%', note:'健康檢查逾時，pod 被重啟', db:'正常', dbc:'up', w:'照樣每 100ms 打一次', hot:true},
+      manual:   {cap:'約 40 分鐘後，值班工程師把 worker 數量縮到 0，再慢慢一批一批加回來，庫存服務才慢慢恢復。', resp:'慢慢恢復', state:'人工介入', note:'', db:'正常', dbc:'up', w:'縮到 0，再一批一批加回來', hot:false},
+      recovered:{cap:'回到正常。資料庫只切換了 45 秒，訂單卻卡了約 40 分鐘。', resp:'回到正常', state:'正常', note:'', db:'正常', dbc:'up', w:'大部分時間在做別的事，偶爾呼叫一次', hot:false}
+    },
+    backoff: {
+      normal:   {cap:NORMAL_CAP, resp:'約 20ms', state:'正常', note:'', db:'正常', dbc:'up', w:'大部分時間在做別的事，偶爾呼叫一次', hot:false},
+      backoff:  {cap:'改成指數退避：每失敗一次就多等一倍（0.2s、0.4s、0.8s…，單次最多 30s），再加上斷路器擋掉大部分呼叫，流量降到不到 100 req/s。', resp:'回錯誤', state:'失敗，但打的人很少', note:'', db:'主節點故障，failover 切換中', dbc:'down', w:'', hot:false},
+      drain:    {cap:'第 45 秒資料庫恢復，庫存服務沒有被積壓的重試壓垮，幾十秒內就消化完積壓的工作。', resp:'正常', state:'消化積壓中', note:'', db:'切換完成，恢復正常', dbc:'up', w:'重試成功，積壓的訂單陸續處理', hot:false},
+      ok:       {cap:'同樣 45 秒的故障，資料庫恢復後幾十秒內就收尾。', resp:'約 20ms', state:'正常', note:'', db:'正常', dbc:'up', w:'大部分時間在做別的事，偶爾呼叫一次', hot:false}
+    }
+  };
+  function fmtSec(x){ return (Math.round(x * 10) / 10).toString(); }
+  function backoffWorkerText(t){
+    for (var k = 0; k < 8; k++){ if (t < CUM[k]) return '每失敗一次多等一倍：第 ' + (k + 1) + ' 次重試前等約 ' + fmtSec(D[k]) + ' 秒（加抖動）'; }
+    return '8 次用完就送死信佇列，不再重試';
+  }
+
+  // ---------- chart ----------
+  var cg = $('cg'), chart = $('chart');
+  var G = {};   // cached geometry
+  var els = {};
+  function el(tag, attrs, parent, text){
+    var e = document.createElementNS(NS, tag);
+    for (var a in attrs) e.setAttribute(a, attrs[a]);
+    if (text != null) e.textContent = text;
+    (parent || cg).appendChild(e); return e;
+  }
+  function X(t){ return t <= T1 ? G.pl + (t - T0) / (T1 - T0) * G.wl : G.pl + G.wl + G.gap + (clamp(t, B0, B1) - B0) / (B1 - B0) * G.wb; }
+  function Y(q){ return G.pt + (1 - q / 13000) * G.hp; }
+  function pathFor(fn){
+    var d = '', t, first = true;
+    for (t = T0; t <= T1 + 1e-9; t += 0.25){ d += (first ? 'M' : 'L') + X(t).toFixed(1) + ' ' + Y(fn(t)).toFixed(1); first = false; }
+    first = true;
+    for (t = B0; t <= B1 + 1e-9; t += 0.25){ d += (first ? 'M' : 'L') + X(t).toFixed(1) + ' ' + Y(fn(t)).toFixed(1); first = false; }
+    return d;
+  }
+  function buildChart(){
+    var W = Math.max(280, Math.round(chart.getBoundingClientRect().width || fig.clientWidth || 600));
+    var narrow = W < 480;
+    var H = narrow ? 232 : 264;
+    G = { W:W, H:H, pl:48, pr:12, pt:20, pb:28, gap:14 };
+    var plot = W - G.pl - G.pr;
+    G.wl = Math.round(plot * (narrow ? 0.74 : 0.82));
+    G.wb = plot - G.wl - G.gap;
+    G.hp = H - G.pt - G.pb;
+    chart.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    chart.setAttribute('width', W); chart.setAttribute('height', H);
+    while (cg.firstChild) cg.removeChild(cg.firstChild);
+    var base = Y(0), top = Y(13000);
+
+    // failover band
+    el('rect', {class:'band', x:X(0), y:top, width:X(45) - X(0), height:base - top});
+    // amber band (fixed mode): after DB recovered, still above capacity
+    els.hot = el('g', {});
+    el('rect', {class:'hotband', x:X(45), y:Y(12900), width:X(T1) - X(45), height:Y(4000) - Y(12900), rx:4}, els.hot);
+    el('rect', {class:'hotband', x:X(B0), y:Y(12900), width:X(2400) - X(B0), height:Y(4000) - Y(12900), rx:4}, els.hot);
+    var hx = (X(45) + X(T1)) / 2;
+    el('text', {class:'hott', x:hx, y:Y(9300), 'text-anchor':'middle'}, els.hot, '資料庫好了');
+    el('text', {class:'hott', x:hx, y:Y(9300) + 16, 'text-anchor':'middle'}, els.hot, '流量還是降不下來');
+
+    // grid + axes
+    el('line', {class:'ax', x1:G.pl, y1:base + .5, x2:G.pl + G.wl, y2:base + .5});
+    el('line', {class:'ax', x1:G.pl + G.wl + G.gap, y1:base + .5, x2:W - G.pr, y2:base + .5});
+    el('line', {class:'ax', x1:G.pl - .5, y1:top, x2:G.pl - .5, y2:base});
+    [12000, 1500].forEach(function(q){
+      el('line', {class:'grid', x1:G.pl, y1:Y(q) + .5, x2:G.pl + G.wl, y2:Y(q) + .5});
+      el('line', {class:'grid', x1:G.pl + G.wl + G.gap, y1:Y(q) + .5, x2:W - G.pr, y2:Y(q) + .5});
+    });
+    // capacity line
+    el('line', {class:'capl', x1:G.pl, y1:Y(4000), x2:G.pl + G.wl, y2:Y(4000)});
+    el('line', {class:'capl', x1:G.pl + G.wl + G.gap, y1:Y(4000), x2:W - G.pr, y2:Y(4000)});
+    // y labels
+    el('text', {x:G.pl - 6, y:Y(12000) + 4, 'text-anchor':'end'}, null, '12000');
+    el('text', {x:G.pl - 6, y:Y(4000) + 4, 'text-anchor':'end', class:'capt'}, null, '4000');
+    el('text', {x:G.pl - 6, y:Y(1500) + 4, 'text-anchor':'end'}, null, '1500');
+    el('text', {x:G.pl - 6, y:top - 6, 'text-anchor':'end'}, null, 'req/s');
+    el('text', {x:G.pl + G.wl - 4, y:Y(4000) - 6, 'text-anchor':'end', class:'capt'}, null, '容量 4000');
+    // band label
+    var bx = (X(0) + X(45)) / 2;
+    el('text', {x:bx, y:Y(10600), 'text-anchor':'middle'}, null, 'failover');
+    el('text', {x:bx, y:Y(10600) + 15, 'text-anchor':'middle'}, null, '約 45 秒');
+    // x labels
+    el('text', {x:X(-5), y:base + 18, 'text-anchor':'middle'}, null, '平常');
+    el('text', {x:X(45), y:base + 18, 'text-anchor':'middle'}, null, '45 秒');
+    el('text', {x:X(90), y:base + 18, 'text-anchor':'middle'}, null, '90 秒');
+    el('text', {x:G.pl + G.wl + G.gap + G.wb / 2, y:base + 18, 'text-anchor':'middle'}, null, '約 40 分');
+    el('line', {class:'ax', x1:X(45), y1:base, x2:X(45), y2:base + 4});
+    el('line', {class:'ax', x1:X(90), y1:base, x2:X(90), y2:base + 4});
+    // axis break marks
+    var g0 = G.pl + G.wl, g1 = g0 + G.gap;
+    [g0 + 3, g1 - 3].forEach(function(x){
+      el('line', {class:'brk', x1:x - 3, y1:base + 5, x2:x + 3, y2:base - 5});
+    });
+    // backoff low label
+    els.low = el('text', {class:'lowt', x:X(24), y:Y(1900), 'text-anchor':'middle'}, null, '不到 100 req/s');
+
+    // curves
+    els.ghost = el('path', {class:'ln ghost'});
+    els.base = el('path', {class:'ln base'});
+    var cp = el('clipPath', {id:'retry-storm-clip'});
+    els.clipL = el('rect', {x:0, y:0, width:0, height:H}, cp);
+    els.clipB = el('rect', {x:0, y:0, width:0, height:H}, cp);
+    els.main = el('path', {class:'ln main', 'clip-path':'url(#retry-storm-clip)'});
+    G.pf = pathFor(qFixed); G.pb2 = pathFor(qBackoff);
+    // playhead
+    els.ph = el('line', {class:'ph', x1:0, y1:top, x2:0, y2:base});
+    els.pdot = el('circle', {class:'pdot', r:5, cx:0, cy:0});
+    lastMode = null;
+  }
+
+  // ---------- render ----------
+  var mode = 'fixed', s = REST_S, lastMode = null, lastPhase = null;
+  function render(){
+    var t = s2t(s);
+    var q = Q[mode](t);
+    var pk = phase(mode, t), p = P[mode][pk];
+    var other = mode === 'fixed' ? 'backoff' : 'fixed';
+
+    if (lastMode !== mode){
+      els.main.setAttribute('d', mode === 'fixed' ? G.pf : G.pb2);
+      els.base.setAttribute('d', mode === 'fixed' ? G.pf : G.pb2);
+      els.ghost.setAttribute('d', other === 'fixed' ? G.pf : G.pb2);
+      els.main.setAttribute('class', 'ln main ' + mode);
+      els.base.setAttribute('class', 'ln base ' + mode);
+      els.ghost.setAttribute('class', 'ln ghost ' + other);
+      els.pdot.style.fill = mode === 'fixed' ? 'var(--bad)' : 'var(--good)';
+      $('m-fixed').setAttribute('aria-pressed', mode === 'fixed');
+      $('m-backoff').setAttribute('aria-pressed', mode === 'backoff');
+      $('lg-f').classList.toggle('dim', mode !== 'fixed');
+      $('lg-b').classList.toggle('dim', mode !== 'backoff');
+      lastPhase = null;
+    }
+    // progress clip
+    var xt = X(t);
+    if (t <= T1){ els.clipL.setAttribute('width', xt); els.clipB.setAttribute('width', 0); }
+    else { els.clipL.setAttribute('width', G.pl + G.wl + 1); els.clipB.setAttribute('x', G.pl + G.wl + G.gap - 1); els.clipB.setAttribute('width', xt - (G.pl + G.wl + G.gap) + 1); }
+    els.ph.setAttribute('x1', xt); els.ph.setAttribute('x2', xt);
+    els.pdot.setAttribute('cx', xt); els.pdot.setAttribute('cy', Y(q));
+    var showHot = mode === 'fixed' && t >= 45;
+    els.hot.style.display = showHot ? '' : 'none';
+    els.low.style.display = (mode === 'backoff' && t >= 8) ? '' : 'none';
+
+    // worker dots
+    for (var i = 0; i < N; i++){
+      var st = dotFor(mode, t, i);
+      if (st !== dotState[i]){ dots[i].setAttribute('class', st); dotState[i] = st; }
+    }
+
+    // readouts
+    var qr = q < 100 ? '< 100' : String(Math.round(q / 100) * 100);
+    $('qnum').firstChild.nodeValue = qr;
+    var bar = $('qbar'); bar.style.width = (Math.min(q, 13000) / 13000 * 100).toFixed(2) + '%';
+    bar.className = q > 4000 ? 'over' : '';
+    var wt = (mode === 'backoff' && pk === 'backoff') ? backoffWorkerText(t) : p.w;
+    if ($('wtxt').textContent !== wt) $('wtxt').textContent = wt;
+
+    var chipTxt, chipOn = false;
+    if (mode === 'fixed') chipTxt = '沒有斷路器';
+    else if (t >= 1 && t < 45){ chipTxt = '斷路器：先停手，擋下大部分呼叫'; chipOn = true; }
+    else chipTxt = '斷路器：放行';
+    if ($('chip').textContent !== chipTxt) $('chip').textContent = chipTxt;
+    $('chip').classList.toggle('on', chipOn);
+
+    if (pk !== lastPhase){
+      $('resp').textContent = p.resp; $('state').textContent = p.state; $('snote').textContent = p.note;
+      $('dbst').textContent = p.db; $('dbst').className = 'db-st ' + p.dbc;
+      $('cap').textContent = p.cap; $('cap').classList.toggle('hot', p.hot);
+      $('ps').classList.toggle('hot', p.hot);
+      lastPhase = pk;
+    }
+    lastMode = mode;
+    // time label
+    var tl = t < 0 ? '平常' : (t <= T1 ? '第 ' + Math.floor(t) + ' 秒' : '約 40 分鐘後');
+    if ($('tlab').textContent !== tl) $('tlab').textContent = tl;
+    var sc = $('scrub'); if (Math.abs(parseFloat(sc.value) - s) > 0.005) sc.value = s.toFixed(2);
+  }
+  function placeCapMark(){
+    var pct = 4000 / 13000 * 100;
+    $('capmark').style.left = 'calc(' + pct.toFixed(2) + '% - 1px)';
+    $('caplbl').style.left = pct.toFixed(2) + '%';
+  }
+
+  // ---------- playback ----------
+  var playing = false, visible = true, raf = 0, lastTs = 0;
+  function setPlayUI(){
+    $('play').setAttribute('aria-label', playing ? '暫停' : '播放');
+    $('playtxt').textContent = playing ? '暫停' : '播放';
+    $('playico').innerHTML = playing ? '<path d="M2 1 H5 V11 H2 Z M7 1 H10 V11 H7 Z"/>' : '<path d="M2 1 L11 6 L2 11 Z"/>';
+  }
+  function frame(ts){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0;
+    lastTs = ts;
+    s += dt;
+    if (s >= DUR){ s = DUR; playing = false; setPlayUI(); render(); return; }
+    render();
+    raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (!raf && playing && visible){ lastTs = 0; raf = requestAnimationFrame(frame); } }
+  function play(){ if (s >= DUR - 0.01) s = 0; playing = true; setPlayUI(); arm(); }
+  function pause(){ playing = false; setPlayUI(); if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function seek(v){ pause(); s = clamp(+v || 0, 0, DUR); render(); }
+
+  $('play').addEventListener('click', function(){ playing ? pause() : play(); });
+  $('scrub').addEventListener('input', function(e){ pause(); s = clamp(parseFloat(e.target.value) || 0, 0, DUR); render(); });
+  $('m-fixed').addEventListener('click', function(){ mode = 'fixed'; render(); });
+  $('m-backoff').addEventListener('click', function(){ mode = 'backoff'; render(); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    if (e.key === ' ' || e.key === 'k'){ e.preventDefault(); playing ? pause() : play(); }
+    else if (e.key === 'ArrowRight'){ e.preventDefault(); seek(s + 0.5); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(s - 0.5); }
+  });
+
+  // ---------- theme ----------
+  var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  function isDark(){ var a = root.getAttribute('data-theme'); return a ? a === 'dark' : !!(mq && mq.matches); }
+  function syncThemeBtn(){ $('theme').textContent = isDark() ? '淺色' : '深色'; }
+  $('theme').addEventListener('click', function(){ root.setAttribute('data-theme', isDark() ? 'light' : 'dark'); });
+  if (mq && mq.addEventListener) mq.addEventListener('change', syncThemeBtn);
+  new MutationObserver(syncThemeBtn).observe(root, {attributes:true, attributeFilter:['data-theme']});
+
+  // ---------- visibility + resize ----------
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(en){
+      visible = en[0].isIntersecting;
+      if (visible) arm(); else if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    }, {rootMargin:'120px'}).observe(fig);
+  }
+  var lastW = 0, lastH = 0;
+  function postHeight(){
+    var h = Math.ceil(document.documentElement.scrollHeight);
+    if (h !== lastH && window.parent && window.parent !== window){
+      lastH = h; try { window.parent.postMessage({type:'figure-height', id:'retry-storm', height:h}, '*'); } catch(e){}
+    }
+  }
+  function onResize(){
+    var w = Math.round(fig.clientWidth);
+    if (w === lastW) return;
+    lastW = w; buildChart(); render(); requestAnimationFrame(postHeight);
+  }
+  if ('ResizeObserver' in window) new ResizeObserver(onResize).observe(fig);
+  else window.addEventListener('resize', onResize);
+
+  // ---------- public ----------
+  window.DUR = DUR;
+  window.seek = seek;
+  window.setMode = function(m){ if (Q[m]){ mode = m; render(); } };
+
+  placeCapMark(); syncThemeBtn(); setPlayUI();
+  lastW = Math.round(fig.clientWidth); buildChart(); render();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ postHeight(); });
+  requestAnimationFrame(postHeight);
+})();
+</script>
+</body>
+</html>

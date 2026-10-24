@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>建索引鎖表連鎖</title>
+<style>
+:root {
+  --paper: #ffffff;
+  --panel: #f6f7f9;
+  --ink: #1f2430;
+  --muted: #4f5d75;
+  --soft: #5a6580;
+  --rule: rgba(31, 36, 48, 0.14);
+  --rule-strong: #b8bec9;
+  --idle: #e3e7ee;
+  --busy: #2e5aa8;
+  --busy-fill: #dbe6f7;
+  --hot-fill: #fde68a;
+  --hot-line: #b45309;
+  --hot-ink: #7c2d12;
+  --bad-fill: #fde2e1;
+  --bad-line: #b42318;
+  --bad-ink: #9a1c12;
+  --ok-fill: #dcf2e3;
+  --ok-line: #1e7a46;
+  --ok-ink: #14532d;
+  --track: #d5dae3;
+  --focus: #2e5aa8;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1e2129;
+    --panel: #272b36;
+    --ink: #eceef2;
+    --muted: #b7bfcd;
+    --soft: #9aa3b5;
+    --rule: rgba(236, 238, 242, 0.14);
+    --rule-strong: #4a5162;
+    --idle: #3a4050;
+    --busy: #7ea6e8;
+    --busy-fill: #2b3a57;
+    --hot-fill: #5a3a0c;
+    --hot-line: #f59e0b;
+    --hot-ink: #fde68a;
+    --bad-fill: #4a1f1f;
+    --bad-line: #f87171;
+    --bad-ink: #fecaca;
+    --ok-fill: #1d3a2a;
+    --ok-line: #4ade80;
+    --ok-ink: #bbf7d0;
+    --track: #3a4050;
+    --focus: #7ea6e8;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1e2129;
+  --panel: #272b36;
+  --ink: #eceef2;
+  --muted: #b7bfcd;
+  --soft: #9aa3b5;
+  --rule: rgba(236, 238, 242, 0.14);
+  --rule-strong: #4a5162;
+  --idle: #3a4050;
+  --busy: #7ea6e8;
+  --busy-fill: #2b3a57;
+  --hot-fill: #5a3a0c;
+  --hot-line: #f59e0b;
+  --hot-ink: #fde68a;
+  --bad-fill: #4a1f1f;
+  --bad-line: #f87171;
+  --bad-ink: #fecaca;
+  --ok-fill: #1d3a2a;
+  --ok-line: #4ade80;
+  --ok-ink: #bbf7d0;
+  --track: #3a4050;
+  --focus: #7ea6e8;
+  color-scheme: dark;
+}
+html, body { margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Heiti TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 16px;
+  box-sizing: border-box;
+}
+.fig { margin: 0; outline: none; max-width: 1040px; }
+.fig:focus-visible { box-shadow: 0 0 0 2px var(--focus); border-radius: 8px; }
+.fig * { box-sizing: border-box; }
+.mono { font-family: ui-monospace, "SFMono-Regular", Consolas, "Cascadia Mono", "Noto Sans Mono CJK TC", monospace; }
+
+/* controls */
+.ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+.btn {
+  min-height: 40px; min-width: 40px; padding: 0 12px;
+  border: 1px solid var(--rule-strong); border-radius: 8px;
+  background: var(--panel); color: var(--ink);
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.btn.play { display: inline-flex; align-items: center; gap: 6px; }
+.btn.play svg { width: 14px; height: 14px; fill: currentColor; }
+.scrub { flex: 1 1 160px; min-width: 140px; height: 32px; accent-color: var(--hot-line); }
+.phases { display: flex; gap: 8px; }
+.phases .btn { padding: 0 10px; }
+.phases .btn[aria-pressed="true"] { background: var(--hot-fill); border-color: var(--hot-line); color: var(--hot-ink); }
+.theme { margin-left: auto; font-weight: 500; }
+.embedded .theme { display: none; }
+
+/* stage */
+.stage { display: grid; grid-template-columns: 1fr; gap: 0; }
+.col { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px; }
+.col h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.col h3 small { font-size: 13px; font-weight: 500; color: var(--soft); }
+.col h3 .site { font-size: 13px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--ok-line); color: var(--ok-ink); background: var(--ok-fill); }
+.col h3 .site.down { border-color: var(--bad-line); color: var(--bad-ink); background: var(--bad-fill); }
+
+.link { position: relative; display: flex; align-items: center; justify-content: center; height: 36px; color: var(--muted); font-size: 12px; }
+.link .line { position: absolute; left: 50%; top: 2px; bottom: 2px; width: 2px; margin-left: -1px; background: var(--rule-strong); }
+.link .line::after { content: ""; position: absolute; left: -5px; bottom: -2px; border: 6px solid transparent; border-top: 7px solid var(--rule-strong); border-bottom: 0; }
+.link .lbl { position: relative; background: var(--paper); padding: 0 6px; margin-left: 64px; white-space: nowrap; }
+.link .pulse { position: absolute; left: 50%; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--busy); top: 0; }
+.link.blocked .pulse { background: var(--bad-line); }
+.link .x { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; background: var(--bad-fill); color: var(--bad-ink); border: 1.5px solid var(--bad-line); font-size: 12px; font-weight: 700; display: none; align-items: center; justify-content: center; line-height: 1; }
+.link.blocked .x { display: flex; }
+
+/* requests */
+.rqs { display: grid; gap: 8px; }
+.rq { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px; min-height: 48px; padding: 6px 8px; border-radius: 6px; background: var(--paper); border: 1px solid var(--rule); }
+.rq .nm { font-size: 14px; font-weight: 600; }
+.rq .tag { display: block; font-size: 12px; color: var(--soft); font-weight: 500; margin-top: 2px; }
+.rq .tag.w { color: var(--hot-ink); }
+.pill { font-size: 13px; font-weight: 500; padding: 3px 8px; border-radius: 999px; border: 1.5px solid var(--rule-strong); white-space: nowrap; justify-self: end; }
+.pill.ok { border-color: var(--ok-line); color: var(--ok-ink); background: var(--ok-fill); }
+.pill.hot { border-color: var(--hot-line); color: var(--hot-ink); background: var(--hot-fill); }
+.pill.bad { border-color: var(--bad-line); color: var(--bad-ink); background: var(--bad-fill); }
+.pill.run { border-color: var(--busy); color: var(--ink); background: var(--busy-fill); }
+
+/* pool */
+.slots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.slot { aspect-ratio: 1; border-radius: 6px; background: var(--idle); border: 1.5px solid var(--rule); position: relative; }
+.slot.busy { background: var(--busy-fill); border-color: var(--busy); }
+.slot.stuck { background: var(--hot-fill); border: 2px solid var(--hot-line); }
+.slot.stuck::after { content: ""; position: absolute; left: 22%; right: 22%; top: 46%; height: 3px; border-radius: 2px; background: var(--hot-line); }
+.poolstate { margin-top: 10px; font-size: 14px; font-weight: 600; min-height: 20px; }
+.poolstate.hot { color: var(--hot-ink); }
+.poolstate.bad { color: var(--bad-ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 12px; color: var(--soft); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; border: 1.5px solid var(--rule); background: var(--idle); }
+.legend i.b { background: var(--busy-fill); border-color: var(--busy); }
+.legend i.s { background: var(--hot-fill); border: 2px solid var(--hot-line); }
+
+/* database */
+.tbl { border-radius: 6px; border: 1.5px solid var(--rule-strong); background: var(--paper); padding: 10px; position: relative; }
+.tbl .tn { font-size: 14px; font-weight: 600; }
+.tbl .tn .mono { font-size: 14px; }
+.tbl .rows { font-size: 13px; color: var(--soft); margin-left: 4px; font-weight: 500; }
+.lock { margin-top: 8px; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 2px solid var(--hot-line); background: var(--hot-fill); color: var(--hot-ink); }
+.lock svg { width: 16px; height: 16px; flex: none; }
+.lock svg path, .lock svg rect { stroke: currentColor; fill: none; stroke-width: 2; }
+.lock.open { border: 1.5px solid var(--ok-line); background: var(--ok-fill); color: var(--ok-ink); }
+.build { margin-top: 10px; }
+.build .bl { font-size: 13px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.build .bl .mono { font-size: 12px; }
+.bar { margin-top: 4px; height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
+.bar b { display: block; height: 100%; width: 0; background: var(--busy); }
+.bar.done b { background: var(--ok-line); }
+.queue { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.dots { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; min-height: 12px; }
+.dots span { width: 12px; height: 12px; border-radius: 50%; background: var(--hot-fill); border: 2px solid var(--hot-line); }
+.dots span.go { background: var(--ok-fill); border-color: var(--ok-line); }
+.reads { margin-top: 8px; font-size: 13px; color: var(--muted); }
+
+/* readout */
+.readout { margin-top: 12px; border-left: 4px solid var(--hot-line); padding: 8px 12px; background: var(--panel); border-radius: 0 8px 8px 0; }
+.readout .ph { font-size: 16px; font-weight: 600; }
+.readout .ph .when { font-weight: 500; color: var(--soft); font-size: 14px; margin-left: 6px; }
+.readout .what { font-size: 15px; margin: 4px 0 0; line-height: 1.55; }
+.readout .user { font-size: 14px; margin: 6px 0 0; color: var(--muted); line-height: 1.5; }
+.readout .user strong { color: var(--ink); }
+
+@media (min-width: 680px) {
+  .stage { grid-template-columns: minmax(0, 1.15fr) 56px minmax(0, 0.9fr) 56px minmax(0, 1.1fr); align-items: stretch; }
+  .slots { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .link { height: auto; flex-direction: column; }
+  .link .line { left: 2px; right: 2px; top: 50%; bottom: auto; width: auto; height: 2px; margin: -1px 0 0; }
+  .link .line::after { left: auto; right: -2px; bottom: auto; top: -5px; border: 6px solid transparent; border-left: 7px solid var(--rule-strong); border-right: 0; }
+  .link .lbl { margin: 0 0 40px; white-space: normal; text-align: center; width: 56px; padding: 0; line-height: 1.3; background: transparent; }
+  .link .pulse { top: 50%; margin: -4px 0 0; left: 0; }
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="create-index-lock" data-dur="16" data-rest="10" tabindex="0"
+  aria-label="動畫：晚上 9 點對 3000 萬列的 orders 下一般 CREATE INDEX。整張表被鎖住、禁止寫入，寫入請求排隊等鎖並各自佔著一條連線；連線池從正常、越佔越多到被佔滿，連不寫 orders 的 API 也借不到連線而失敗；約 8 分鐘後索引建完、鎖放開，連線才開始釋放。">
+
+  <div class="ctl">
+    <button class="btn play" id="play" type="button" aria-label="播放">
+      <svg viewBox="0 0 14 14" aria-hidden="true"><path id="playIcon" d="M3 1.5v11l9-5.5z"/></svg><span id="playTxt">播放</span>
+    </button>
+    <input class="scrub" id="scrub" type="range" min="0" max="16" step="0.05" value="10" aria-label="時間軸，拖曳看 T1 到 T4">
+    <div class="phases" role="group" aria-label="跳到某個時間點">
+      <button class="btn" type="button" data-p="0" aria-pressed="false">T1</button>
+      <button class="btn" type="button" data-p="1" aria-pressed="false">T2</button>
+      <button class="btn" type="button" data-p="2" aria-pressed="false">T3</button>
+      <button class="btn" type="button" data-p="3" aria-pressed="false">T4</button>
+    </div>
+    <button class="btn theme" id="theme" type="button" aria-label="切換深淺色">深／淺</button>
+  </div>
+
+  <div class="stage">
+    <section class="col" aria-label="應用程式收到的請求">
+      <h3>應用程式的請求 <span class="site" id="site">網站還打得開</span></h3>
+      <div class="rqs">
+        <div class="rq"><div><span class="nm">下單</span><span class="tag w">要寫 orders</span></div><span class="pill" data-rq="w"></span></div>
+        <div class="rq"><div><span class="nm">付款回呼</span><span class="tag w">要寫 orders</span></div><span class="pill" data-rq="w"></span></div>
+        <div class="rq"><div><span class="nm">訂單狀態更新</span><span class="tag w">要寫 orders</span></div><span class="pill" data-rq="w"></span></div>
+        <div class="rq"><div><span class="nm">我的訂單</span><span class="tag">只讀 orders</span></div><span class="pill" data-rq="r"></span></div>
+        <div class="rq"><div><span class="nm">其他 API</span><span class="tag">不碰 orders</span></div><span class="pill" data-rq="o"></span></div>
+      </div>
+    </section>
+
+    <div class="link" id="link1" aria-hidden="true"><span class="line"></span><span class="pulse" id="pulse1"></span><span class="x">✕</span><span class="lbl">借一條連線</span></div>
+
+    <section class="col" aria-label="連線池">
+      <h3>連線池 <small>預先開好、輪流借用</small></h3>
+      <div class="slots" id="slots"></div>
+      <div class="poolstate" id="poolstate"></div>
+      <div class="legend"><span><i></i>空閒</span><span><i class="b"></i>借出去用一下</span><span><i class="s"></i>卡住等鎖，不放</span></div>
+    </section>
+
+    <div class="link" id="link2" aria-hidden="true"><span class="line"></span><span class="pulse" id="pulse2"></span><span class="lbl">送出 SQL</span></div>
+
+    <section class="col" aria-label="PostgreSQL">
+      <h3>PostgreSQL</h3>
+      <div class="tbl">
+        <div class="tn"><span class="mono">orders</span><span class="rows">3000 萬列</span></div>
+        <div class="lock" id="lock">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path id="shackle" d="M5 7V5a3 3 0 0 1 6 0v2"/></svg>
+          <span id="lockTxt">整張表鎖住：禁止寫入，讀取可以</span>
+        </div>
+        <div class="build">
+          <div class="bl"><span class="mono">CREATE INDEX</span><span id="buildTxt">讀 3000 萬列、建索引中</span></div>
+          <div class="bar" id="bar"><b id="barFill"></b></div>
+        </div>
+        <div class="queue"><span id="queueTxt">排隊等鎖的寫入</span><div class="dots" id="dots"></div></div>
+        <div class="reads" id="reads">讀取：照常</div>
+      </div>
+    </section>
+  </div>
+
+  <figcaption class="readout" aria-live="polite">
+    <div class="ph"><span id="ph">T3</span><span class="when" id="when"></span></div>
+    <p class="what" id="what"></p>
+    <p class="user" id="user"></p>
+  </figcaption>
+</figure>
+
+<script>
+(function () {
+  "use strict";
+  var fig = document.getElementById("fig");
+  var DUR = parseFloat(fig.dataset.dur);
+  var REST = parseFloat(fig.dataset.rest);
+  var N = 12;
+  var PH = [0, 4, 8, 12];
+  var root = document.documentElement;
+
+  try { if (window.self !== window.top) root.classList.add("embedded"); } catch (e) { root.classList.add("embedded"); }
+
+  var slotsEl = document.getElementById("slots");
+  var dotsEl = document.getElementById("dots");
+  var slots = [], dots = [];
+  for (var i = 0; i < N; i++) {
+    var s = document.createElement("div"); s.className = "slot"; slotsEl.appendChild(s); slots.push(s);
+    var d = document.createElement("span"); dotsEl.appendChild(d); dots.push(d);
+  }
+  var $ = function (id) { return document.getElementById(id); };
+  var pills = { w: fig.querySelectorAll('[data-rq="w"]'), r: fig.querySelectorAll('[data-rq="r"]'), o: fig.querySelectorAll('[data-rq="o"]') };
+  var phaseBtns = fig.querySelectorAll(".phases .btn");
+
+  var TEXT = [
+    { ph: "T1", when: "21:00 尖峰",
+      what: "值班工程師送出一般的 CREATE INDEX，開始讀 3000 萬列、建索引。整張 orders 被鎖住：讀取照常，寫入開始排隊等鎖。",
+      user: "連線池：還正常。" },
+    { ph: "T2", when: "索引還在建",
+      what: "每一個卡在鎖前面的寫入請求，都佔著一條連線不放；被佔住的連線越來越多。",
+      user: "使用者看到：下不了單、付款沒有結果。" },
+    { ph: "T3", when: "索引還在建",
+      what: "連線池被佔滿。新的請求借不到連線，連只讀 orders、甚至不碰 orders 的 API 也開始失敗。",
+      user: "使用者看到：整個網站打不開。" },
+    { ph: "T4", when: "約 8 分鐘後",
+      what: "索引建完，鎖放開。排隊的寫入才繼續執行，卡住的連線開始釋放。",
+      user: "<strong>修法：</strong>改成 CREATE INDEX CONCURRENTLY（建立期間不擋寫入），並挑離峰時段執行。" }
+  ];
+  var PILL = {
+    w: [["排隊等鎖", "hot"], ["卡住，佔著連線", "hot"], ["借不到連線", "bad"], ["繼續執行", "run"]],
+    r: [["照常", "ok"], ["照常", "ok"], ["借不到連線", "bad"], ["連線釋放中", "run"]],
+    o: [["照常", "ok"], ["照常", "ok"], ["借不到連線", "bad"], ["連線釋放中", "run"]]
+  };
+  var POOL = [["正常", ""], ["被佔住的連線越來越多", "hot"], ["被佔滿，借不到連線", "bad"], ["卡住的連線開始釋放", ""]];
+
+  function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
+  function phaseOf(t) { return t < 4 ? 0 : t < 8 ? 1 : t < 12 ? 2 : 3; }
+  function stuckAt(t) {
+    if (t < 4) return Math.floor(clamp((t - 1.5) / 2.5, 0, 1) * 1.999);       // 0 → 1
+    if (t < 8) return 1 + Math.floor(clamp((t - 4) / 3.6, 0, 1) * 9.999);     // 1 → 10
+    if (t < 12) return t < 8.6 ? 11 : N;                                       // 被佔滿
+    return Math.round(N * (1 - clamp((t - 12.4) / 2.8, 0, 1)));                // 12 → 0
+  }
+  function busyAt(t, i) {                     // 空閒格偶爾被借出去用一下（決定式）
+    var v = Math.sin(t * 2.3 + i * 1.91) * Math.sin(t * 0.7 + i * 0.83);
+    return v > 0.45;
+  }
+  function setText(el, v) { if (el._v !== v) { el._v = v; el.textContent = v; } }
+  function setHTML(el, v) { if (el._v !== v) { el._v = v; el.innerHTML = v; } }
+  function setCls(el, v) { if (el._c !== v) { el._c = v; el.className = v; } }
+
+  var lastPhase = -1;
+  function draw(t) {
+    var p = phaseOf(t);
+    var stuck = stuckAt(t);
+    var locked = t < 12;
+    var prog = clamp(t / 12, 0, 1);
+
+    for (var i = 0; i < N; i++) {
+      var cls = "slot";
+      if (i < stuck) cls += " stuck";
+      else if (p !== 2 && busyAt(t, i)) cls += " busy";
+      setCls(slots[i], cls);
+      setCls(dots[i], p === 3 ? "go" : "");
+      var show = i < stuck;
+      if (dots[i]._s !== show) { dots[i]._s = show; dots[i].style.display = show ? "" : "none"; }
+    }
+
+    if (p !== lastPhase) {
+      lastPhase = p;
+      var T = TEXT[p];
+      setText($("ph"), T.ph); setText($("when"), T.when); setText($("what"), T.what); setHTML($("user"), T.user);
+      ["w", "r", "o"].forEach(function (k) {
+        pills[k].forEach(function (el) { setText(el, PILL[k][p][0]); setCls(el, "pill " + PILL[k][p][1]); });
+      });
+      setText($("poolstate"), POOL[p][0]); setCls($("poolstate"), "poolstate " + POOL[p][1]);
+      var site = $("site");
+      setText(site, p === 2 ? "整個網站掛掉" : p === 3 ? "連線開始釋放" : "網站還打得開");
+      setCls(site, p === 2 ? "site down" : "site");
+      phaseBtns.forEach(function (b, k) { b.setAttribute("aria-pressed", k === p ? "true" : "false"); });
+      setCls($("lock"), locked ? "lock" : "lock open");
+      setText($("lockTxt"), locked ? "整張表鎖住：禁止寫入，讀取可以" : "鎖放開了：寫入可以繼續");
+      $("shackle").setAttribute("d", locked ? "M5 7V5a3 3 0 0 1 6 0v2" : "M5 7V5a3 3 0 0 1 6 0");
+      setText($("buildTxt"), p === 3 ? "建完" : p === 0 ? "讀 3000 萬列、建索引中" : "還在建");
+      setCls($("bar"), p === 3 ? "bar done" : "bar");
+      setText($("queueTxt"), p === 3 ? "排隊的寫入繼續執行" : "排隊等鎖的寫入（每一筆佔一條連線）");
+      setText($("reads"), p === 2 ? "讀取：鎖沒擋，但請求借不到連線，進不來" : p === 3 ? "讀取：照常" : "讀取：照常（一般 CREATE INDEX 不擋讀）");
+      setCls($("link1"), p === 2 ? "link blocked" : "link");
+    }
+    $("barFill").style.width = (prog * 100).toFixed(1) + "%";
+    // 連接線上的小點：示意請求一直進來
+    var f = (t * 0.9) % 1;
+    var horiz = window.matchMedia("(min-width: 680px)").matches;
+    var p1 = $("pulse1"), p2 = $("pulse2");
+    if (horiz) { p1.style.left = (f * 90) + "%"; p1.style.top = ""; p2.style.left = (((f + 0.5) % 1) * 90) + "%"; p2.style.top = ""; }
+    else { p1.style.top = (f * 70) + "%"; p1.style.left = ""; p2.style.top = (((f + 0.5) % 1) * 70) + "%"; p2.style.left = ""; }
+    // T3 時請求送不進連線池；鎖住時寫入送不到表（小點停在線上一半）
+    p2.style.visibility = (p === 2) ? "hidden" : "";
+    $("scrub").value = t;
+  }
+
+  // ---- clock ----
+  var t = REST, playing = false, visible = true, raf = 0, last = 0;
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  function setPlaying(v) {
+    playing = v;
+    $("play").setAttribute("aria-label", v ? "暫停" : "播放");
+    $("playTxt").textContent = v ? "暫停" : "播放";
+    $("playIcon").setAttribute("d", v ? "M3 1.5h3v11H3zM8 1.5h3v11H8z" : "M3 1.5v11l9-5.5z");
+    arm();
+  }
+  function arm() { if (playing && visible && !raf) { last = 0; raf = requestAnimationFrame(tick); } }
+  function tick(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    if (last) t += Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (t >= DUR) { t = DUR; draw(t); setPlaying(false); return; }
+    draw(t);
+    raf = requestAnimationFrame(tick);
+  }
+  function seek(x) { t = clamp(+x || 0, 0, DUR); if (playing) setPlaying(false); draw(t); }
+  window.seek = seek;
+  window.DUR = DUR;
+  window.timeline = function () { return { dur: DUR, rest: REST, keys: PH.slice() }; };
+
+  $("play").addEventListener("click", function () {
+    if (playing) { setPlaying(false); return; }
+    if (t >= DUR - 0.05 || Math.abs(t - REST) < 0.001) t = 0;
+    setPlaying(true);
+  });
+  $("scrub").addEventListener("input", function (e) { seek(parseFloat(e.target.value)); });
+  phaseBtns.forEach(function (b) { b.addEventListener("click", function () { seek(PH[+b.dataset.p] + 2); }); });
+  $("theme").addEventListener("click", function () {
+    var dark = root.getAttribute("data-theme") ? root.getAttribute("data-theme") === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+  fig.addEventListener("keydown", function (e) {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") return;
+    if (e.key === " " || e.key === "k") { e.preventDefault(); $("play").click(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); seek(t + 0.5); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); seek(t - 0.5); }
+    else if (e.key >= "1" && e.key <= "4") { e.preventDefault(); seek(PH[+e.key - 1] + 2); }
+  });
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(function (es) { visible = es[0].isIntersecting; arm(); }, { rootMargin: "120px" }).observe(fig);
+  }
+  var mq = window.matchMedia("(min-width: 680px)");
+  var redraw = function () { draw(t); };
+  if (mq.addEventListener) mq.addEventListener("change", redraw);
+  window.addEventListener("resize", redraw);
+  reduce.addEventListener && reduce.addEventListener("change", function () { if (reduce.matches) seek(REST); });
+
+  draw(t); // 不自動播放：停在 T3（連線池被佔滿），按播放從 T1 開始
+})();
+</script>
+</body>
+</html>

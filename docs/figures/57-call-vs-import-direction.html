@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>呼叫與依賴方向</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f3f5f9;
+    --zone-in: #eef2f8;
+    --zone-in-edge: rgba(46, 90, 168, 0.28);
+    --zone-out-edge: rgba(31, 36, 48, 0.22);
+    --node: #ffffff;
+    --ink: #1f2430;
+    --muted: #4f5d75;
+    --soft: #5f6878;
+    --rule: rgba(31, 36, 48, 0.14);
+    --rule-strong: rgba(31, 36, 48, 0.34);
+    --call: #2e5aa8;
+    --dep: #4f5d75;
+    --hot-fill: #fde68a;
+    --hot-stroke: #b45309;
+    --hot-ink: #78350f;
+    --no: #b42318;
+    --btn: #2e5aa8;
+    --btn-ink: #ffffff;
+    --font: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, Menlo, "Noto Sans TC", "Microsoft JhengHei", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1e2129;
+      --panel: #272b36;
+      --zone-in: #252b38;
+      --zone-in-edge: rgba(122, 165, 234, 0.34);
+      --zone-out-edge: rgba(232, 234, 240, 0.22);
+      --node: #1e2129;
+      --ink: #e8eaf0;
+      --muted: #b4bccb;
+      --soft: #a3abbc;
+      --rule: rgba(232, 234, 240, 0.14);
+      --rule-strong: rgba(232, 234, 240, 0.36);
+      --call: #7aa5ea;
+      --dep: #b4bccb;
+      --hot-fill: #4a3410;
+      --hot-stroke: #f59e0b;
+      --hot-ink: #fde68a;
+      --no: #f97066;
+      --btn: #7aa5ea;
+      --btn-ink: #10141c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1e2129;
+    --panel: #272b36;
+    --zone-in: #252b38;
+    --zone-in-edge: rgba(122, 165, 234, 0.34);
+    --zone-out-edge: rgba(232, 234, 240, 0.22);
+    --node: #1e2129;
+    --ink: #e8eaf0;
+    --muted: #b4bccb;
+    --soft: #a3abbc;
+    --rule: rgba(232, 234, 240, 0.14);
+    --rule-strong: rgba(232, 234, 240, 0.36);
+    --call: #7aa5ea;
+    --dep: #b4bccb;
+    --hot-fill: #4a3410;
+    --hot-stroke: #f59e0b;
+    --hot-ink: #fde68a;
+    --no: #f97066;
+    --btn: #7aa5ea;
+    --btn-ink: #10141c;
+    color-scheme: dark;
+  }
+
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 13px/1.5 var(--font);
+    padding: 8px 16px 12px;
+    -webkit-text-size-adjust: 100%;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  button { font: inherit; color: inherit; }
+  code { font-family: var(--mono); font-size: 12.5px; }
+
+  .fig { margin: 0 auto; max-width: 960px; outline: none; container-type: inline-size; }
+  .fig:focus-visible { outline: 2px solid var(--btn); outline-offset: 4px; border-radius: 6px; }
+
+  /* legend + theme */
+  .top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-bottom: 10px; }
+  .key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .key svg { flex: none; }
+  .theme {
+    margin-left: auto; min-height: 32px; padding: 0 10px; font-size: 12px;
+    border: 1px solid var(--rule-strong); border-radius: 6px; background: transparent; cursor: pointer;
+  }
+
+  /* stage: nodes are HTML (true type size), wires are an SVG laid over them */
+  .stage {
+    position: relative; isolation: isolate;
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-rows: 24px 56px auto 104px;
+    column-gap: 16px;
+  }
+  .zone {
+    position: relative; grid-row: 1 / 5;
+    display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid;
+  }
+  .zone::before {
+    content: ""; position: absolute; inset: 0 -4px; border-radius: 10px; z-index: -1;
+    border: 1px dashed var(--zone-out-edge);
+  }
+  .zone.in::before { background: var(--zone-in); border: 1px solid var(--zone-in-edge); }
+  .z-out-l { grid-column: 1 / 2; }
+  .z-in { grid-column: 2 / 5; }
+  .z-out-r { grid-column: 5 / 7; }
+  .ztag {
+    grid-row: 1; grid-column: 1 / -1; align-self: center; padding: 0 8px;
+    font-size: 12px; font-weight: 600; color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .zone.in .ztag { color: var(--call); }
+  .node {
+    grid-row: 3; position: relative; z-index: 2;
+    display: flex; flex-direction: column; justify-content: center; gap: 2px;
+    min-height: 72px; padding: 8px 6px; text-align: center;
+    background: var(--node); border: 1.5px solid var(--rule-strong); border-radius: 8px;
+    transition: none;
+  }
+  .node.iface { border-style: dashed; }
+  .node .nm { font-weight: 600; font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
+  .node .rl { font-size: 12px; line-height: 1.3; color: var(--soft); }
+  .node.hot { background: var(--hot-fill); border-color: var(--hot-stroke); border-style: solid; }
+  .node.hot .rl { color: var(--hot-ink); }
+  .node.focal { border-color: var(--hot-stroke); }
+
+  .wires { position: absolute; left: 0; top: 0; z-index: 1; overflow: visible; pointer-events: none; }
+  .wires .w { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .wires .call { stroke: var(--call); }
+  .wires .dep { stroke: var(--dep); stroke-dasharray: 6 5; }
+  .wires .dep.hotw { stroke: var(--hot-stroke); stroke-width: 2.5; }
+  .wires .head-call { fill: var(--call); }
+  .wires .head-dep { fill: var(--dep); }
+  .wires .head-dep.hotw { fill: var(--hot-stroke); }
+  .wires .mask { fill: var(--bg); }
+  .wires .zone-mask { fill: var(--zone-in); }
+  .wires .lbl { font: 500 12px var(--font); fill: var(--soft); }
+  .wires .lbl.mono { font-family: var(--mono); font-weight: 400; }
+  .wires .lbl.callc { fill: var(--call); }
+  .wires .lbl.hotw { fill: var(--hot-stroke); font-weight: 600; }
+  .wires .tok { fill: var(--call); }
+  .wires .tok.hotw { fill: var(--hot-stroke); }
+  .wires .chip rect { fill: var(--bg); stroke: var(--no); stroke-width: 1.5; }
+  .wires .chip text { font: 600 12px var(--font); fill: var(--no); }
+
+  /* steps + controls */
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
+  .steps { display: flex; gap: 6px; }
+  .steps button {
+    min-width: 36px; min-height: 32px; padding: 0 8px; border-radius: 16px; cursor: pointer;
+    border: 1px solid var(--rule-strong); background: transparent; color: var(--soft); font-size: 12px; white-space: nowrap;
+  }
+  .steps button.done { color: var(--ink); }
+  .steps button.cur { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .steps button.key4:not(.cur) { border-color: var(--hot-stroke); color: var(--hot-ink); }
+  .ctrl { display: flex; align-items: center; gap: 6px; flex: 1 1 220px; min-width: 0; }
+  .ctrl button {
+    min-height: 36px; min-width: 36px; padding: 0 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--rule-strong); background: transparent; white-space: nowrap;
+  }
+  .ctrl .play { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); min-width: 64px; }
+  .scrub { flex: 1 1 auto; min-width: 60px; accent-color: var(--btn); height: 32px; }
+  .steps button:focus-visible, .ctrl button:focus-visible, .theme:focus-visible, .scrub:focus-visible {
+    outline: 2px solid var(--btn); outline-offset: 2px;
+  }
+
+  /* readout: all states stacked in one cell so the height never jumps */
+  .readout { display: grid; margin-top: 10px; background: var(--panel); border-radius: 8px; padding: 10px 12px; }
+  .rs { grid-area: 1 / 1; visibility: hidden; }
+  .rs.on { visibility: visible; }
+  .rows { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; align-items: baseline; }
+  .rows dt { font-size: 12px; color: var(--soft); white-space: nowrap; }
+  .rows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .rs .say { margin-top: 6px; font-size: 13px; }
+  .rs .say.hot { color: var(--hot-ink); background: var(--hot-fill); border: 1px solid var(--hot-stroke); border-radius: 6px; padding: 4px 8px; }
+  .rs h3 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--soft); }
+  .note { margin-top: 6px; font-size: 12px; color: var(--soft); }
+
+  /* phone / narrow: nodes in one column, calls on the left, imports on the right */
+  @container (max-width: 639px) {
+    .stage { display: flex; flex-direction: column; gap: 14px; }
+    .zone { display: flex; flex-direction: column; gap: 32px; padding: 30px 108px 14px 44px; }
+    .zone::before { inset: 0; }
+    .ztag { position: absolute; left: 44px; top: 6px; padding: 0; }
+    .node { min-height: 56px; }
+    .rows { grid-template-columns: 1fr; gap: 0; }
+    .rows dd { margin-bottom: 4px; }
+  }
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="call-vs-import-direction" data-dur="12" data-rest="6.6" tabindex="0"
+  aria-label="六邊形架構裡同一次扣款的呼叫方向與 import 方向對照：程式跑起來時，呼叫從 OrderController 經 PlaceOrderService、PaymentPort 一路往外走到 PaymentGatewayAdapter 和 PayAClient；原始碼的 import 和 implements 卻都指向裡面，PaymentGatewayAdapter implements 指回裡面的 PaymentPort，裡面沒有任何一條 import 指向 adapter。">
+  <div class="top">
+    <span class="key"><svg width="34" height="12" aria-hidden="true"><line x1="1" y1="6" x2="26" y2="6" stroke="var(--call)" stroke-width="2"/><path d="M26 1.5 L33 6 L26 10.5 Z" fill="var(--call)"/></svg>實線：呼叫（程式跑起來時往哪走）</span>
+    <span class="key"><svg width="34" height="12" aria-hidden="true"><line x1="1" y1="6" x2="26" y2="6" stroke="var(--dep)" stroke-width="2" stroke-dasharray="6 5"/><path d="M26 1.5 L33 6 L26 10.5 Z" fill="var(--dep)"/></svg>虛線：import／implements（原始碼指向誰）</span>
+    <button type="button" class="theme" id="theme" aria-label="切換深色或淺色">深／淺</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="zone out z-out-l">
+      <div class="ztag">外面</div>
+      <div class="node" data-n="C" style="grid-column:1"><span class="nm">Order<wbr>Controller</span><span class="rl">inbound adapter</span></div>
+    </div>
+    <div class="zone in z-in">
+      <div class="ztag">裡面：業務流程和它定的 port</div>
+      <div class="node iface" data-n="U" style="grid-column:1"><span class="nm">PlaceOrder<wbr>UseCase</span><span class="rl">Port In（介面）</span></div>
+      <div class="node" data-n="S" style="grid-column:2"><span class="nm">PlaceOrder<wbr>Service</span><span class="rl">業務流程</span></div>
+      <div class="node iface" data-n="P" style="grid-column:3"><span class="nm">Payment<wbr>Port</span><span class="rl">Port Out（介面）</span></div>
+    </div>
+    <div class="zone out z-out-r">
+      <div class="ztag">外面</div>
+      <div class="node" data-n="A" style="grid-column:1"><span class="nm">Payment<wbr>Gateway<wbr>Adapter</span><span class="rl">outbound adapter</span></div>
+      <div class="node" data-n="X" style="grid-column:2"><span class="nm">PayA<wbr>Client</span><span class="rl">金流 SDK</span></div>
+    </div>
+    <svg class="wires" id="wires" aria-hidden="true"></svg>
+  </div>
+
+  <div class="bar">
+    <div class="steps" id="steps" role="group" aria-label="跳到某一步">
+      <button type="button" data-s="0" aria-label="步驟 1">1</button>
+      <button type="button" data-s="1" aria-label="步驟 3">3</button>
+      <button type="button" data-s="2" class="key4" aria-label="步驟 4">4</button>
+      <button type="button" data-s="3" aria-label="步驟 5">5</button>
+      <button type="button" data-s="4" aria-label="全部 import 一起看">全部</button>
+    </div>
+    <div class="ctrl">
+      <button type="button" id="prev" aria-label="上一步">‹</button>
+      <button type="button" id="play" class="play" aria-label="播放">播放</button>
+      <button type="button" id="next" aria-label="下一步">›</button>
+      <input type="range" class="scrub" id="scrub" min="0" max="12" step="0.01" value="6.6" aria-label="時間軸">
+    </div>
+  </div>
+
+  <div class="readout" id="readout" aria-live="polite">
+    <div class="rs" data-s="0">
+      <h3>步驟 1</h3>
+      <dl class="rows">
+        <dt>正在執行</dt><dd><code>OrderController.createOrder()</code></dd>
+        <dt>它呼叫了</dt><dd><code>placeOrder.execute(cmd)</code></dd>
+        <dt>這個檔案 import</dt><dd><code>PlaceOrderUseCase</code>（Port In）</dd>
+      </dl>
+      <div class="say">inbound 這一側：呼叫和 import 都往裡面走，方向一樣。</div>
+    </div>
+    <div class="rs" data-s="1">
+      <h3>步驟 3</h3>
+      <dl class="rows">
+        <dt>正在執行</dt><dd><code>PlaceOrderService.execute()</code></dd>
+        <dt>它呼叫了</dt><dd><code>payment.charge("ORD-0001", 1020)</code></dd>
+        <dt>這個檔案 import</dt><dd><code>PaymentPort</code>（Port Out）</dd>
+      </dl>
+      <div class="say">它呼叫的是介面，檔案裡只認得 <code>PaymentPort</code>。</div>
+    </div>
+    <div class="rs" data-s="2">
+      <h3>步驟 4</h3>
+      <dl class="rows">
+        <dt>正在執行</dt><dd><code>PaymentGatewayAdapter.charge()</code></dd>
+        <dt>它呼叫了</dt><dd><code>client.createCharge(102000, "ORD-0001")</code></dd>
+        <dt>這個檔案 import</dt><dd><code>PaymentPort</code> 和 <code>PayAClient</code></dd>
+      </dl>
+      <div class="say hot">呼叫往外走 →，implements 卻指回裡面 ←。銜接靠 Java 多型：<code>payment</code> 欄位在 <code>buildApp()</code> 被塞進了一個 <code>PaymentGatewayAdapter</code>。</div>
+    </div>
+    <div class="rs" data-s="3">
+      <h3>步驟 5</h3>
+      <dl class="rows">
+        <dt>正在執行</dt><dd><code>PayAClient.createCharge()</code></dd>
+        <dt>它做了</dt><dd>回傳 <code>status = "succeeded"</code></dd>
+        <dt>這個檔案 import</dt><dd>第三方 SDK，不認得我們的任何類別</dd>
+      </dl>
+    </div>
+    <div class="rs" data-s="4">
+      <h3>所有 import／implements 一起看</h3>
+      <dl class="rows">
+        <dt>跨過裡外邊界的虛線</dt><dd>2 條，都指向裡面</dd>
+        <dt>從裡面指向 adapter</dt><dd>0 條</dd>
+      </dl>
+      <div class="say"><code>PlaceOrderService</code> 的檔案裡從頭到尾沒有出現 <code>PaymentGatewayAdapter</code> 這個字。</div>
+    </div>
+  </div>
+  <div class="note">文章表格的第 2、6 步（庫存、物流）走法相同，這裡省略。</div>
+</figure>
+
+<script>
+(() => {
+  const NS = 'http://www.w3.org/2000/svg';
+  const fig = document.getElementById('fig');
+  const stage = document.getElementById('stage');
+  const svg = document.getElementById('wires');
+  const $ = (id) => document.getElementById(id);
+  const DUR = Number(fig.dataset.dur), REST = Number(fig.dataset.rest), SEG = 2.4;
+  const ORDER = ['C', 'U', 'S', 'P', 'A', 'X'];
+  const nodeEl = {};
+  fig.querySelectorAll('.node').forEach((n) => { nodeEl[n.dataset.n] = n; });
+
+  // pairs i = (ORDER[i], ORDER[i+1]); every call runs left → right (outward along the path)
+  const CALL_LBL = [
+    { t: 'execute(cmd)', mono: true },
+    { t: '實際執行', mono: false },
+    { t: 'charge(…)', mono: true },
+    { t: '實際執行', mono: false },
+    { t: 'createCharge(…)', mono: true },
+  ];
+  // dependency wires: which end the arrow starts from (the file that does the import)
+  const DEPS = [
+    { pair: 0, fromLeft: true, t: 'import' },       // OrderController → PlaceOrderUseCase
+    { pair: 1, fromLeft: false, t: 'implements' },  // PlaceOrderService → PlaceOrderUseCase
+    { pair: 2, fromLeft: true, t: 'import' },       // PlaceOrderService → PaymentPort
+    { pair: 3, fromLeft: false, t: 'implements' },  // PaymentGatewayAdapter → PaymentPort
+    { pair: 4, fromLeft: true, t: 'import' },       // PaymentGatewayAdapter → PayAClient
+  ];
+  // states: active node, calls drawn (in order), deps shown, hot dep
+  const STATES = [
+    { act: 'C', calls: [0, 1], deps: [0] },
+    { act: 'S', calls: [2], deps: [2] },
+    { act: 'A', calls: [3, 4], deps: [3, 4], hot: 3 },
+    { act: 'X', calls: [], ret: 4, deps: [] },
+    { act: null, calls: [], deps: [0, 1, 2, 3, 4], all: true },
+  ];
+
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const ease = (u) => { u = clamp(u, 0, 1); return u * u * (3 - 2 * u); };
+  const el = (tag, attrs, parent) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  };
+
+  let W = 0, narrow = false;
+  let calls = [], deps = [], chip = null, tokCall = null, tokDep = null;
+
+  function arrowHead(x, y, dir, cls) {
+    // dir: 'down' | 'up' | 'right' | 'left'; (x,y) is the tip
+    const L = 8, H = 5;
+    let d;
+    if (dir === 'down') d = `M${x - H} ${y - L} L${x} ${y} L${x + H} ${y - L} Z`;
+    else if (dir === 'up') d = `M${x - H} ${y + L} L${x} ${y} L${x + H} ${y + L} Z`;
+    else if (dir === 'right') d = `M${x - L} ${y - H} L${x} ${y} L${x - L} ${y + H} Z`;
+    else d = `M${x + L} ${y - H} L${x} ${y} L${x + L} ${y + H} Z`;
+    return el('path', { d, class: cls });
+  }
+  function label(g, x, y, text, mono, anchor, cls, onZone) {
+    const w = Math.ceil([...text].reduce((s, ch) => s + (ch.charCodeAt(0) > 0x2e80 ? 12 : (mono ? 7.44 : 7.2)), 0)) + 8;
+    const h = 16;
+    const rx = anchor === 'start' ? x - 4 : x - w / 2;
+    const m = el('rect', { x: rx, y: y - 12, width: w, height: h, rx: 3, class: onZone ? 'mask zone-mask' : 'mask' }, g);
+    const tx = el('text', { x: anchor === 'start' ? x : x, y, 'text-anchor': anchor || 'middle', class: 'lbl' + (mono ? ' mono' : '') + (cls ? ' ' + cls : '') }, g);
+    tx.textContent = text;
+    return { m, tx };
+  }
+  function rel(n) {
+    const s = stage.getBoundingClientRect(), r = n.getBoundingClientRect();
+    return { l: r.left - s.left, t: r.top - s.top, r: r.right - s.left, b: r.bottom - s.top, cx: (r.left + r.right) / 2 - s.left, cy: (r.top + r.bottom) / 2 - s.top };
+  }
+  const R = 8;
+
+  function build() {
+    const sr = stage.getBoundingClientRect();
+    W = sr.width; narrow = fig.clientWidth < 640;
+    const H = sr.height;
+    svg.setAttribute('width', W); svg.setAttribute('height', H);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.textContent = '';
+    const box = {}; ORDER.forEach((k) => { box[k] = rel(nodeEl[k]); });
+    const inZone = (i) => !narrow && i >= 1 && i <= 2; // pair lies inside the inner zone (U–S, S–P)
+    calls = []; deps = [];
+    const gCalls = el('g', {}, svg), gDeps = el('g', {}, svg), gTok = el('g', {}, svg);
+
+    for (let i = 0; i < 5; i++) {
+      const a = box[ORDER[i]], b = box[ORDER[i + 1]];
+      // ---- call wire
+      let d, head, lbl = null;
+      const g = el('g', {}, gCalls);
+      if (!narrow) {
+        const xa = a.cx + 10, xb = b.cx - 10, yT = Math.min(a.t, b.t), yH = yT - 30;
+        d = `M${xa} ${a.t} V${yH + R} Q${xa} ${yH} ${xa + R} ${yH} H${xb - R} Q${xb} ${yH} ${xb} ${yH + R} V${b.t - 7}`;
+        head = arrowHead(xb, b.t - 1, 'down', 'head-call');
+      } else {
+        const ya = a.cy + 8, yb = b.cy - 8, xL = a.l - 28;
+        d = `M${a.l} ${ya} H${xL + R} Q${xL} ${ya} ${xL} ${ya + R} V${yb - R} Q${xL} ${yb} ${xL + R} ${yb} H${b.l - 7}`;
+        head = arrowHead(b.l - 1, yb, 'right', 'head-call');
+      }
+      const p = el('path', { d, class: 'w call' }, g);
+      g.appendChild(head);
+      if (!narrow) {
+        const yT = Math.min(a.t, b.t), yH = yT - 30;
+        lbl = label(g, (a.cx + b.cx) / 2, yH - 8, CALL_LBL[i].t, CALL_LBL[i].mono, 'middle', 'callc', inZone(i));
+      }
+      const len = p.getTotalLength();
+      p.style.strokeDasharray = `${len} ${len}`;
+      calls.push({ g, p, head, lbl, len });
+
+      // ---- dependency wire
+      const dep = DEPS[i];
+      const gd = el('g', {}, gDeps);
+      let dd, dhead, dl = null;
+      if (!narrow) {
+        const xa = a.cx + 10, xb = b.cx - 10, yB = Math.max(a.b, b.b) + 30;
+        if (dep.fromLeft) {
+          dd = `M${xa} ${a.b} V${yB - R} Q${xa} ${yB} ${xa + R} ${yB} H${xb - R} Q${xb} ${yB} ${xb} ${yB - R} V${b.b + 7}`;
+          dhead = arrowHead(xb, b.b + 1, 'up', 'head-dep');
+        } else {
+          dd = `M${xb} ${b.b} V${yB - R} Q${xb} ${yB} ${xb - R} ${yB} H${xa + R} Q${xa} ${yB} ${xa} ${yB - R} V${a.b + 7}`;
+          dhead = arrowHead(xa, a.b + 1, 'up', 'head-dep');
+        }
+        const pd = el('path', { d: dd, class: 'w dep' }, gd);
+        gd.appendChild(dhead);
+        dl = label(gd, (a.cx + b.cx) / 2, yB + 20, dep.t, true, 'middle', '', inZone(i));
+        deps.push({ g: gd, p: pd, head: dhead, lbl: dl, len: pd.getTotalLength() });
+      } else {
+        const xR = a.r + 24;
+        const yTop = a.cy + 8, yBot = b.cy - 8;
+        if (dep.fromLeft) {
+          dd = `M${a.r} ${yTop} H${xR - R} Q${xR} ${yTop} ${xR} ${yTop + R} V${yBot - R} Q${xR} ${yBot} ${xR - R} ${yBot} H${b.r + 7}`;
+          dhead = arrowHead(b.r + 1, yBot, 'left', 'head-dep');
+        } else {
+          dd = `M${b.r} ${yBot} H${xR - R} Q${xR} ${yBot} ${xR} ${yBot - R} V${yTop + R} Q${xR} ${yTop} ${xR - R} ${yTop} H${a.r + 7}`;
+          dhead = arrowHead(a.r + 1, yTop, 'left', 'head-dep');
+        }
+        const pd = el('path', { d: dd, class: 'w dep' }, gd);
+        gd.appendChild(dhead);
+        dl = label(gd, xR + 8, (yTop + yBot) / 2 + 4, dep.t, true, 'start', '', false);
+        deps.push({ g: gd, p: pd, head: dhead, lbl: dl, len: pd.getTotalLength() });
+      }
+    }
+    // "no such import" chip, wide only (narrow: the readout says it)
+    chip = null;
+    if (!narrow) {
+      const a = box.P, b = box.A, yB = Math.max(a.b, b.b) + 30;
+      chip = el('g', { class: 'chip' }, svg);
+      const text = '✕ 沒有從裡面指向 adapter 的 import';
+      const w = Math.ceil([...text].reduce((s, ch) => s + (ch.charCodeAt(0) > 0x2e80 ? 12 : 7.2), 0)) + 20;
+      let cx = (a.cx + b.cx) / 2;
+      cx = clamp(cx, w / 2 + 2, W - w / 2 - 2);
+      el('rect', { x: cx - w / 2, y: yB + 34, width: w, height: 26, rx: 13 }, chip);
+      const t = el('text', { x: cx, y: yB + 51, 'text-anchor': 'middle' }, chip);
+      t.textContent = text;
+    }
+    tokCall = el('circle', { r: 5, class: 'tok' }, gTok);
+    tokDep = el('circle', { r: 5, class: 'tok hotw' }, gTok);
+    draw();
+  }
+
+  // ---------- frame t
+  let t = REST, playing = false, raf = 0, last = 0, visible = true, autoplayed = false;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  const stateAt = (tt) => Math.min(4, Math.floor(clamp(tt, 0, DUR - 1e-6) / SEG));
+
+  function setCall(c, prog, opacity, cls) {
+    c.p.style.strokeDashoffset = String(c.len * (1 - prog));
+    c.g.style.opacity = prog > 0 ? opacity : 0;
+    c.head.style.opacity = prog > 0.97 ? 1 : 0;
+    if (c.lbl) { c.lbl.tx.style.opacity = prog > 0.3 ? 1 : 0; c.lbl.m.style.opacity = prog > 0.3 ? 1 : 0; }
+  }
+  function setDep(dp, op, hot) {
+    dp.g.style.opacity = op;
+    dp.p.classList.toggle('hotw', !!hot); dp.head.classList.toggle('hotw', !!hot);
+    dp.lbl.tx.classList.toggle('hotw', !!hot);
+  }
+  function placeTok(tok, path, len, u, show) {
+    if (!show) { tok.style.opacity = 0; return; }
+    const pt = path.getPointAtLength(clamp(u, 0, 1) * len);
+    tok.setAttribute('cx', pt.x); tok.setAttribute('cy', pt.y); tok.style.opacity = 1;
+  }
+
+  let lastS = -1;
+  function draw() {
+    if (!calls.length) return;
+    const k = stateAt(t), u = t - k * SEG, st = STATES[k];
+    // nodes
+    ORDER.forEach((n) => {
+      nodeEl[n].classList.toggle('hot', st.act === n);
+      nodeEl[n].classList.toggle('focal', !!st.all && n === 'P');
+    });
+    // calls: earlier states' calls stay as a faint trail
+    const done = new Set();
+    for (let j = 0; j < k; j++) STATES[j].calls.forEach((c) => done.add(c));
+    let tokShown = false;
+    calls.forEach((c, i) => {
+      const pos = st.calls.indexOf(i);
+      if (pos >= 0) {
+        const n = st.calls.length, span = 0.9 / n;
+        const prog = ease((u - pos * span) / span);
+        setCall(c, prog, 1);
+        if (prog > 0 && prog < 1) { placeTok(tokCall, c.p, c.len, prog, true); tokShown = true; }
+      } else if (done.has(i)) {
+        setCall(c, 1, st.all ? 0.4 : 0.35);
+      } else setCall(c, 0, 0);
+    });
+    if (st.ret !== undefined) {
+      const c = calls[st.ret];
+      setCall(c, 1, 0.35);
+      const prog = ease(u / 0.9);
+      if (prog < 1) { placeTok(tokCall, c.p, c.len, 1 - prog, true); tokShown = true; }
+      if (c.lbl) { c.lbl.tx.textContent = '← "succeeded"'; }
+    } else if (calls[4].lbl) calls[4].lbl.tx.textContent = CALL_LBL[4].t;
+    if (!tokShown) tokCall.style.opacity = 0;
+
+    // deps
+    deps.forEach((dp, i) => {
+      if (st.deps.includes(i)) {
+        const op = st.all ? ease((u - 0.1 * i) / 0.4) : ease((u - 0.9) / 0.4);
+        const hot = st.hot === i || (st.all && (i === 0 || i === 3));
+        setDep(dp, op, hot);
+      } else setDep(dp, 0, false);
+    });
+    // inward token along the implements wire on step 4
+    if (st.hot !== undefined) {
+      const dp = deps[st.hot], v = (u - 1.0) / 0.7;
+      placeTok(tokDep, dp.p, dp.len, ease(v), v > 0 && v < 1);
+    } else tokDep.style.opacity = 0;
+    if (chip) chip.style.opacity = st.all ? ease((u - 0.8) / 0.4) : 0;
+
+    // readout + chips + scrubber
+    if (k !== lastS) {
+      fig.querySelectorAll('.rs').forEach((r) => r.classList.toggle('on', Number(r.dataset.s) === k));
+      lastS = k;
+    }
+    fig.querySelectorAll('.steps button').forEach((b) => {
+      const s = Number(b.dataset.s);
+      b.classList.toggle('cur', s === k); b.classList.toggle('done', s < k);
+      b.setAttribute('aria-pressed', s === k ? 'true' : 'false');
+    });
+    $('scrub').value = t.toFixed(2);
+    const pb = $('play');
+    pb.textContent = playing ? '暫停' : (t >= DUR - 0.01 ? '重播' : '播放');
+    pb.setAttribute('aria-label', playing ? '暫停' : (t >= DUR - 0.01 ? '重播' : '播放'));
+  }
+
+  function loop(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    const dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+    last = now;
+    t = Math.min(DUR, t + dt);
+    if (t >= DUR) playing = false;
+    draw();
+    if (playing) raf = requestAnimationFrame(loop);
+  }
+  function arm() { if (!raf && playing && visible) { last = 0; raf = requestAnimationFrame(loop); } }
+  function play(from) {
+    if (from !== undefined) t = from;
+    else if (t >= DUR - 0.01) t = 0;
+    playing = true; draw(); arm();
+  }
+  function pause() { playing = false; if (raf) { cancelAnimationFrame(raf); raf = 0; } draw(); }
+  function seek(tt) { autoplayed = true; playing = false; if (raf) { cancelAnimationFrame(raf); raf = 0; } t = clamp(Number(tt) || 0, 0, DUR); draw(); }
+  function toState(s) { seek(clamp(s, 0, 4) * SEG + (s === 4 ? 1.8 : 1.8)); }
+  window.seek = seek;
+  window.DUR = DUR;
+  window.timeline = () => ({ dur: DUR, rest: REST });
+
+  $('play').addEventListener('click', () => { autoplayed = true; playing ? pause() : play(); });
+  $('prev').addEventListener('click', () => toState(stateAt(t) - 1));
+  $('next').addEventListener('click', () => toState(stateAt(t) + 1));
+  $('scrub').addEventListener('input', (e) => seek(e.target.value));
+  $('steps').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) toState(Number(b.dataset.s)); });
+  $('theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    const cur = root.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  });
+  fig.addEventListener('keydown', (e) => {
+    if (e.target.closest('input')) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); toState(stateAt(t) + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); toState(stateAt(t) - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); seek(0); }
+    else if (e.key === 'End') { e.preventDefault(); seek(REST); }
+    else if (e.key === ' ' && e.target === fig) { e.preventDefault(); autoplayed = true; playing ? pause() : play(); }
+  });
+
+  // layout: measured once per width change, never per frame
+  let lastW = -1;
+  const ro = new ResizeObserver(() => {
+    const w = stage.clientWidth;
+    if (w === lastW) return;
+    lastW = w;
+    requestAnimationFrame(build);
+  });
+  ro.observe(fig);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { lastW = -1; build(); });
+
+  const io = new IntersectionObserver((entries) => {
+    visible = entries[0].isIntersecting;
+    if (visible && !autoplayed && !reduce.matches) { autoplayed = true; play(0); }
+    arm();
+  }, { rootMargin: '120px' });
+  io.observe(fig);
+  reduce.addEventListener('change', (e) => { if (e.matches) seek(REST); });
+  t = REST;
+  build();
+})();
+</script>
+</body>
+</html>

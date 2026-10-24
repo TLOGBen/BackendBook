@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>運費規則三份抄本</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --text: #1f2328;
+    --muted: #57606a;
+    --line: #d0d7de;
+    --surface: #ffffff;
+    --surface2: #f6f8fa;
+    --api-fill: #dbeafe;
+    --api-line: #1d4ed8;
+    --flow-fill: #dcfce7;
+    --flow-line: #15803d;
+    --dom-fill: #fde68a;
+    --dom-line: #b45309;
+    --hot-fill: #fde68a;
+    --hot-line: #b45309;
+    --hot-text: #111111;
+    --ok: #15803d;
+    --bad: #b91c1c;
+    --bad-fill: #fee2e2;
+    --focus: #1d4ed8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #1b1e26;
+      --text: #e6e8ec;
+      --muted: #a0a8b3;
+      --line: #3a404b;
+      --surface: #242833;
+      --surface2: #2b303b;
+      --api-fill: #172a4a;
+      --api-line: #60a5fa;
+      --flow-fill: #12331f;
+      --flow-line: #4ade80;
+      --dom-fill: #5a3a0c;
+      --dom-line: #f59e0b;
+      --hot-fill: #78350f;
+      --hot-line: #f59e0b;
+      --hot-text: #fef3c7;
+      --ok: #4ade80;
+      --bad: #f87171;
+      --bad-fill: #4a1d1d;
+      --focus: #60a5fa;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #1b1e26;
+    --text: #e6e8ec;
+    --muted: #a0a8b3;
+    --line: #3a404b;
+    --surface: #242833;
+    --surface2: #2b303b;
+    --api-fill: #172a4a;
+    --api-line: #60a5fa;
+    --flow-fill: #12331f;
+    --flow-line: #4ade80;
+    --dom-fill: #5a3a0c;
+    --dom-line: #f59e0b;
+    --hot-fill: #78350f;
+    --hot-line: #f59e0b;
+    --hot-text: #fef3c7;
+    --ok: #4ade80;
+    --bad: #f87171;
+    --bad-fill: #4a1d1d;
+    --focus: #60a5fa;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .src { margin: 0; padding: 12px 16px 14px; display: grid; gap: 10px; min-width: 0; }
+  .src:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .src code, .src .mono { font-family: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Noto Sans Mono CJK TC", monospace; font-size: 12px; overflow-wrap: anywhere; }
+
+  /* controls */
+  .src-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .src-btn {
+    min-height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface2); color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .src-btn:hover { border-color: var(--muted); }
+  .src-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .src-btn.play { min-width: 84px; font-weight: 600; }
+  .src-btn.theme { margin-left: auto; padding: 0 10px; color: var(--muted); }
+
+  .src-track {
+    display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, 1.7fr); gap: 4px;
+    touch-action: none; user-select: none; cursor: pointer; border-radius: 8px;
+  }
+  .src-track:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .src-seg {
+    position: relative; min-height: 32px; display: flex; align-items: center; justify-content: center;
+    border-radius: 6px; background: var(--surface2); border: 1px solid var(--line);
+    font-size: 12px; color: var(--muted); white-space: nowrap;
+  }
+  .src-seg.past { background: var(--api-fill); border-color: transparent; color: var(--text); }
+  .src-seg.cur { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 700; }
+  .src-seg.mark::after {
+    content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--hot-line);
+  }
+  .src-seg.after-seg { border-style: dashed; }
+  .src-seg.after-seg.cur { border-style: solid; }
+
+  .src-event {
+    display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-radius: 8px;
+    background: var(--surface2); border: 1px solid var(--line); min-height: 40px; box-sizing: border-box;
+  }
+  .src-tag {
+    flex: none; font-weight: 700; font-size: 12px; padding: 2px 8px; border-radius: 999px;
+    background: var(--text); color: var(--bg); margin-top: 1px;
+  }
+  .src-evt { font-size: 14px; }
+
+  /* stage: before and after share one grid cell so the height never jumps */
+  .src-stage { display: grid; }
+  .src-stage > .panel { grid-area: 1 / 1; min-width: 0; transition: opacity .35s ease; }
+  .src-stage > .panel[aria-hidden="true"] { opacity: 0; visibility: hidden; }
+
+  .lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+  .lane {
+    background: var(--api-fill); border: 1.5px solid var(--api-line); border-radius: 10px;
+    padding: 10px; display: grid; grid-template-rows: auto auto auto 1fr; gap: 8px; min-width: 0;
+    transition: background-color .3s ease, border-color .3s ease, box-shadow .3s ease;
+  }
+  .lane-head { display: grid; gap: 2px; min-width: 0; }
+  .lane-name { font-weight: 700; font-size: 15px; }
+  .lane-head code { color: var(--muted); }
+
+  .rule {
+    background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--dom-line);
+    border-radius: 8px; padding: 6px 10px; display: grid; gap: 2px; min-width: 0;
+    transition: background-color .3s ease, border-color .3s ease;
+  }
+  .rule-tag { font-size: 12px; color: var(--muted); }
+  .rule-val { font-size: 15px; font-weight: 700; }
+  .rule-val.old { color: var(--muted); }
+  .rule-val .chk { color: var(--ok); margin-left: 4px; }
+
+  .note { font-size: 12.5px; color: var(--muted); min-height: 36px; }
+  .note.miss { color: var(--bad); font-weight: 600; }
+
+  .extra {
+    min-height: 60px; border-radius: 8px; padding: 6px 8px; box-sizing: border-box;
+    display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; align-content: center;
+    font-size: 13px; border: 1px dashed transparent;
+  }
+  .extra.on { background: var(--surface); border-color: var(--line); }
+  .extra .chip { padding: 2px 8px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--line); white-space: nowrap; }
+  .extra .arr { color: var(--muted); }
+  .extra .ok { color: var(--ok); font-weight: 600; }
+  .extra .bad { color: var(--bad); font-weight: 700; }
+
+  /* the place where it happens */
+  .hot {
+    background: var(--hot-fill) !important; border-color: var(--hot-line) !important; color: var(--hot-text);
+    box-shadow: 0 0 0 2px var(--hot-line);
+  }
+  .hot .rule-tag, .hot .rule-val.old, .hot code, .hot .note, .hot .arr { color: var(--hot-text); }
+  .hot .chip { background: var(--surface); color: var(--text); }
+  .hot .chip.money { border-color: var(--hot-line); font-weight: 700; }
+  .lane.hot .rule { border-left-color: var(--hot-line); }
+
+  .pop { animation: pop .45s ease both; }
+  .seq > * { animation: rise .35s ease both; }
+  .seq > *:nth-child(2) { animation-delay: .35s; }
+  .seq > *:nth-child(3) { animation-delay: .7s; }
+  .seq > *:nth-child(4) { animation-delay: 1.05s; }
+  .seq > *:nth-child(5) { animation-delay: 1.4s; }
+  @keyframes pop { 0% { transform: scale(.92); opacity: .2; } 100% { transform: none; opacity: 1; } }
+  @keyframes rise { 0% { transform: translateY(4px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+
+  /* after */
+  .after { display: grid; justify-items: center; align-content: start; }
+  .entries { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; width: 100%; }
+  .entry {
+    background: var(--api-fill); border: 1.5px solid var(--api-line); border-radius: 10px; padding: 8px 10px;
+    display: grid; gap: 2px; min-width: 0; text-align: center;
+  }
+  .entry .lane-name { font-size: 14px; }
+  .entry code { color: var(--muted); }
+  .entry .ok { font-size: 12.5px; color: var(--ok); font-weight: 600; }
+  .bus { width: 100%; height: 28px; display: block; }
+  .bus path { fill: none; stroke: var(--muted); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .cmd { font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); }
+  .down { width: 2px; height: 14px; background: var(--muted); position: relative; margin-bottom: 7px; }
+  .down::after {
+    content: ""; position: absolute; left: -5px; bottom: -7px;
+    border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 7px solid var(--muted);
+  }
+  .box {
+    width: min(100%, 340px); box-sizing: border-box; border-radius: 10px; padding: 8px 12px;
+    display: grid; gap: 2px; text-align: center;
+  }
+  .box.flow { background: var(--flow-fill); border: 1.5px solid var(--flow-line); }
+  .box .layer { font-size: 12px; color: var(--muted); }
+  .box .big { font-weight: 700; font-size: 15px; }
+  .box.dom .rule-val { font-size: 16px; }
+  .box.hot .layer { color: var(--hot-text); }
+
+  /* readout + legend */
+  .src-read { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+  .count { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .pips { display: inline-flex; gap: 3px; }
+  .pip { width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--dom-line); box-sizing: border-box; }
+  .pip.on { background: var(--dom-line); }
+  .cap { font-size: 13.5px; flex: 1 1 260px; min-width: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; box-sizing: border-box; }
+  .sw.api { background: var(--api-fill); border: 1.5px solid var(--api-line); }
+  .sw.flow { background: var(--flow-fill); border: 1.5px solid var(--flow-line); }
+  .sw.dom { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--dom-line); }
+  .sw.hot { background: var(--hot-fill); border: 2px solid var(--hot-line); }
+
+  @media (max-width: 640px) {
+    .lanes { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .lane { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); grid-template-rows: auto auto; gap: 6px 8px; }
+    .lane-head { grid-column: 1; grid-row: 1; align-self: center; }
+    .rule { grid-column: 2; grid-row: 1; }
+    .note { grid-column: 1 / -1; min-height: 18px; }
+    .extra { grid-column: 1 / -1; min-height: 44px; }
+    .entries { gap: 6px; }
+    .entry { padding: 6px; }
+  }
+  @media (max-width: 400px) {
+    .src-track { gap: 3px; }
+    .src-btn { padding: 0 10px; }
+  }
+  .noanim *, .still * { animation: none !important; transition: none !important; }
+</style>
+</head>
+<body>
+<figure class="fig src" id="src" data-fig="shipping-rule-copies" data-dur="8" data-rest="4.5" tabindex="0"
+  aria-label="三個下單入口各抄一份運費規則。新規則 VIP 一律免運只改到網站和 App 兩份，批次那份漏改，VIP 會員透過客服代下 800 元的單被收 60 元運費、扣款 860 元；重構後規則只有 Order.shippingFee() 一份，改一處三個入口一起生效。">
+  <div class="src-bar">
+    <button type="button" class="src-btn" data-act="prev" aria-label="上一步">◀ 上一步</button>
+    <button type="button" class="src-btn play" data-act="play" aria-label="播放">▶ 播放</button>
+    <button type="button" class="src-btn" data-act="next" aria-label="下一步">下一步 ▶</button>
+    <button type="button" class="src-btn theme" data-act="theme" aria-label="切換深淺色">◐</button>
+  </div>
+  <div class="src-track" id="src-track" role="slider" tabindex="0" aria-label="時間軸"
+    aria-valuemin="0" aria-valuemax="7" aria-valuenow="4"></div>
+  <div class="src-event"><span class="src-tag" id="src-tag">T5</span><span class="src-evt" id="src-evt"></span></div>
+
+  <div class="src-stage">
+    <div class="panel before" id="src-before">
+      <div class="lanes">
+        <div class="lane" id="lane0">
+          <div class="lane-head"><span class="lane-name">網站</span><code>OrderController</code></div>
+          <div class="rule" id="rule0"><span class="rule-tag">運費規則・<code>shippingFee</code></span><span class="rule-val" id="val0"></span></div>
+          <div class="note" id="note0"></div>
+          <div class="extra" id="x0"></div>
+        </div>
+        <div class="lane" id="lane1">
+          <div class="lane-head"><span class="lane-name">App</span><code>AppOrderApi</code></div>
+          <div class="rule" id="rule1"><span class="rule-tag">運費規則・<code>fee</code></span><span class="rule-val" id="val1"></span></div>
+          <div class="note" id="note1"></div>
+          <div class="extra" id="x1"></div>
+        </div>
+        <div class="lane" id="lane2">
+          <div class="lane-head"><span class="lane-name">後台批次</span><code>BatchOrderImporter</code></div>
+          <div class="rule" id="rule2"><span class="rule-tag">運費規則・<code>freight</code></span><span class="rule-val" id="val2"></span></div>
+          <div class="note" id="note2"></div>
+          <div class="extra" id="x2"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel after" id="src-after" aria-hidden="true">
+      <div class="entries" id="src-entries">
+        <div class="entry"><span class="lane-name">網站</span><code>OrderController</code><span class="ok">✓ VIP 免運</span></div>
+        <div class="entry"><span class="lane-name">App</span><code>AppOrderApi</code><span class="ok">✓ VIP 免運</span></div>
+        <div class="entry"><span class="lane-name">後台批次</span><code>BatchOrderImporter</code><span class="ok">✓ VIP 免運</span></div>
+      </div>
+      <svg class="bus" viewBox="0 0 300 28" preserveAspectRatio="none" aria-hidden="true"><path d="M50 0V14H250V0M150 0V28"/></svg>
+      <span class="cmd mono">PlaceOrderCommand</span>
+      <div class="down" style="margin-top:0"></div>
+      <div class="box flow"><span class="layer">流程梳理層</span><span class="big mono" style="font-size:14px">PlaceOrderService</span><span class="layer">步驟順序、交易邊界</span></div>
+      <div class="down" style="margin-top:0"></div>
+      <div class="box dom hot" id="src-dom"><span class="layer">業務實現層・唯一一份運費規則</span><span class="big mono" style="font-size:14px">Order.shippingFee()</span><span class="rule-val" id="src-domval">VIP 免運<span class="chk">✓</span></span></div>
+    </div>
+  </div>
+
+  <figcaption class="src-read">
+    <span class="count" id="src-count"></span>
+    <span class="cap" id="src-cap" aria-live="polite"></span>
+  </figcaption>
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw api"></i>對外接口層（入口）</span>
+    <span><i class="sw flow"></i>流程梳理層</span>
+    <span><i class="sw dom"></i>業務規則</span>
+    <span><i class="sw hot"></i>事情發生在這裡</span>
+  </div>
+</figure>
+
+<script>
+(() => {
+  const fig = document.getElementById('src');
+  const $ = (id) => document.getElementById(id);
+  const root = document.documentElement;
+  const OLD = '滿 1000 免運';
+  const chip = (t, cls = '') => `<span class="chip ${cls}">${t}</span>`;
+  const arr = '<span class="arr">→</span>';
+
+  // 每一格的內容都照文章「為什麼要在意」的 T1～T7 表格
+  const S = [
+    { t: 'T1', evt: '行銷提需求：VIP 會員一律免運，下週一上線。', rules: [0, 0, 0], hot: null,
+      notes: ['', '從網站那支複製來的', '客服代下單的 CSV，每天晚上匯入'], miss: [],
+      x: ['', '', ''],
+      cap: '同一條運費規則，三個入口各抄一份；要改，就得三份都找到。' },
+    { t: 'T2', evt: '工程師全專案搜尋 shippingFee，只找到網站那支，加上 VIP 判斷。', rules: [1, 0, 0], hot: 'rule0',
+      notes: ['搜到 shippingFee → 改好', '變數叫 fee，沒搜到', '變數叫 freight，沒搜到'], miss: [1, 2],
+      x: ['', '', ''],
+      cap: '搜尋只找得到同名的變數，另外兩份的名字不一樣。' },
+    { t: 'T3', evt: 'QA 用 App 測 VIP 買 800 元，還是收 60，回報後補改 App。', rules: [1, 1, 0], hot: 'rule1',
+      notes: ['已改', 'QA 測到收 60 → 補改', '變數叫 freight，沒搜到'], miss: [2],
+      x: ['', `${chip('VIP・800 元')}${arr}<span class="bad">收 60</span>${arr}<span class="ok">補改</span>`, ''],
+      cap: 'App 那份是 QA 測到之後才補上的。' },
+    { t: 'T4', evt: '週一上線。批次那支變數叫 freight，沒被搜到，也沒有測試。', rules: [1, 1, 0], hot: 'rule2',
+      notes: ['上線', '上線', '沒被搜到、沒有測試，舊規則跟著上線'], miss: [2],
+      x: ['', '', ''],
+      cap: '三份裡改到兩份就上線了。' },
+    { t: 'T5', evt: 'VIP 會員請客服代下一張 800 元的單，晚上批次匯入。', rules: [1, 1, 0], hot: 'lane2',
+      notes: ['', '', '還是「滿 1000 免運」'], miss: [],
+      x: [`${chip('VIP 下單')}${arr}<span class="ok">運費 0</span>`,
+          `${chip('VIP 下單')}${arr}<span class="ok">運費 0</span>`,
+          `${chip('VIP・800 元')}${arr}${chip('運費 60', 'money')}${arr}${chip('扣款 860 元', 'money')}`],
+      seq: [false, false, true],
+      cap: '網站、App 下單都免運；同一位 VIP 讓客服代下單，卻被扣了 860 元。' },
+    { t: 'T6', evt: '會員收到 860 元的扣款通知，打給客服。', rules: [1, 1, 0], hot: 'x2',
+      notes: ['日誌：沒有錯誤', '日誌：沒有錯誤', '日誌：沒有錯誤'], miss: [],
+      x: ['<span>正常回應</span>', '<span>正常回應</span>',
+          `${chip('扣款 860 元', 'money')}${arr}<span class="bad">會員打給客服</span>`],
+      seq: [false, false, true],
+      cap: '日誌裡沒有任何錯誤，三個入口都正常回應。' },
+    { t: 'T7', evt: '工程師查資料庫，找到漏改的那一份，補上 VIP 判斷。', rules: [1, 1, 2], hot: 'rule2',
+      notes: ['', '', '補上 VIP 判斷'], miss: [],
+      x: ['<span class="mono">source = web</span><span>：沒有資料</span>',
+          '<span class="mono">source = app</span><span>：沒有資料</span>',
+          '<span class="mono">source = batch</span><span class="bad">：有資料</span>'],
+      xlabel: '查 VIP 且運費 > 0 的訂單',
+      cap: '根因：「運費怎麼算」是業務規則，卻寫在三個負責接收請求的入口裡。' },
+    { t: '重構後', evt: '重構後：運費規則搬進 Order.shippingFee()，只留一份。', after: true, hot: 'src-dom',
+      cap: '三個入口只把各自的格式翻成 PlaceOrderCommand，交給同一個 PlaceOrderService；新規則只要改一處。' }
+  ];
+  const N = S.length, DUR = N, REST = Math.floor(Number(fig.dataset.rest));
+  const STEP_MS = 2600;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  if (reduce.matches) fig.classList.add('still');
+  reduce.addEventListener('change', () => fig.classList.toggle('still', reduce.matches));
+
+  // timeline segments
+  const track = $('src-track');
+  const segs = S.map((s, i) => {
+    const d = document.createElement('div');
+    d.className = 'src-seg' + (i === 4 ? ' mark' : '') + (s.after ? ' after-seg' : '');
+    d.textContent = s.t;
+    d.dataset.i = i;
+    track.appendChild(d);
+    return d;
+  });
+
+  let cur = -1, playing = false, timer = 0, visible = true;
+  const playBtn = fig.querySelector('[data-act="play"]');
+
+  function render(i, animate) {
+    i = Math.max(0, Math.min(N - 1, i));
+    const changed = i !== cur;
+    cur = i;
+    const s = S[i];
+    fig.classList.toggle('noanim', !animate || !changed);
+    segs.forEach((d, k) => { d.classList.toggle('past', k < i); d.classList.toggle('cur', k === i); });
+    track.setAttribute('aria-valuenow', i);
+    track.setAttribute('aria-valuetext', `${s.t}：${s.evt}`);
+    $('src-tag').textContent = s.t;
+    $('src-evt').textContent = s.evt;
+    $('src-cap').textContent = s.cap;
+
+    $('src-before').setAttribute('aria-hidden', s.after ? 'true' : 'false');
+    $('src-after').setAttribute('aria-hidden', s.after ? 'false' : 'true');
+
+    fig.querySelectorAll('.src-stage .hot').forEach((el) => { if (el.id !== 'src-dom') el.classList.remove('hot'); });
+
+    if (s.after) {
+      $('src-count').innerHTML = '要改的地方：3 處 → <span style="color:var(--ok)">1 處</span>';
+      const ents = $('src-entries');
+      ents.querySelectorAll('.ok').forEach((el, k) => {
+        el.className = 'ok';
+        el.style.animation = animate && changed ? `rise .35s ease ${0.6 + k * 0.25}s both` : '';
+      });
+      const dv = $('src-domval');
+      dv.classList.remove('pop'); if (animate && changed) { dv.replaceWith(dv.cloneNode(true)); $('src-domval').classList.add('pop'); }
+      return;
+    }
+
+    let done = 0;
+    for (let k = 0; k < 3; k++) {
+      const r = s.rules[k];
+      if (r > 0) done++;
+      const v = $('val' + k);
+      v.className = 'rule-val' + (r === 0 ? ' old' : '');
+      v.innerHTML = r === 0 ? OLD : `VIP 免運<span class="chk">✓</span>`;
+      if (s.hot === 'rule' + k && animate && changed) {
+        const n = v.cloneNode(true); n.classList.add('pop'); v.replaceWith(n);
+      }
+      const note = $('note' + k);
+      note.textContent = s.notes[k];
+      note.className = 'note' + (s.miss.includes(k) ? ' miss' : '');
+      const x = $('x' + k);
+      const html = s.x[k] ? (s.xlabel ? `<span class="arr" style="flex-basis:100%">${s.xlabel}</span>` : '') + s.x[k] : '';
+      const nx = x.cloneNode(false);
+      nx.innerHTML = html;
+      nx.className = 'extra' + (html ? ' on' : '') + (s.seq && s.seq[k] ? ' seq' : '');
+      x.replaceWith(nx);
+    }
+    if (s.hot) { const h = $(s.hot); if (h) h.classList.add('hot'); }
+    $('src-count').innerHTML = `運費規則 3 份<span class="pips">${[0, 1, 2].map((k) => `<i class="pip${s.rules[k] > 0 ? ' on' : ''}"></i>`).join('')}</span>已改 ${done}／3`;
+  }
+
+  function setPlaying(p) {
+    playing = p;
+    clearTimeout(timer);
+    playBtn.textContent = p ? '❚❚ 暫停' : '▶ 播放';
+    playBtn.setAttribute('aria-label', p ? '暫停' : '播放');
+    if (p) schedule();
+  }
+  function schedule() {
+    clearTimeout(timer);
+    if (!playing || !visible) return;
+    timer = setTimeout(() => {
+      if (cur >= N - 1) { setPlaying(false); return; }
+      render(cur + 1, !fig.classList.contains('still'));
+      if (cur >= N - 1) setPlaying(false); else schedule();
+    }, STEP_MS);
+  }
+  function go(i) { setPlaying(false); render(i, !fig.classList.contains('still')); }
+
+  fig.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const a = b.dataset.act;
+    if (a === 'prev') go(cur - 1);
+    else if (a === 'next') go(cur + 1);
+    else if (a === 'play') {
+      if (playing) { setPlaying(false); return; }
+      if (cur >= N - 1) render(0, !fig.classList.contains('still'));
+      setPlaying(true);
+    } else if (a === 'theme') {
+      const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      root.dataset.theme = dark ? 'light' : 'dark';
+    }
+  });
+
+  // drag / click the timeline
+  let rects = null;
+  const pick = (x) => {
+    let best = 0, bd = Infinity;
+    rects.forEach((r, k) => {
+      const d = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+      if (d < bd) { bd = d; best = k; }
+    });
+    return best;
+  };
+  track.addEventListener('pointerdown', (e) => {
+    rects = segs.map((d) => d.getBoundingClientRect());
+    track.setPointerCapture(e.pointerId);
+    go(pick(e.clientX));
+  });
+  track.addEventListener('pointermove', (e) => {
+    if (!rects || !track.hasPointerCapture(e.pointerId)) return;
+    const k = pick(e.clientX);
+    if (k !== cur) go(k);
+  });
+  const endDrag = () => { rects = null; };
+  track.addEventListener('pointerup', endDrag);
+  track.addEventListener('pointercancel', endDrag);
+
+  fig.addEventListener('keydown', (e) => {
+    if (e.target.closest('button')) return;
+    if (e.key === 'ArrowLeft') { go(cur - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { go(cur + 1); e.preventDefault(); }
+    else if (e.key === 'Home') { go(0); e.preventDefault(); }
+    else if (e.key === 'End') { go(N - 1); e.preventDefault(); }
+  });
+
+  // pause while off screen
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver((es) => {
+      visible = es[0].isIntersecting;
+      if (visible) schedule(); else clearTimeout(timer);
+    }).observe(fig);
+  }
+
+  window.seek = (tt) => {
+    setPlaying(false);
+    const t = Math.max(0, Math.min(DUR - 0.001, Number(tt) || 0));
+    render(Math.floor(t), false);
+  };
+
+  render(REST, false);
+})();
+</script>
+</body>
+</html>

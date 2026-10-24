@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CASCADE 全表掃描</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#5b6472; --rule:#cfd6df; --card:#f6f8fa;
+  --bar:#dfe5ec; --bar-seen:#c3ccd7; --bar-gone:#eef1f4;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111; --hot-text:#92400e;
+  --calm-fill:#e8f0fb; --calm-stroke:#3b6db3; --calm-text:#1e4e8c;
+  --focus:#2563eb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e5e7eb; --muted:#b9c0cc; --soft:#a3abb8; --rule:#3c4352; --card:#262b36;
+    --bar:#3a4150; --bar-seen:#566074; --bar-gone:#2b303b;
+    --hot-fill:#5b3e0c; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fbbf24;
+    --calm-fill:#1f3350; --calm-stroke:#6f9fe0; --calm-text:#a9c8f2;
+    --focus:#60a5fa;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e5e7eb; --muted:#b9c0cc; --soft:#a3abb8; --rule:#3c4352; --card:#262b36;
+  --bar:#3a4150; --bar-seen:#566074; --bar-gone:#2b303b;
+  --hot-fill:#5b3e0c; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fbbf24;
+  --calm-fill:#1f3350; --calm-stroke:#6f9fe0; --calm-text:#a9c8f2;
+  --focus:#60a5fa;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:14px; line-height:1.5;
+}
+.fk{padding:12px 16px 16px; max-width:1120px; margin:0 auto; outline:none}
+.fk:focus-visible{outline:2px solid var(--focus); outline-offset:2px; border-radius:8px}
+.mono{font-family:ui-monospace,"Cascadia Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace}
+
+/* SQL row */
+.fk-sql{display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:8px 12px; border:1px solid var(--rule); border-radius:8px; background:var(--card)}
+.fk-sql .who{font-size:13px; color:var(--soft)}
+.fk-sql code{font-size:13px; font-weight:600; word-break:break-word}
+.fk-sql .state{margin-left:auto; font-size:13px; padding:2px 8px; border-radius:4px; border:1px solid var(--rule); color:var(--muted); white-space:nowrap}
+.fk-sql .state.hot{background:var(--hot-fill); border-color:var(--hot-stroke); color:var(--hot-ink)}
+.fk-sql.killed code{text-decoration:line-through; text-decoration-thickness:2px; color:var(--soft)}
+
+/* stage = the transaction */
+.fk-stage{position:relative; margin-top:12px; padding:36px 12px 12px; border:2px dashed var(--rule); border-radius:8px; display:grid; grid-template-columns:1fr; gap:0}
+.fk-stage.hot{border-color:var(--hot-stroke)}
+.fk-tx{position:absolute; left:12px; top:8px; right:12px; display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center; font-size:13px; color:var(--soft)}
+.fk-tx .tag{padding:0 8px; border-radius:4px; border:1px solid var(--rule)}
+.fk-stage.hot .fk-tx .tag{background:var(--hot-fill); border-color:var(--hot-stroke); color:var(--hot-ink)}
+.fk-tx .note{display:none}
+.fk-stage.hot .fk-tx .note, .fk-stage.back .fk-tx .note{display:inline}
+.fk-stage.back .fk-tx .tag{background:var(--calm-fill); border-color:var(--calm-stroke); color:var(--calm-text)}
+.fk-stage.hot{padding-top:60px}
+.fk-stage.back{padding-top:60px}
+
+/* table cards */
+.tbl{border:1px solid var(--rule); border-radius:8px; background:var(--card); padding:12px; min-width:0}
+.tbl.hot{border-color:var(--hot-stroke); box-shadow:0 0 0 1px var(--hot-stroke)}
+.tbl h3{margin:0; font-size:16px; font-weight:600; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap}
+.tbl h3 .mono{font-size:15px}
+.tbl h3 small{font-size:13px; font-weight:400; color:var(--soft)}
+.fkcol{display:inline-flex; flex-wrap:wrap; gap:4px; align-items:center; margin-top:8px; font-size:13px}
+.fkcol .mono{font-size:12px; color:var(--muted)}
+.chip{font-size:12px; padding:0 6px; border-radius:4px; border:1px solid var(--hot-stroke); color:var(--hot-text); line-height:20px}
+.fkcol.hot .chip{background:var(--hot-fill); color:var(--hot-ink)}
+.rows{position:relative; margin-top:12px; display:flex; flex-direction:column; gap:4px}
+.bar{height:8px; border-radius:2px; background:var(--bar)}
+.bar.seen{background:var(--bar-seen)}
+.bar.mark{background:var(--hot-fill); box-shadow:inset 0 0 0 1px var(--hot-stroke)}
+.bar.gone{background:var(--bar-gone); box-shadow:inset 0 0 0 1px var(--rule)}
+.row42{display:flex; align-items:center; gap:8px; height:24px; padding:0 8px; border-radius:4px; background:var(--bar); font-size:13px}
+.row42 .mono{font-size:12px}
+.row42.hot{background:var(--hot-fill); box-shadow:inset 0 0 0 1px var(--hot-stroke); color:var(--hot-ink)}
+.row42.gone{background:var(--bar-gone); box-shadow:inset 0 0 0 1px var(--rule); color:var(--soft); text-decoration:line-through}
+.scan{position:absolute; left:-6px; right:-6px; height:4px; margin-top:-2px; border-radius:2px; background:var(--hot-stroke); box-shadow:0 0 0 2px var(--hot-fill); display:none; pointer-events:none}
+.scan.on{display:block}
+.meta{margin-top:12px; font-size:13px; color:var(--muted); min-height:40px}
+.meta b{color:var(--ink)}
+.meta.hot{color:var(--hot-text)}
+.meta.hot b{color:var(--hot-text)}
+.count{margin-top:8px; padding:8px; border-radius:4px; border:1px solid var(--rule); font-size:13px; color:var(--muted); display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; visibility:hidden}
+.count.on{visibility:visible}
+.count.hot{background:var(--hot-fill); border-color:var(--hot-stroke); color:var(--hot-ink)}
+.count .n{font-size:24px; font-weight:700; line-height:1}
+.count .of{font-size:13px}
+
+/* CASCADE links */
+.link{position:relative; display:flex; align-items:center; gap:8px; height:56px; padding-left:24px}
+.link .shaft{position:relative; width:2px; height:100%; background:var(--rule)}
+.link .shaft::after{content:""; position:absolute; left:50%; bottom:-1px; transform:translateX(-50%); border:6px solid transparent; border-top:8px solid var(--rule); border-bottom:0}
+.link .lbl{font-size:12px; color:var(--soft); line-height:1.3}
+.link.hot .shaft{background:var(--hot-stroke); width:4px}
+.link.hot .shaft::after{border-top-color:var(--hot-stroke)}
+.link.hot .lbl{color:var(--hot-text); font-weight:600}
+
+/* readout */
+.fk-read{display:grid; grid-template-columns:1fr; gap:8px; margin-top:12px}
+.tile{border:1px solid var(--rule); border-radius:8px; padding:8px 12px; min-width:0}
+.tile .k{font-size:13px; color:var(--soft)}
+.tile .v{font-size:15px; font-weight:600}
+.tile.hot{background:var(--hot-fill); border-color:var(--hot-stroke); color:var(--hot-ink)}
+.tile.hot .k{color:var(--hot-ink)}
+.tile.calm{background:var(--calm-fill); border-color:var(--calm-stroke); color:var(--calm-text)}
+.tile.calm .k{color:var(--calm-text)}
+
+/* step caption */
+.fk-step{margin-top:12px; display:flex; gap:12px; align-items:flex-start; min-height:48px}
+.fk-step .t{flex:none; font-weight:700; font-size:15px; padding:0 8px; border-radius:4px; background:var(--hot-fill); color:var(--hot-ink); border:1px solid var(--hot-stroke); line-height:24px}
+.fk-step .d{font-size:15px}
+
+/* controls */
+.fk-ctl{margin-top:12px; display:grid; grid-template-columns:auto 1fr auto; gap:8px 12px; align-items:center}
+.btn{min-width:40px; height:40px; border-radius:8px; border:1px solid var(--rule); background:var(--card); color:var(--ink); font:inherit; font-size:14px; cursor:pointer; padding:0 10px}
+.btn:focus-visible, .keys button:focus-visible, input[type=range]:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
+.btn.theme{display:none; font-size:13px}
+.btn.theme.on{display:inline-block}
+.fk-ctl input[type=range]{width:100%; height:32px; margin:0; accent-color:var(--hot-stroke)}
+.keys{grid-column:1 / -1; display:grid; grid-template-columns:repeat(6, 1fr); gap:4px}
+.keys button{height:32px; border-radius:4px; border:1px solid var(--rule); background:transparent; color:var(--muted); font:inherit; font-size:13px; font-weight:600; cursor:pointer; padding:0}
+.keys button[aria-current="step"]{background:var(--hot-fill); border-color:var(--hot-stroke); color:var(--hot-ink)}
+
+@media (min-width:480px){
+  .fk-read{grid-template-columns:repeat(3, 1fr)}
+}
+@media (min-width:720px){
+  .fk-stage{grid-template-columns:minmax(0,1fr) 88px minmax(0,1.2fr) 88px minmax(0,1.4fr); align-items:start}
+  .link{flex-direction:column; justify-content:center; height:auto; padding:72px 4px 0; gap:6px}
+  .link .shaft{width:100%; height:2px}
+  .link .shaft::after{left:auto; right:-1px; top:50%; bottom:auto; transform:translateY(-50%); border:6px solid transparent; border-left:8px solid var(--rule); border-right:0}
+  .link.hot .shaft{width:100%; height:4px}
+  .link.hot .shaft::after{border-top-color:transparent; border-left-color:var(--hot-stroke)}
+  .link .lbl{text-align:center; order:-1}
+}
+</style>
+</head>
+<body>
+<figure class="fk fig" data-fig="fk-cascade-scan" data-dur="18" data-rest="11.5" tabindex="0"
+  aria-label="動畫：一句 DELETE FROM merchants WHERE id = 42 沿著 ON DELETE CASCADE 外鍵往下擴散。orders.merchant_id 和 order_items.order_id 都沒有索引，所以先掃整張 orders 找到 80 萬筆訂單，接著每刪 1 筆訂單就掃一次整張 order_items（400 多萬列），總共要掃 80 萬次；結帳 API 從約 200ms 變成 8 秒逾時，讀取副本落後好幾分鐘，最後 DBA 砍掉查詢、整個交易回滾。"
+  style="margin:0">
+
+  <div class="fk-sql" id="sql">
+    <span class="who">後台送出</span>
+    <code class="mono">DELETE FROM merchants WHERE id = 42</code>
+    <span class="state hot" id="sqlState">執行中</span>
+  </div>
+
+  <div class="fk-stage" id="stage">
+    <div class="fk-tx"><span class="tag" id="txTag">同一個交易</span><span class="note" id="txNote"></span></div>
+
+    <section class="tbl" id="tM" aria-label="merchants 商家表">
+      <h3><span class="mono">merchants</span><small>商家</small></h3>
+      <div class="rows" id="rM">
+        <div class="bar"></div>
+        <div class="row42" id="row42"><span class="mono">id = 42</span><span>測試商家</span></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+      </div>
+      <div class="meta" id="mM">要刪 <b>1 筆</b>商家</div>
+    </section>
+
+    <div class="link" id="l1"><div class="shaft"></div><div class="lbl mono">ON DELETE<br>CASCADE</div></div>
+
+    <section class="tbl" id="tO" aria-label="orders 訂單表">
+      <h3><span class="mono">orders</span><small>訂單</small></h3>
+      <div class="fkcol" id="fO"><span class="mono">merchant_id</span><span class="chip">沒索引</span></div>
+      <div class="rows" id="rO"><div class="scan" id="sO"></div></div>
+      <div class="meta" id="mO">&nbsp;</div>
+    </section>
+
+    <div class="link" id="l2"><div class="shaft"></div><div class="lbl mono">ON DELETE<br>CASCADE</div></div>
+
+    <section class="tbl" id="tI" aria-label="order_items 訂單明細表">
+      <h3><span class="mono">order_items</span><small>訂單明細</small></h3>
+      <div class="fkcol" id="fI"><span class="mono">order_id</span><span class="chip">沒索引</span></div>
+      <div class="rows" id="rI"><div class="scan" id="sI"></div></div>
+      <div class="meta" id="mI">400 多萬列</div>
+      <div class="count" id="cnt"><span>整張掃描</span><span>第 <span class="n" id="cntN">1</span> 次</span><span class="of">／每刪 1 筆訂單掃 1 次，總共要 80 萬次</span></div>
+    </section>
+  </div>
+
+  <div class="fk-read" aria-live="polite">
+    <div class="tile" id="vApi"><div class="k">結帳 API</div><div class="v" id="vApiV">正常，約 200ms</div></div>
+    <div class="tile" id="vDb"><div class="k">資料庫</div><div class="v" id="vDbV">執行這一句 DELETE</div></div>
+    <div class="tile" id="vRep"><div class="k">讀取副本（前台查訂單）</div><div class="v" id="vRepV">跟著主資料庫</div></div>
+  </div>
+
+  <div class="fk-step"><span class="t" id="stT">T1</span><span class="d" id="stD"></span></div>
+
+  <div class="fk-ctl">
+    <button class="btn" id="play" type="button" aria-label="播放">▶</button>
+    <input id="scrub" type="range" min="0" max="18" step="0.05" value="11.5" aria-label="時間軸，拖曳看每個時間點">
+    <button class="btn theme" id="theme" type="button" aria-label="切換深淺色">深色</button>
+    <div class="keys" role="group" aria-label="跳到某個時間點">
+      <button type="button" data-k="0">T1</button><button type="button" data-k="1">T2</button><button type="button" data-k="2">T3</button><button type="button" data-k="3">T4</button><button type="button" data-k="4">T5</button><button type="button" data-k="5">T6</button>
+    </div>
+  </div>
+</figure>
+
+<script>
+(function(){
+  'use strict';
+  var DUR = 18, REST = 11.5;
+  var $ = function(id){ return document.getElementById(id); };
+  var fig = document.querySelector('.fk');
+
+  // step windows (s) and the frame each key button jumps to
+  var STEPS = [
+    {a:0,    b:2.5,  key:2.3,  t:'T1', d:'送出 DELETE，刪掉商家 42。外鍵發現 orders 有列指向它，設定是 CASCADE，所以要連訂單一起刪。'},
+    {a:2.5,  b:5.5,  key:5.3,  t:'T2', d:'要找出 merchant_id = 42 的訂單，但 orders.merchant_id 沒有索引，只好把整張 orders 掃一遍，找到 80 萬筆。'},
+    {a:5.5,  b:8.5,  key:8.3,  t:'T3', d:'刪第 1 筆訂單。外鍵又要去 order_items 找它的明細，order_items.order_id 沒有索引，只好把 400 多萬列整張掃一遍。'},
+    {a:8.5,  b:12.5, key:11.5, t:'T4', d:'刪第 2、第 3……筆訂單，每一筆都再掃一次整張 order_items。80 萬筆訂單，就是 80 萬次整張表掃描。'},
+    {a:12.5, b:15.5, key:15.0, t:'T5', d:'幾百萬列的刪除塞在同一個交易裡。交易不結束，相關的列一直被鎖著；大量 WAL 讓讀取副本跟不上。'},
+    {a:15.5, b:18.01,key:18,   t:'T6', d:'DBA 手動砍掉這個查詢。整個交易回滾，刪到一半的資料全部還原，系統慢慢恢復。'}
+  ];
+
+  // build row bars once
+  var O_N = 12, I_N = 16;
+  var O_MARK = [1, 3, 4, 7, 9, 10];          // rows that point at merchant 42 (picture only)
+  var rO = $('rO'), rI = $('rI'), bO = [], bI = [];
+  for (var i = 0; i < O_N; i++){ var d = document.createElement('div'); d.className = 'bar'; rO.appendChild(d); bO.push(d); }
+  for (var j = 0; j < I_N; j++){ var e = document.createElement('div'); e.className = 'bar'; rI.appendChild(e); bI.push(e); }
+
+  // timeline facts
+  var O_SCAN = [2.8, 4.8];                  // T2: one sweep over orders
+  var I_FIRST = [6.0, 8.2];                 // T3: first full sweep over order_items
+  var SWEEP = 0.9;                          // T4–T5: each later sweep
+  var LOOP_A = 8.5, LOOP_B = 15.5;          // repeated sweeps until the query is killed
+
+  function stepAt(t){ for (var k = 0; k < STEPS.length; k++){ if (t < STEPS[k].b) return k; } return STEPS.length - 1; }
+  function cls(el, name, on){ el.classList.toggle(name, !!on); }
+  function setText(el, s){ if (el.textContent !== s) el.textContent = s; }
+  function setHTML(el, s){ if (el._h !== s){ el.innerHTML = s; el._h = s; } }
+
+  // one sweep's state at time t: which pass (1-based) and progress p in [0,1], or null
+  function itemsSweep(t){
+    if (t >= I_FIRST[0] && t < I_FIRST[1]) return {n:1, p:(t - I_FIRST[0]) / (I_FIRST[1] - I_FIRST[0])};
+    if (t >= LOOP_A && t < LOOP_B){ var q = (t - LOOP_A) / SWEEP; return {n: 2 + Math.floor(q), p: q - Math.floor(q)}; }
+    return null;
+  }
+
+  function D(t){
+    var k = stepAt(t), S = STEPS[k];
+    var killed = t >= 15.5, back = t >= 16.2;
+
+    // SQL row
+    cls($('sql'), 'killed', killed);
+    var st = $('sqlState');
+    setText(st, killed ? (back ? '已中止，整個交易回滾' : 'DBA 砍掉查詢') : '執行中，還沒結束');
+    cls(st, 'hot', !killed);
+
+    // merchants
+    var r42 = $('row42');
+    var mGone = t >= 1.0 && !back;
+    cls(r42, 'hot', t < 1.0 || (t >= 15.5 && !back));
+    cls(r42, 'gone', mGone);
+    cls($('tM'), 'hot', k === 0);
+    setHTML($('mM'), mGone ? '刪掉 <b>1 筆</b>商家' : (back ? '還原：商家 42 還在' : '要刪 <b>1 筆</b>商家'));
+
+    // link 1
+    cls($('l1'), 'hot', t >= 1.6 && t < 5.5);
+
+    // orders: scan in T2, marks found, then deleted one by one
+    var oScan = t >= O_SCAN[0] && t < O_SCAN[1];
+    var oP = oScan ? (t - O_SCAN[0]) / (O_SCAN[1] - O_SCAN[0]) : (t >= O_SCAN[1] ? 1 : 0);
+    var sO = $('sO');
+    cls(sO, 'on', oScan);
+    if (oScan) sO.style.top = (oP * 100).toFixed(2) + '%';
+    var sw = itemsSweep(t);
+    var deleted = 0;                          // how many orders already deleted (picture shows first 3)
+    if (!back){
+      if (t >= 5.7) deleted = 1;
+      if (sw && sw.n >= 2) deleted = Math.min(sw.n, 3);
+      else if (t >= LOOP_B && t < 16.2) deleted = 3;
+    }
+    for (var i = 0; i < O_N; i++){
+      var pos = (i + 0.5) / O_N, mi = O_MARK.indexOf(i);
+      var seen = oScan && pos <= oP;
+      var found = mi >= 0 && !back && (t >= O_SCAN[1] || (oScan && pos <= oP));
+      var gone = mi >= 0 && mi < deleted;
+      cls(bO[i], 'seen', seen && !found);
+      cls(bO[i], 'mark', found && !gone);
+      cls(bO[i], 'gone', gone);
+    }
+    cls($('fO'), 'hot', k === 1);
+    cls($('tO'), 'hot', k === 1);
+    var mO = $('mO');
+    if (t < O_SCAN[0]) setHTML(mO, '&nbsp;');
+    else if (oScan) setHTML(mO, '沒索引，<b>整張</b>從頭掃到尾……');
+    else if (back) setHTML(mO, '還原：刪掉的訂單<b>全部回來</b>');
+    else if (t < 5.7) setHTML(mO, '找到 <b>80 萬筆</b>訂單要一起刪');
+    else if (deleted <= 1) setHTML(mO, '正在刪第 <b>1</b> 筆／共 80 萬筆');
+    else setHTML(mO, '正在刪第 <b>2、3……</b> 筆／共 80 萬筆');
+    cls(mO, 'hot', k === 1);
+
+    // link 2
+    cls($('l2'), 'hot', t >= 5.8 && t < 15.5);
+
+    // order_items: every sweep reads the whole table
+    var sI = $('sI');
+    cls(sI, 'on', !!sw);
+    if (sw) sI.style.top = (sw.p * 100).toFixed(2) + '%';
+    for (var j = 0; j < I_N; j++){
+      var pj = (j + 0.5) / I_N;
+      cls(bI[j], 'seen', !!sw && pj <= sw.p);
+    }
+    var hotI = k >= 2 && k <= 4;
+    cls($('fI'), 'hot', hotI);
+    cls($('tI'), 'hot', hotI);
+    var mI = $('mI');
+    if (sw) setHTML(mI, '沒索引，<b>400 多萬列整張</b>掃一遍');
+    else if (back) setHTML(mI, '還原：刪到一半的資料全部回來');
+    else setHTML(mI, '400 多萬列');
+    cls(mI, 'hot', !!sw);
+    var cnt = $('cnt');
+    var shown = sw ? sw.n : (t >= I_FIRST[1] && t < LOOP_A ? 1 : (t >= LOOP_B && !back ? Math.floor((LOOP_B - LOOP_A) / SWEEP) + 1 : 0));
+    cls(cnt, 'on', shown > 0);
+    cls(cnt, 'hot', shown > 0);
+    if (shown > 0) setText($('cntN'), String(shown));
+
+    // transaction frame
+    var stage = $('stage');
+    cls(stage, 'hot', k === 4 || (t >= 15.5 && !back));
+    cls(stage, 'back', back);
+    setText($('txTag'), back ? '整個交易回滾' : '同一個交易');
+    setText($('txNote'), back ? '刪到一半的資料全部還原' : (k === 4 || t >= 15.5 ? '幾百萬列的刪除還沒結束：相關的列一直被鎖著，大量 WAL 產生' : ''));
+
+    // readout tiles (only states the article names)
+    var api = ['正常，約 200ms', '正常', '開始變慢', '8 秒，大量逾時', '8 秒，大量逾時', '慢慢恢復'][k];
+    var db  = ['執行這一句 DELETE', '整張 orders 掃一遍', '整張 order_items 掃一遍', 'CPU 100%、磁碟 I/O 滿載', '列一直被鎖著，大量 WAL', '查詢被砍掉，交易回滾'][k];
+    var rep = ['跟著主資料庫', '跟著主資料庫', '跟著主資料庫', '跟著主資料庫', '跟不上：前台看到好幾分鐘前的舊資料', '慢慢恢復'][k];
+    setText($('vApiV'), api); setText($('vDbV'), db); setText($('vRepV'), rep);
+    cls($('vApi'), 'hot', k === 2 || k === 3 || k === 4); cls($('vApi'), 'calm', k === 5);
+    cls($('vDb'), 'hot', k === 3 || k === 4);            cls($('vDb'), 'calm', k === 5);
+    cls($('vRep'), 'hot', k === 4);                       cls($('vRep'), 'calm', k === 5);
+
+    // step caption + keys
+    setText($('stT'), S.t); setText($('stD'), S.d);
+    var keys = document.querySelectorAll('.keys button');
+    for (var q = 0; q < keys.length; q++){ if (q === k) keys[q].setAttribute('aria-current', 'step'); else keys[q].removeAttribute('aria-current'); }
+  }
+
+  // ---- controller ----
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var t = REST, playing = false, visible = true, raf = 0, last = 0, played = false;
+  var scrub = $('scrub'), playBtn = $('play');
+
+  function paint(){ D(t); scrub.value = String(t); }
+  function setPlayUI(){
+    if (reduce.matches){ playBtn.textContent = '下一步'; playBtn.setAttribute('aria-label', '下一步'); return; }
+    playBtn.textContent = playing ? '❚❚' : '▶';
+    playBtn.setAttribute('aria-label', playing ? '暫停' : '播放');
+  }
+  function stopLoop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    t = Math.min(DUR, t + dt);
+    paint();
+    if (t >= DUR){ playing = false; setPlayUI(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+  function startLoop(){ if (!raf && playing && visible){ last = performance.now(); raf = requestAnimationFrame(frame); } }
+  function pause(){ playing = false; stopLoop(); setPlayUI(); }
+  function play(){
+    if (!played || t >= DUR - 0.01){ t = 0; }
+    played = true; playing = true; setPlayUI(); paint(); startLoop();
+  }
+  function seek(x){ pause(); t = Math.max(0, Math.min(DUR, +x || 0)); paint(); }
+  function nextKey(){
+    var k = stepAt(t);
+    var cur = STEPS[k];
+    var nk = (Math.abs(t - cur.key) < 0.01 || t > cur.key) ? (k + 1) % STEPS.length : k;
+    seek(STEPS[nk].key);
+  }
+
+  playBtn.addEventListener('click', function(){
+    if (reduce.matches){ nextKey(); return; }
+    if (playing) pause(); else play();
+  });
+  scrub.addEventListener('input', function(){ played = true; seek(scrub.value); });
+  Array.prototype.forEach.call(document.querySelectorAll('.keys button'), function(b){
+    b.addEventListener('click', function(){ played = true; seek(STEPS[+b.getAttribute('data-k')].key); });
+  });
+  fig.addEventListener('keydown', function(ev){
+    if (ev.target !== fig) return;
+    if (ev.key === ' ' || ev.key === 'Enter'){ ev.preventDefault(); playBtn.click(); }
+    else if (ev.key === 'ArrowRight'){ ev.preventDefault(); played = true; nextKey(); }
+    else if (ev.key === 'ArrowLeft'){ ev.preventDefault(); played = true; var k = stepAt(t); seek(STEPS[Math.max(0, (t > STEPS[k].key + 0.01 ? k : k - 1))].key); }
+  });
+  if (reduce.addEventListener) reduce.addEventListener('change', function(){ pause(); });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) startLoop(); else stopLoop();
+    }, {rootMargin:'120px'}).observe(fig);
+  }
+
+  // theme switch: shown only when opened on its own (a host page sets data-theme itself)
+  var themeBtn = $('theme'), root = document.documentElement;
+  var top = true; try { top = window.self === window.top; } catch (e) { top = false; }
+  function isDark(){
+    var a = root.getAttribute('data-theme');
+    return a ? a === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function themeLabel(){ themeBtn.textContent = isDark() ? '淺色' : '深色'; }
+  if (top){ themeBtn.classList.add('on'); themeLabel(); }
+  themeBtn.addEventListener('click', function(){ root.setAttribute('data-theme', isDark() ? 'light' : 'dark'); themeLabel(); });
+  new MutationObserver(themeLabel).observe(root, {attributes:true, attributeFilter:['data-theme']});
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:STEPS.map(function(s){ return s.key; })}; };
+
+  setPlayUI();
+  paint();
+})();
+</script>
+</body>
+</html>

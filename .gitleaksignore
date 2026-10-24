@@ -1,2 +1,3 @@
 # 範例 HTTP 請求裡的 Idempotency-Key 是隨機 UUID，不是金鑰
 docs/25-冪等性.md:generic-api-key:132
+docs/25-冪等性.md:generic-api-key:174

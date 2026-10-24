@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>水平擴展：狀態卡在單一台</title>
+<style>
+:root {
+  --bg: #ffffff; --surface: #ffffff; --node: #f6f7f9; --ink: #1f2430; --muted: #5b6474; --line: #b8c0cc;
+  --hot-fill: #fde68a; --hot-stroke: #b45309; --hot-ink: #111111; --req: #2557a7;
+  --f-ui: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --f-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Noto Sans TC", "Microsoft JhengHei", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e2129; --surface: #1e2129; --node: #2a2f3a; --ink: #e8eaef; --muted: #a3abb8; --line: #556070;
+    --hot-fill: #6b3a0c; --hot-stroke: #f59e0b; --hot-ink: #fff4d6; --req: #7fb0ff; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e2129; --surface: #1e2129; --node: #2a2f3a; --ink: #e8eaef; --muted: #a3abb8; --line: #556070;
+  --hot-fill: #6b3a0c; --hot-stroke: #f59e0b; --hot-ink: #fff4d6; --req: #7fb0ff; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); padding: 8px 16px 12px; }
+.fig { margin: 0 auto; max-width: 820px; min-width: 0; display: flex; flex-direction: column; gap: 10px; outline: none; }
+.fig:focus-visible { outline: 2px solid var(--hot-stroke); outline-offset: 4px; border-radius: 6px; }
+.readout { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: start; min-height: 3.6em; font-size: 15px; line-height: 1.45; }
+.readout .tag { grid-row: span 2; font: 700 14px var(--f-mono); padding: 3px 8px; border-radius: 6px; background: var(--hot-fill); color: var(--hot-ink); border: 1.5px solid var(--hot-stroke); }
+.readout .what { color: var(--ink); }
+.readout .res { color: var(--muted); }
+.readout .res b { color: var(--ink); font-weight: 650; }
+.readout code { font-family: var(--f-mono); font-size: 0.92em; }
+.stage { width: 100%; min-width: 0; }
+.stage svg { display: block; width: 100%; height: auto; overflow: visible; }
+.stage.narrow svg { max-width: 460px; margin: 0 auto; }
+.ctrl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ctrl button { flex: none; min-width: 36px; height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: 14px var(--f-ui); }
+.ctrl button:hover { border-color: var(--hot-stroke); }
+.ctrl button[aria-current="step"] { background: var(--hot-fill); color: var(--hot-ink); border-color: var(--hot-stroke); font-weight: 700; }
+.ctrl .steps { display: flex; gap: 6px; flex-wrap: wrap; }
+.ctrl .steps button { font: 600 13px var(--f-mono); min-width: 40px; }
+.ctrl input[type=range] { flex: 1 1 140px; min-width: 0; height: 34px; accent-color: var(--hot-stroke); }
+:focus-visible { outline: 2px solid var(--hot-stroke); outline-offset: 2px; }
+/* SVG parts */
+.n-box { fill: var(--node); stroke: var(--line); stroke-width: 1.5; }
+.n-hot { fill: var(--hot-fill); stroke: var(--hot-stroke); stroke-width: 2.5; }
+.t-name { fill: var(--ink); font-family: var(--f-ui); font-weight: 650; }
+.t-body { fill: var(--muted); font-family: var(--f-ui); }
+.t-strong { fill: var(--ink); font-weight: 650; }
+.t-mono { fill: var(--muted); font-family: var(--f-mono); }
+.t-hot { fill: var(--hot-ink); font-family: var(--f-ui); font-weight: 650; }
+.conn { fill: none; stroke: var(--line); stroke-width: 1.75; }
+.band { fill: none; stroke: var(--line); stroke-width: 10; stroke-linecap: round; }
+.dot { fill: var(--req); }
+.dot-bad { fill: var(--hot-stroke); }
+.tagbg { fill: var(--bg); stroke: var(--req); stroke-width: 1.25; }
+.tagtx { fill: var(--req); font-family: var(--f-ui); font-weight: 650; }
+.m-track { fill: var(--node); stroke: var(--line); stroke-width: 1; }
+.m-ghost { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.m-fill { fill: var(--hot-stroke); }
+.m-mark { stroke: var(--ink); stroke-width: 2; }
+.arrowhead { fill: var(--line); }
+.x { fill: var(--hot-stroke); font-family: var(--f-ui); font-weight: 800; }
+</style>
+</head>
+<body>
+
+<figure class="fig" data-fig="scale-out-state-stuck" data-dur="28" data-rest="17.2" tabindex="0"
+  aria-label="動畫：負載平衡器把同一位使用者的請求輪流分給 VM-A 到 VM-D，登入狀態只留在 VM-A、大頭貼只留在 VM-C，所以換到 VM-B、VM-D 時撲空；之後加到 10 台，連線數上限變成 300 條，超過 PostgreSQL 的 max_connections 100，新連線被拒絕。左右方向鍵切換步驟，空白鍵播放或暫停。">
+  <div class="readout" aria-live="polite">
+    <span class="tag" data-ro="tag">T5</span>
+    <span class="what" data-ro="what"></span>
+    <span class="res" data-ro="res"></span>
+  </div>
+  <div class="stage"></div>
+  <div class="ctrl">
+    <button type="button" data-act="play" aria-label="播放">▶</button>
+    <input type="range" min="0" max="28" step="0.01" aria-label="時間軸">
+    <div class="steps" role="group" aria-label="跳到某一步"></div>
+    <button type="button" data-act="theme" aria-label="切換深淺色">深色</button>
+  </div>
+</figure>
+
+<script>
+(() => {
+const NS = 'http://www.w3.org/2000/svg';
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const ease = (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const easeOut = (x) => 1 - Math.pow(1 - clamp(x), 3);
+function spring(t, k = 170, d = 20) {
+  if (t <= 0) return 0;
+  const w0 = Math.sqrt(k), z = d / (2 * w0);
+  if (z < 1) { const wd = w0 * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * w0 * t) * (Math.cos(wd * t) + (z * w0 / wd) * Math.sin(wd * t)); }
+  return 1 - Math.exp(-w0 * t) * (1 + w0 * t);
+}
+
+// ---- timeline (seconds) -------------------------------------------------
+const T = [0, 4.5, 9, 13.5, 18, 22.5];
+const DUR = 28, REST = 17.2;
+const ARRIVE = 1.5;            // request reaches its VM
+const BACK0 = 1.9, BACK1 = 3.0; // response returns to the user (T3, T5)
+const FULL = T[5] + 2.5;       // connections hit 100
+const NP = 40;                 // connection particles in T7
+
+const STEPS = [
+  { tag: 'T2', what: '一位使用者登入，請求分到 VM-A，<code>SESSIONS[sid]</code> 寫進 VM-A 這個 worker 的記憶體',
+    res: '結果：<b>只有 VM-A 的這個 worker 記得這個 <code>sid</code></b>', label: '登入' },
+  { tag: 'T3', what: '他點下一頁，負載平衡器輪到 VM-B。VM-B 的 <code>SESSIONS</code> 裡沒有這個 <code>sid</code>',
+    res: '結果：<b>VM-B 當作沒登入，導回登入頁</b>', label: '下一頁' },
+  { tag: 'T4', what: '他重新登入後上傳大頭貼，這個請求落在 VM-C，檔案存進 VM-C 的 <code>/var/app/uploads</code>',
+    res: '結果：<b>只有 VM-C 的硬碟上有這張圖</b>', label: '上傳大頭貼' },
+  { tag: 'T5', what: '頁面載入大頭貼，請求分到 VM-D，VM-D 的硬碟上沒有這個檔案',
+    res: '結果：<b>回 404，圖片破掉</b>', label: '載入大頭貼' },
+  { tag: 'T6', what: '下午流量更大，手動加到 10 台。每個 worker 的連線池上限 15 條：10 台 × 2 個 worker × 15 = 300 條',
+    res: '結果：<b>PostgreSQL 的 <code>max_connections</code> 還是預設的 100</b>' },
+  { tag: 'T7', what: '尖峰時各個 worker 把連線開到上限，總數超過 100',
+    res: '結果：<b>PostgreSQL 拒絕新連線，整站掛掉</b>：<code>FATAL: sorry, too many clients already</code>' },
+];
+
+// ---- two layouts on a 4 px grid (docs/layout.md) -------------------------
+const MODES = {
+  wide: {
+    W: 720, H: 408, fsN: 15, fsB: 14, fsM: 13.5,
+    user: { x: 16, y: 168, w: 80, h: 64 }, chip: { x: 4, y: 244, w: 108, h: 28 },
+    lb: { x: 136, y: 164, w: 120, h: 72 },
+    vms: [24, 112, 200, 288].map((y) => ({ x: 312, y, w: 200, h: 72 })),
+    grid: (i) => ({ x: 312 + (i % 2) * 104, y: 24 + Math.floor(i / 2) * 68, w: 96, h: 56 }),
+    pg: { x: 544, y: 128, w: 168, h: 104 }, meter: { x: 544, y: 268, w: 168, h: 16 },
+    formula: { x: 512, y: 392 },
+    userLb: [[96, 200], [136, 200]], lbC: [196, 200],
+    conn: [
+      [[256, 176], [272, 176], [272, 60], [312, 60]],
+      [[256, 192], [284, 192], [284, 148], [312, 148]],
+      [[256, 208], [284, 208], [284, 236], [312, 236]],
+      [[256, 224], [272, 224], [272, 324], [312, 324]],
+    ],
+    lbGrid: [[256, 200], [308, 200]],
+    band: [[520, 180], [540, 180]],
+    pIn: (c) => [[c.x + c.w / 2, c.y + c.h / 2], [528, c.y + c.h / 2], [528, 180], [548, 180]],
+    rowDy: [26, 50], titleDy: 0,
+  },
+  narrow: {
+    W: 340, H: 640, fsN: 16, fsB: 15, fsM: 15,
+    user: { x: 8, y: 8, w: 112, h: 48 }, chip: { x: 128, y: 16, w: 204, h: 32 },
+    lb: { x: 88, y: 88, w: 164, h: 56 },
+    vms: [[8, 192], [184, 192], [8, 304], [184, 304]].map(([x, y]) => ({ x, y, w: 148, h: 88 })),
+    grid: (i) => ({ x: 8 + (i % 2) * 176, y: 192 + Math.floor(i / 2) * 40, w: 148, h: 32 }),
+    pg: { x: 68, y: 432, w: 204, h: 88 }, meter: { x: 40, y: 564, w: 260, h: 16 },
+    formula: { x: 170, y: 628 },
+    userLb: [[64, 56], [64, 72], [170, 72], [170, 88]], lbC: [170, 116],
+    conn: [
+      [[120, 144], [120, 160], [82, 160], [82, 192]],
+      [[220, 144], [220, 160], [258, 160], [258, 192]],
+      [[152, 144], [152, 168], [164, 168], [164, 292], [82, 292], [82, 304]],
+      [[188, 144], [188, 168], [176, 168], [176, 292], [258, 292], [258, 304]],
+    ],
+    lbGrid: [[170, 144], [170, 186]],
+    band: [[170, 396], [170, 424]],
+    pIn: (c) => { const ex = c.x < 170 ? c.x + c.w : c.x; return [[c.x + c.w / 2, c.y + c.h / 2], [ex, c.y + c.h / 2], [170, c.y + c.h / 2], [170, 400], [170, 440]]; },
+    rowDy: [32, 60], titleDy: 0,
+  },
+};
+
+// ---- helpers ------------------------------------------------------------
+function el(tag, attrs, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function txt(parent, x, y, s, cls, fs, anchor = 'start') {
+  const n = el('text', { x, y, class: cls, 'font-size': fs, 'text-anchor': anchor, 'dominant-baseline': 'middle' }, parent);
+  n.textContent = s; return n;
+}
+function rounded(pts, r = 8) {
+  let d = `M${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i - 1], [bx, by] = pts[i], [cx, cy] = pts[i + 1];
+    const l1 = Math.hypot(bx - ax, by - ay), l2 = Math.hypot(cx - bx, cy - by);
+    const rr = Math.min(r, l1 / 2, l2 / 2);
+    const p1 = [bx - (bx - ax) / l1 * rr, by - (by - ay) / l1 * rr];
+    const p2 = [bx + (cx - bx) / l2 * rr, by + (cy - by) / l2 * rr];
+    d += ` L${p1[0]} ${p1[1]} Q${bx} ${by} ${p2[0]} ${p2[1]}`;
+  }
+  const z = pts[pts.length - 1];
+  return d + ` L${z[0]} ${z[1]}`;
+}
+function along(pts, u) {
+  const seg = []; let L = 0;
+  for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(l); L += l; }
+  let s = clamp(u) * L;
+  for (let i = 0; i < seg.length; i++) {
+    if (s <= seg[i] || i === seg.length - 1) { const f = seg[i] ? s / seg[i] : 0; return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f]; }
+    s -= seg[i];
+  }
+  return pts[pts.length - 1];
+}
+const textW = (s, fs) => [...s].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? fs : fs * 0.6), 0);
+const cache = new WeakMap();
+function set(n, k, v) { let c = cache.get(n); if (!c) cache.set(n, c = {}); if (c[k] !== v) { c[k] = v; if (k === 'text') n.textContent = v; else n.setAttribute(k, v); } }
+const op = (n, a) => set(n, 'opacity', a <= 0.001 ? '0' : a >= 0.999 ? '1' : a.toFixed(3));
+
+// ---- DOM ----------------------------------------------------------------
+const fig = document.querySelector('.fig');
+const stage = fig.querySelector('.stage');
+const ro = { tag: fig.querySelector('[data-ro=tag]'), what: fig.querySelector('[data-ro=what]'), res: fig.querySelector('[data-ro=res]') };
+const btnPlay = fig.querySelector('[data-act=play]'), btnTheme = fig.querySelector('[data-act=theme]');
+const range = fig.querySelector('input[type=range]');
+const stepsBox = fig.querySelector('.steps');
+const stepBtns = STEPS.map((s, i) => {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = s.tag;
+  b.setAttribute('aria-label', `從 ${s.tag} 開始播放`);
+  b.addEventListener('click', () => { f.t = T[i]; f.playing = true; f.userSet = true; sync(); render(); kick(); });
+  stepsBox.appendChild(b); return b;
+});
+
+let M = null, S = null, modeName = '';
+function build(name) {
+  modeName = name; M = MODES[name]; stage.className = 'stage ' + name;
+  const svg = el('svg', { viewBox: `0 0 ${M.W} ${M.H}`, role: 'img', 'aria-labelledby': 'sos-title sos-desc' });
+  const title = el('title', { id: 'sos-title' }, svg); title.textContent = '水平擴展後，狀態卡在單一台';
+  const desc = el('desc', { id: 'sos-desc' }, svg);
+  desc.textContent = '同一位使用者的請求被輪流分到 VM-A 到 VM-D，session 只在 VM-A、大頭貼只在 VM-C；加到 10 台後連線數上限 300 條，超過 PostgreSQL 的 max_connections 100。';
+  const defs = el('defs', {}, svg);
+  const mk = el('marker', { id: 'sos-arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
+  el('path', { d: 'M0 0 L10 5 L0 10 z', class: 'arrowhead' }, mk);
+
+  S = {};
+  const gConn = el('g', {}, svg), gNodes = el('g', {}, svg), gFx = el('g', {}, svg);
+  // connectors first
+  S.userLb = el('path', { d: rounded(M.userLb), class: 'conn', 'marker-end': 'url(#sos-arrow)' }, gConn);
+  S.conn = M.conn.map((p) => el('path', { d: rounded(p), class: 'conn', 'marker-end': 'url(#sos-arrow)' }, gConn));
+  S.lbGrid = el('path', { d: rounded(M.lbGrid), class: 'conn', 'marker-end': 'url(#sos-arrow)', 'stroke-width': 2.5 }, gConn);
+  S.band = el('path', { d: rounded(M.band), class: 'band' }, gConn);
+
+  // user
+  const u = M.user;
+  el('rect', { x: u.x, y: u.y, width: u.w, height: u.h, rx: 8, class: 'n-box' }, gNodes);
+  txt(gNodes, u.x + u.w / 2, u.y + u.h / 2, '使用者', 't-name', M.fsN, 'middle');
+  S.chip = el('g', {}, gNodes);
+  const c = M.chip;
+  el('rect', { x: c.x, y: c.y, width: c.w, height: c.h, rx: 6, class: 'n-hot' }, S.chip);
+  S.chipT = txt(S.chip, c.x + c.w / 2, c.y + c.h / 2 + 1, '', 't-hot', M.fsB, 'middle');
+
+  // load balancer
+  const b = M.lb;
+  el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 8, class: 'n-box' }, gNodes);
+  txt(gNodes, b.x + b.w / 2, b.y + b.h / 2 - 10, '負載平衡器', 't-name', M.fsN, 'middle');
+  txt(gNodes, b.x + b.w / 2, b.y + b.h / 2 + 12, '輪流分', 't-body', M.fsB, 'middle');
+
+  // four VM cards
+  S.vm = M.vms.map((r, i) => {
+    const g = el('g', {}, gNodes);
+    el('rect', { x: r.x, y: r.y, width: r.w, height: r.h, rx: 8, class: 'n-box' }, g);
+    const hot = el('rect', { x: r.x, y: r.y, width: r.w, height: r.h, rx: 8, class: 'n-hot', opacity: 0 }, g);
+    const nm = txt(g, r.x + 12, r.y + 14, 'VM-' + 'ABCD'[i], 't-name', M.fsN);
+    const r1 = txt(g, r.x + 12, r.y + M.rowDy[0] + (modeName === 'wide' ? 4 : 4), '', 't-body', M.fsB);
+    const r2 = txt(g, r.x + 12, r.y + M.rowDy[1] + (modeName === 'wide' ? 6 : 8), '', 't-body', M.fsB);
+    return { g, hot, nm, r1, r2 };
+  });
+
+  // ten small VMs (T6+)
+  S.grid = Array.from({ length: 10 }, (_, i) => {
+    const r = M.grid(i), g = el('g', { opacity: 0 }, gNodes);
+    el('rect', { x: r.x, y: r.y, width: r.w, height: r.h, rx: 6, class: 'n-box' }, g);
+    txt(g, r.x + r.w / 2, r.y + r.h / 2 + 1, i < 4 ? 'VM-' + 'ABCD'[i] : '新加的 VM', i < 4 ? 't-name' : 't-body', M.fsB, 'middle');
+    return { g, r };
+  });
+
+  // PostgreSQL cylinder
+  const p = M.pg, e = 12;
+  el('path', { d: `M${p.x} ${p.y + e} V${p.y + p.h - e} A${p.w / 2} ${e} 0 0 0 ${p.x + p.w} ${p.y + p.h - e} V${p.y + e}`, class: 'n-box' }, gNodes);
+  el('ellipse', { cx: p.x + p.w / 2, cy: p.y + e, rx: p.w / 2, ry: e, class: 'n-box' }, gNodes);
+  S.pgHot = el('g', { opacity: 0 }, gNodes);
+  el('path', { d: `M${p.x} ${p.y + e} V${p.y + p.h - e} A${p.w / 2} ${e} 0 0 0 ${p.x + p.w} ${p.y + p.h - e} V${p.y + e}`, class: 'n-hot' }, S.pgHot);
+  el('ellipse', { cx: p.x + p.w / 2, cy: p.y + e, rx: p.w / 2, ry: e, class: 'n-hot' }, S.pgHot);
+  S.pgName = txt(gNodes, p.x + p.w / 2, p.y + p.h / 2 + 2, 'PostgreSQL', 't-name', M.fsN, 'middle');
+  S.pgSub = txt(gNodes, p.x + p.w / 2, p.y + p.h / 2 + 24, 'max_connections 100', 't-mono', M.fsM, 'middle');
+
+  // connection meter (T6+)
+  const m = M.meter;
+  S.meter = el('g', { opacity: 0 }, gNodes);
+  S.mLabel = txt(S.meter, m.x + m.w / 2, m.y - 14, '', 't-body t-strong', M.fsB, 'middle');
+  el('rect', { x: m.x, y: m.y, width: m.w, height: m.h, rx: 3, class: 'm-track' }, S.meter);
+  S.mFill = el('rect', { x: m.x, y: m.y, width: 0, height: m.h, rx: 3, class: 'm-fill' }, S.meter);
+  S.mGhost = el('rect', { x: m.x, y: m.y - 3, width: 0, height: m.h + 6, rx: 4, class: 'm-ghost' }, S.meter);
+  const mx = m.x + m.w / 3;
+  el('line', { x1: mx, y1: m.y - 6, x2: mx, y2: m.y + m.h + 6, class: 'm-mark' }, S.meter);
+  txt(S.meter, m.x, m.y + m.h + 16, '0', 't-mono', M.fsM, 'start');
+  txt(S.meter, mx, m.y + m.h + 16, '100', 't-mono', M.fsM, 'middle');
+  S.m300 = txt(S.meter, m.x + m.w, m.y + m.h + 16, '300', 't-mono', M.fsM, 'end');
+  S.formula = txt(gNodes, M.formula.x, M.formula.y, '10 台 × 2 個 worker × 15 = 300 條上限', 't-body t-strong', M.fsB, 'middle');
+
+  // moving things on top
+  S.req = el('circle', { r: 7, class: 'dot', opacity: 0 }, gFx);
+  S.tag = el('g', { opacity: 0 }, gFx);
+  S.tagBg = el('rect', { rx: 5, height: M.fsB + 10, class: 'tagbg' }, S.tag);
+  S.tagT = txt(S.tag, 0, 0, '', 'tagtx', M.fsB, 'middle');
+  S.back = el('circle', { r: 7, class: 'dot-bad', opacity: 0 }, gFx);
+  S.parts = Array.from({ length: NP }, () => ({ c: el('circle', { r: 4.5, class: 'dot', opacity: 0 }, gFx), x: txt(gFx, 0, 0, '×', 'x', M.fsN + 2, 'middle') }));
+  S.parts.forEach((q) => op(q.x, 0));
+
+  stage.replaceChildren(svg);
+}
+
+// ---- the figure as a pure function of t ---------------------------------
+function stepAt(t) { let s = 0; for (let i = 0; i < T.length; i++) if (t >= T[i]) s = i; return s; }
+function reqPath(k) { return [...M.userLb, M.lbC, ...M.conn[k]]; }
+
+function draw(t) {
+  const s = stepAt(t);
+  // VM cards (T2–T5)
+  const cardA = 1 - clamp((t - T[4]) / 0.5);
+  S.vm.forEach((v, i) => {
+    op(v.g, cardA);
+    const a = T[i] + ARRIVE;
+    const hot = t >= a && t < T[i + 1] ? clamp((t - a) / 0.25) : (t >= T[i + 1] && t < T[i + 1] + 0.3 ? 1 - (t - T[i + 1]) / 0.3 : 0);
+    op(v.hot, hot);
+    set(v.nm, 'class', hot > 0.5 ? 't-hot' : 't-name');
+    let r1 = '記憶體：—', r2 = '硬碟：—', s1 = false, s2 = false;
+    if (i === 0 && t >= a) { r1 = '記憶體：有 sid'; s1 = true; }
+    if (i === 1 && t >= a) { r1 = '記憶體：沒有 sid'; s1 = true; }
+    if (i === 2 && t >= a) { r2 = '硬碟：有大頭貼'; s2 = true; }
+    if (i === 3 && t >= a) { r2 = '硬碟：沒有這張圖'; s2 = true; }
+    set(v.r1, 'text', r1); set(v.r2, 'text', r2);
+    set(v.r1, 'class', hot > 0.5 && s1 ? 't-hot' : s1 ? 't-body t-strong' : 't-body');
+    set(v.r2, 'class', hot > 0.5 && s2 ? 't-hot' : s2 ? 't-body t-strong' : 't-body');
+  });
+  S.conn.forEach((c) => op(c, cardA));
+
+  // request dot + its label
+  let reqA = 0, tagA = 0;
+  if (s < 4) {
+    const u = t - T[s], p = ease((u - 0.2) / (ARRIVE - 0.2));
+    reqA = u > 0.15 && u < ARRIVE + 0.25 ? Math.min(clamp((u - 0.15) / 0.1), 1 - clamp((u - ARRIVE) / 0.25)) : 0;
+    tagA = reqA;
+    const [x, y] = along(reqPath(s), p);
+    set(S.req, 'cx', x.toFixed(1)); set(S.req, 'cy', y.toFixed(1));
+    const lab = STEPS[s].label, w = Math.ceil(textW(lab, M.fsB) + 14), h = M.fsB + 10;
+    const ty = y - 14 - h / 2;
+    set(S.tagT, 'text', lab); set(S.tagT, 'x', x.toFixed(1)); set(S.tagT, 'y', (ty + 1).toFixed(1));
+    set(S.tagBg, 'x', (x - w / 2).toFixed(1)); set(S.tagBg, 'y', (ty - h / 2).toFixed(1)); set(S.tagBg, 'width', w);
+    // failed response travelling back (T3, T5)
+    let backA = 0;
+    if (s === 1 || s === 3) {
+      const b = (u - BACK0) / (BACK1 - BACK0);
+      backA = b > 0 && b < 1.05 ? Math.min(clamp(b / 0.08), 1 - clamp((b - 0.95) / 0.1)) : 0;
+      const [bx, by] = along(reqPath(s).slice().reverse(), ease(b));
+      set(S.back, 'cx', bx.toFixed(1)); set(S.back, 'cy', by.toFixed(1));
+    }
+    op(S.back, backA);
+  } else op(S.back, 0);
+  op(S.req, reqA); op(S.tag, tagA);
+
+  // user status chip
+  let chip = '', chipA = 0;
+  if (t >= T[1] + BACK1 && t < T[2]) { chip = '導回登入頁'; chipA = clamp((t - T[1] - BACK1) / 0.2); }
+  else if (t >= T[3] + BACK1 && t < T[4]) { chip = '圖片破掉 404'; chipA = clamp((t - T[3] - BACK1) / 0.2); }
+  else if (t >= FULL + 0.6) { chip = '整站打不開'; chipA = clamp((t - FULL - 0.6) / 0.2); }
+  set(S.chipT, 'text', chip); op(S.chip, chipA);
+  set(S.chip, 'transform', chipA > 0 ? `translate(0 ${(1 - spring(Math.max(0, t - (chip === '導回登入頁' ? T[1] + BACK1 : chip === '圖片破掉 404' ? T[3] + BACK1 : FULL + 0.6)))) * -6})` : '');
+
+  // T6: ten VMs, the band, the meter, the formula
+  S.grid.forEach((q, j) => op(q.g, clamp((t - T[4] - 0.3 - j * 0.06) / 0.3)));
+  op(S.lbGrid, clamp((t - T[4] - 0.3) / 0.3));
+  const meterA = clamp((t - T[4] - 1.0) / 0.5);
+  op(S.band, meterA * 0.55); op(S.meter, meterA); op(S.formula, clamp((t - T[4] - 1.2) / 0.5));
+  const m = M.meter;
+  const ghost = easeOut((t - T[4] - 1.4) / 1.2);
+  set(S.mGhost, 'width', (m.w * ghost).toFixed(1)); op(S.m300, clamp((ghost - 0.9) / 0.1));
+  // T7: connections pile up to 100
+  const n = Math.round(100 * easeOut((t - T[5] - 0.2) / 2.3));
+  set(S.mFill, 'width', (m.w / 3 * n / 100).toFixed(1));
+  set(S.mLabel, 'text', t < T[5] ? '連線數上限 vs max_connections' : `連線數 ${n}${n >= 100 ? '（已滿）' : ''}`);
+  op(S.pgHot, clamp((t - FULL) / 0.25));
+  set(S.pgName, 'class', t >= FULL + 0.12 ? 't-hot' : 't-name');
+  set(S.pgSub, 'class', t >= FULL + 0.12 ? 't-hot' : 't-mono');
+
+  // particles
+  S.parts.forEach((q, i) => {
+    const ts = T[5] + 0.1 + i * 0.11, ta = ts + 0.7;
+    if (t < ts || s < 5) { op(q.c, 0); op(q.x, 0); return; }
+    const pts = M.pIn(M.grid((i * 3) % 10));
+    if (t <= ta) {
+      const [x, y] = along(pts, ease((t - ts) / 0.7));
+      set(q.c, 'cx', x.toFixed(1)); set(q.c, 'cy', y.toFixed(1)); set(q.c, 'class', 'dot'); op(q.c, 1); op(q.x, 0); return;
+    }
+    if (ta < FULL) { op(q.c, 0); op(q.x, 0); return; }       // absorbed: still room
+    const b = (t - ta) / 0.45;                                  // rejected: bounce back
+    const [ex, ey] = pts[pts.length - 1], [px, py] = pts[pts.length - 2];
+    const L = Math.hypot(ex - px, ey - py) || 1, back = 26 * Math.sin(Math.PI * 0.5 * Math.min(1, b));
+    if (b > 1) {
+      op(q.c, 0); op(q.x, clamp(1 - (b - 1) / 0.6));
+      set(q.x, 'x', (ex - (ex - px) / L * back).toFixed(1)); set(q.x, 'y', (ey - (ey - py) / L * back - 12).toFixed(1));
+      return;
+    }
+    const x = ex - (ex - px) / L * back, y = ey - (ey - py) / L * back;
+    set(q.c, 'cx', x.toFixed(1)); set(q.c, 'cy', y.toFixed(1)); set(q.c, 'class', 'dot-bad'); op(q.c, 1 - b * 0.6);
+    set(q.x, 'x', x.toFixed(1)); set(q.x, 'y', (y - 12).toFixed(1)); op(q.x, b);
+  });
+
+  // readout
+  const st = STEPS[s];
+  if (f.ros !== s) {
+    f.ros = s;
+    ro.tag.textContent = st.tag; ro.what.innerHTML = st.what; ro.res.innerHTML = st.res;
+    stepBtns.forEach((b, i) => b.toggleAttribute('aria-current', false));
+    stepBtns[s].setAttribute('aria-current', 'step');
+  }
+}
+
+// ---- controller ---------------------------------------------------------
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const f = { t: REST, playing: false, visible: false, started: false, userSet: false, last: 0, ros: -1 };
+function pickMode() {
+  const w = f.w || (f.w = stage.clientWidth || innerWidth);
+  const want = w >= 640 ? 'wide' : 'narrow';
+  if (want !== modeName) { build(want); f.ros = -1; }
+}
+function render() { pickMode(); draw(f.t); range.value = f.t.toFixed(2); range.setAttribute('aria-valuetext', `${STEPS[stepAt(f.t)].tag}，${f.t.toFixed(1)} 秒`); }
+function sync() {
+  btnPlay.textContent = f.playing ? '❚❚' : '▶';
+  btnPlay.setAttribute('aria-label', f.playing ? '暫停' : '播放');
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+  btnTheme.textContent = dark ? '淺色' : '深色';
+  btnTheme.setAttribute('aria-label', dark ? '切換為淺色' : '切換為深色');
+}
+function toggle() {
+  if (!f.playing && f.t >= DUR - 0.01) f.t = 0;
+  f.playing = !f.playing; f.userSet = true; sync(); render(); kick();
+}
+function goStep(d) {
+  const s = clamp(stepAt(f.t) + d, 0, T.length - 1);
+  f.t = T[s]; f.playing = true; f.userSet = true; sync(); render(); kick();
+}
+btnPlay.addEventListener('click', toggle);
+btnTheme.addEventListener('click', () => {
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+});
+range.addEventListener('input', () => { f.playing = false; f.userSet = true; f.t = +range.value; sync(); render(); });
+fig.addEventListener('keydown', (e) => {
+  if (e.target !== fig) return;
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); goStep(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); goStep(-1); }
+  else if (e.key === 'Home') { e.preventDefault(); window.seek(0); }
+  else if (e.key === 'End') { e.preventDefault(); window.seek(DUR); }
+});
+
+let raf = 0;
+const live = () => f.playing && f.visible;
+function tick(now) {
+  raf = 0;
+  if (!live()) { f.last = 0; return; }
+  if (f.last) {
+    f.t = Math.min(DUR, f.t + Math.min(0.1, (now - f.last) / 1000));
+    if (f.t >= DUR) { f.playing = false; sync(); }
+    render();
+  }
+  f.last = now;
+  raf = requestAnimationFrame(tick);
+}
+function kick() { if (!raf && live()) raf = requestAnimationFrame(tick); }
+new IntersectionObserver((es) => {
+  f.visible = es.some((e) => e.isIntersecting);
+  // first time on screen: play once from the start, unless motion is reduced or the reader already took over
+  if (f.visible && !f.started && !reduce && !f.userSet) { f.started = true; f.t = 0; f.playing = true; sync(); render(); }
+  kick();
+}, { rootMargin: '120px' }).observe(fig);
+
+window.DUR = DUR;
+window.seek = (t) => { f.playing = false; f.userSet = true; f.started = true; f.t = clamp(+t, 0, DUR); sync(); render(); };
+
+const redraw = () => { sync(); render(); };
+redraw();
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(redraw);
+new ResizeObserver((es) => { f.w = es[0].contentRect.width; const before = modeName; pickMode(); if (modeName !== before) draw(f.t); }).observe(stage);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redraw);
+new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>
+</body>
+</html>

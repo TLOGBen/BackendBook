@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>沒有上限的佇列</title>
+<style>
+:root{
+  --paper:#ffffff; --paper-2:#f3f4f6; --ink:#1f2937; --muted:#4b5563; --soft:#5a6580;
+  --rule:rgba(31,41,55,.14); --rule-solid:#c7cbd1;
+  --hot-fill:#fde68a; --hot-line:#b45309; --hot-ink:#111111; --hot-bar:#f59e0b;
+  --bad:#b42318; --bad-bg:#fde8e6; --ok:#1f7a45; --ok-bg:#e3f4ea; --chip:#e8edf5; --chip-ink:#1f2937;
+  --dot-idle:#d5d9e0; --dot-busy:#5a6580;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"Noto Sans TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2130; --paper-2:#272b3d; --ink:#eef0f4; --muted:#c3c7d0; --soft:#a3abbd;
+    --rule:rgba(238,240,244,.16); --rule-solid:rgba(195,199,208,.32);
+    --hot-fill:#4a3608; --hot-line:#f59e0b; --hot-ink:#fde68a; --hot-bar:#d97706;
+    --bad:#f6877b; --bad-bg:#3d2226; --ok:#6fd49a; --ok-bg:#1f3a2c; --chip:#33384d; --chip-ink:#eef0f4;
+    --dot-idle:#3a3f55; --dot-busy:#a3abbd;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2130; --paper-2:#272b3d; --ink:#eef0f4; --muted:#c3c7d0; --soft:#a3abbd;
+  --rule:rgba(238,240,244,.16); --rule-solid:rgba(195,199,208,.32);
+  --hot-fill:#4a3608; --hot-line:#f59e0b; --hot-ink:#fde68a; --hot-bar:#d97706;
+  --bad:#f6877b; --bad-bg:#3d2226; --ok:#6fd49a; --ok-bg:#1f3a2c; --chip:#33384d; --chip-ink:#eef0f4;
+  --dot-idle:#3a3f55; --dot-busy:#a3abbd;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--font);font-size:13px;line-height:1.45;-webkit-text-size-adjust:100%}
+.fig{margin:0 auto;padding:12px 16px 16px;outline:none;max-width:960px}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--hot-line);border-radius:8px}
+
+/* 現在發生什麼 */
+.say{display:flex;gap:8px;align-items:flex-start;min-height:64px;margin-bottom:12px}
+@media (min-width:640px){.say{min-height:48px}}
+.say .tag{flex:none;font:700 14px/1 var(--mono);padding:6px 8px;border-radius:6px;background:var(--hot-fill);color:var(--hot-ink);border:1px solid var(--hot-line);white-space:nowrap;min-width:60px;text-align:center}
+.say .txt{font-size:14px;font-weight:600;padding-top:3px}
+.fig.down .say .tag{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
+
+/* 元件流 */
+.flow{display:grid;grid-template-columns:minmax(0,1fr);gap:0}
+@media (min-width:640px){
+  .flow{grid-template-columns:minmax(0,1fr) 20px minmax(0,1.05fr) 20px minmax(0,1.3fr) 20px minmax(0,1fr) 20px minmax(0,.9fr);align-items:stretch}
+}
+.arw{display:flex;align-items:center;justify-content:center;color:var(--soft);height:20px}
+.arw svg{width:16px;height:16px;transform:rotate(90deg)}
+@media (min-width:640px){.arw{height:auto}.arw svg{transform:none}}
+.node{position:relative;min-width:0;padding:8px 12px;border:1.5px solid var(--rule-solid);border-radius:8px;background:var(--paper-2)}
+@media (min-width:640px){.node{min-height:176px;padding:12px}}
+.node .nm{font-weight:700;font-size:14px;line-height:1.3}
+.node .st{margin-top:4px;font-size:13px;color:var(--muted)}
+.node .big{font-weight:700;font-size:18px;line-height:1.25;color:var(--ink);margin-top:4px}
+.mono{font-family:var(--mono);font-size:12px;word-break:break-all}
+.chip{display:inline-flex;align-items:center;gap:4px;margin-top:6px;padding:2px 6px;border-radius:4px;font-size:12px;font-weight:600;background:var(--ok-bg);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 40%,transparent)}
+.node.off{opacity:.55}
+.node.off .chip{background:var(--chip);color:var(--soft);border-color:var(--rule-solid)}
+
+/* 佇列（焦點） */
+.node.q{background:var(--hot-fill);border:2px solid var(--hot-line);box-shadow:0 0 0 3px color-mix(in srgb,var(--hot-line) 18%,transparent)}
+.node.q .nm,.node.q .st,.node.q .big{color:var(--hot-ink)}
+.q-body{display:flex;gap:10px;align-items:stretch;margin-top:6px}
+.tank{position:relative;flex:none;width:44px;height:72px;border:2px solid var(--hot-line);border-top-style:dashed;border-radius:0 0 6px 6px;background:color-mix(in srgb,var(--paper) 55%,transparent);overflow:hidden}
+@media (min-width:640px){.tank{height:96px}}
+.tank .fill{position:absolute;left:0;right:0;bottom:0;height:100%;background:repeating-linear-gradient(0deg,var(--hot-bar) 0 3px,color-mix(in srgb,var(--hot-bar) 70%,var(--paper)) 3px 5px);transform-origin:bottom;transform:scaleY(0)}
+.tank .ghost{position:absolute;left:-2px;right:-2px;bottom:-2px;border:2px dashed var(--bad);border-radius:0 0 6px 6px;display:none}
+.q-read{min-width:0;display:flex;flex-direction:column;justify-content:space-between}
+.q-num{font:700 22px/1.15 var(--font);color:var(--hot-ink)}
+.q-unit{font-size:12px;color:var(--hot-ink);opacity:.85}
+.rates{display:flex;flex-direction:column;gap:2px;margin-top:6px;font-size:12px;color:var(--hot-ink)}
+.rates b{font-family:var(--mono)}
+.lost{display:none;margin-top:6px;font-size:12px;font-weight:700;color:var(--bad)}
+:root[data-theme="dark"] .lost{color:#ffb4a8}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .lost{color:#ffb4a8}}
+.fig.down .tank .ghost{display:block}
+.fig.down .lost,.fig.after .lost{display:block}
+
+/* 執行緒 */
+.dots{display:grid;grid-template-columns:repeat(8,12px);gap:4px;margin-top:6px}
+@media (min-width:640px){.dots{grid-template-columns:repeat(4,12px)}}
+.dots i{display:block;width:12px;height:12px;border-radius:3px;background:var(--dot-idle)}
+.dots i.b{background:var(--dot-busy)}
+.dots i.w{background:transparent;border:2px solid var(--dot-busy)}
+
+/* 監控 */
+.mon{margin-top:16px;border-top:2px solid var(--rule-solid);padding-top:8px}
+.mon-h{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px}
+.mon-h .t{font-weight:700;font-size:13px}
+.alert{font-size:12px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--ok-bg);color:var(--ok)}
+.fig.down .alert{background:var(--bad-bg);color:var(--bad)}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (min-width:640px){.tiles{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.6fr) minmax(0,1.2fr)}}
+.tile{min-width:0;padding:8px 12px;border:1.5px solid var(--rule-solid);border-radius:8px;background:var(--paper)}
+.tile .k{font-size:12px;color:var(--soft)}
+.tile .v{display:flex;align-items:center;gap:6px;font-weight:700;font-size:16px;margin-top:2px}
+.led{flex:none;width:10px;height:10px;border-radius:50%;background:var(--ok)}
+.led.bad{background:var(--bad)}
+.led.off{background:var(--dot-idle)}
+.tile.mem{grid-column:1 / -1}
+@media (min-width:640px){.tile.mem{grid-column:auto}}
+.tile.mem.bad{border-color:var(--bad);background:var(--bad-bg)}
+.spark{display:block;width:100%;height:48px;margin-top:4px}
+.spark .lim{stroke:var(--bad);stroke-dasharray:4 3;stroke-width:1.5}
+.spark .ln{fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round}
+.spark .now{fill:var(--ink)}
+.sp-note{font-size:12px;color:var(--soft);margin-top:2px}
+.tile.miss{border-style:dashed;background:transparent}
+.tile.miss .v{color:var(--soft)}
+
+/* 控制列 */
+.ctrl{display:flex;align-items:center;gap:8px;margin-top:14px}
+.btn{flex:none;width:36px;height:36px;border-radius:8px;border:1.5px solid var(--rule-solid);background:var(--paper-2);color:var(--ink);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font:600 14px var(--font);padding:0}
+.btn:hover{border-color:var(--hot-line)}
+.btn:focus-visible{outline:2px solid var(--hot-line);outline-offset:2px}
+.btn svg{width:16px;height:16px;fill:currentColor}
+.scrub{flex:1;min-width:0;height:32px;accent-color:var(--hot-line);margin:0;cursor:pointer}
+.ticks{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.ticks button{min-height:32px;padding:0 10px;border-radius:6px;border:1.5px solid var(--rule-solid);background:var(--paper);color:var(--ink);font:600 12px var(--mono);cursor:pointer}
+.ticks button[aria-current="true"]{background:var(--hot-fill);border-color:var(--hot-line);color:var(--hot-ink)}
+.ticks button:focus-visible{outline:2px solid var(--hot-line);outline-offset:2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:12px;color:var(--soft)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:14px;height:12px;border-radius:3px;background:var(--hot-fill);border:1.5px solid var(--hot-line)}
+.sw.d{background:var(--dot-busy);border-color:var(--dot-busy)}
+.sw.x{background:transparent;border:1.5px dashed var(--soft)}
+</style>
+</head>
+<body>
+<figure class="fig" id="uq" data-fig="unbounded-queue-oom" data-dur="47" data-rest="22" tabindex="0"
+  aria-label="動畫：雙十一 20:00 起，訂單每秒 300 筆、物流 API 變成 8 秒，執行緒池內部沒有上限的佇列每秒多 298 個工作；監控上 API 回應時間和 CPU 都正常，只有 Pod 記憶體一路爬，20:32 Pod 被 OOMKilled，佇列裡約 57 萬個出貨工作全部消失，之後又從 0 開始循環。">
+
+  <div class="say" aria-live="polite"><span class="tag" id="uq-clock">20:20</span><span class="txt" id="uq-say"></span></div>
+
+  <div class="flow">
+    <div class="node" id="n-req">
+      <div class="nm">下單請求</div>
+      <div class="big" id="req-rate">每秒 300 筆</div>
+      <div class="st" id="req-st">雙十一晚上</div>
+    </div>
+    <div class="arw" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 7h10V3.5L15.5 8 11 12.5V9H1z" fill="currentColor"/></svg></div>
+    <div class="node" id="n-api">
+      <div class="nm">訂單 API handler</div>
+      <div class="st"><span class="mono">save_order()</span> 寫進資料庫</div>
+      <div class="st"><span class="mono">executor.submit()</span> 立刻回傳</div>
+      <div class="chip" id="api-chip">↩ 馬上回 202，訂單成立</div>
+    </div>
+    <div class="arw" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 7h10V3.5L15.5 8 11 12.5V9H1z" fill="currentColor"/></svg></div>
+    <div class="node q" id="n-q">
+      <div class="nm">執行緒池內部的佇列</div>
+      <div class="st">沒有上限，<span class="mono">submit()</span> 永遠成功</div>
+      <div class="q-body">
+        <div class="tank" aria-hidden="true"><div class="fill" id="q-fill"></div><div class="ghost" id="q-ghost"></div></div>
+        <div class="q-read">
+          <div><div class="q-num" id="q-num">約 36 萬</div><div class="q-unit">個出貨工作在排隊（只存在記憶體）</div></div>
+          <div class="rates"><span>進：每秒 <b id="r-in">300</b></span><span>出：每秒 <b id="r-out">2</b></span></div>
+        </div>
+      </div>
+      <div class="lost" id="q-lost">約 57 萬個出貨工作跟著 Pod 一起消失</div>
+    </div>
+    <div class="arw" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 7h10V3.5L15.5 8 11 12.5V9H1z" fill="currentColor"/></svg></div>
+    <div class="node" id="n-thr">
+      <div class="nm">16 個執行緒</div>
+      <div class="dots" id="dots" aria-hidden="true"></div>
+      <div class="st" id="thr-st">每筆 8 秒，每秒只做得完 2 筆</div>
+    </div>
+    <div class="arw" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M1 7h10V3.5L15.5 8 11 12.5V9H1z" fill="currentColor"/></svg></div>
+    <div class="node" id="n-ext">
+      <div class="nm">物流 API</div>
+      <div class="big" id="ext-rt">回應 8 秒</div>
+      <div class="st" id="ext-st">物流商系統過載</div>
+    </div>
+  </div>
+
+  <div class="mon">
+    <div class="mon-h"><span class="t">監控畫面（工程師看得到的）</span><span class="alert" id="alert">沒有告警</span></div>
+    <div class="tiles">
+      <div class="tile" id="t-rt"><div class="k">API 回應時間</div><div class="v"><span class="led" id="led-rt"></span><span id="v-rt">正常</span></div></div>
+      <div class="tile" id="t-cpu"><div class="k">CPU</div><div class="v"><span class="led" id="led-cpu"></span><span id="v-cpu">20%</span></div></div>
+      <div class="tile mem" id="t-mem">
+        <div class="k">Pod 記憶體（唯一的異常）</div>
+        <div class="v"><span id="v-mem">2 GB</span></div>
+        <svg class="spark" viewBox="0 0 200 48" preserveAspectRatio="none" aria-hidden="true">
+          <line class="lim" x1="0" x2="200" y1="4" y2="4" vector-effect="non-scaling-stroke"/>
+          <polyline class="ln" id="sp-ln" points="" vector-effect="non-scaling-stroke"/>
+        </svg>
+        <div class="sp-note">紅色虛線＝記憶體上限，超過就 <span class="mono">OOMKilled</span></div>
+      </div>
+      <div class="tile miss"><div class="k">佇列裡排隊的工作數</div><div class="v">沒有這個指標</div></div>
+    </div>
+  </div>
+
+  <div class="ctrl">
+    <button class="btn" id="uq-play" type="button" aria-label="播放"><svg viewBox="0 0 16 16"><path id="uq-play-ic" d="M4 2.5v11l9-5.5z"/></svg></button>
+    <input class="scrub" id="uq-scrub" type="range" min="0" max="47" step="0.05" value="22" aria-label="時間軸：19:58 到 20:45">
+    <button class="btn" id="uq-theme" type="button" aria-label="切換深淺色">◐</button>
+  </div>
+  <ol class="ticks" id="uq-ticks"></ol>
+  <div class="legend">
+    <span><i class="sw"></i>事情發生在這裡：沒有上限的佇列</span>
+    <span><i class="sw d"></i>執行緒在等物流 API</span>
+    <span><i class="sw x"></i>監控上看不到</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var fig = document.getElementById("uq");
+  var DUR = 47, REST = 22;           // t = 從 19:58 起算的分鐘
+  var SPEED = 3;                      // 每秒走 3 分鐘
+  var HOLD = 1200;                    // 每個關鍵時間停 1.2 秒
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var $ = function(id){ return document.getElementById(id); };
+
+  var KEYS = [
+    {t:1,    tick:"20:00 前"},
+    {t:2.5,  tick:"20:00"},
+    {t:7,    tick:"20:05"},
+    {t:22,   tick:"20:20"},
+    {t:34.3, tick:"20:32"},
+    {t:40,   tick:"20:33 後"}
+  ];
+
+  // 執行緒點
+  var dotsEl = $("dots"), dots = [];
+  for (var i = 0; i < 16; i++){ var d = document.createElement("i"); dotsEl.appendChild(d); dots.push(d); }
+
+  // 刻度
+  var ticks = $("uq-ticks"), tickBtns = [];
+  KEYS.forEach(function(k){
+    var li = document.createElement("li"), b = document.createElement("button");
+    b.type = "button"; b.textContent = k.tick; b.setAttribute("aria-label", "跳到 " + k.tick);
+    b.addEventListener("click", function(){ pause(); seek(k.t); });
+    li.appendChild(b); ticks.appendChild(li); tickBtns.push(b);
+  });
+
+  // ---------- 模型（只用文章的數字） ----------
+  // T = 相對 20:00 的分鐘數
+  function queueAt(T){
+    if (T < 0) return 0;                       // 平常：幾乎是 0
+    if (T < 32) return 298 * T * 60;           // 每秒多 298 個
+    if (T < 33) return 0;                      // Pod 被殺、重新啟動
+    return 298 * (T - 33) * 60;                // 從 0 又往上爬
+  }
+  // 記憶體只畫形狀：20:00 為 300 MB、20:20 為 2 GB，同斜率爬到 20:32 超過上限
+  var M0 = 300, SLOPE = (2000 - 300) / 20, MLIM = M0 + SLOPE * 32;
+  function memAt(T){
+    if (T < 0) return M0;
+    if (T < 32) return M0 + SLOPE * T;
+    if (T < 33) return M0;
+    return M0 + SLOPE * (T - 33);
+  }
+  function memY(m){ return 46 - (m / MLIM) * 42; }
+  function clock(t){
+    var mm = 58 + Math.floor(t + 1e-6), h = 19 + Math.floor(mm / 60);
+    mm = mm % 60; return h + ":" + (mm < 10 ? "0" : "") + mm;
+  }
+  function fmtQ(q){
+    if (q < 1) return "幾乎是 0";
+    if (q < 10000) return Math.round(q).toLocaleString("en-US");
+    return "約 " + Math.round(q / 10000) + " 萬";
+  }
+
+  var SAY = {
+    calm:  "平常每秒 30 筆，物流 API 200ms，16 個執行緒每秒做得完 80 筆，佇列幾乎是空的",
+    start: "20:00 雙十一：每秒 300 筆進來，物流 API 變成 8 秒，每秒只做得完 2 筆，佇列每秒多 298 個",
+    climb: "submit() 永遠成功、照樣馬上回 202：上游完全不知道下游跟不上，API 回應時間正常、CPU 20%",
+    high:  "記憶體爬到 2 GB，還是沒有告警：沒有任何指標告訴你有幾十萬個工作在排隊",
+    oom:   "20:32 記憶體超過上限，Pod 被 OOMKilled：佇列裡約 57 萬個出貨工作全部消失，因為它們只存在記憶體裡",
+    again: "Pod 重新啟動，佇列從 0 又往上爬；20 分鐘後又被殺一次，循環好幾輪"
+  };
+
+  var el = {
+    clock:$("uq-clock"), say:$("uq-say"), reqRate:$("req-rate"), reqSt:$("req-st"), api:$("n-api"), apiChip:$("api-chip"),
+    req:$("n-req"), thr:$("n-thr"), ext:$("n-ext"),
+    qFill:$("q-fill"), qGhost:$("q-ghost"), qNum:$("q-num"), qLost:$("q-lost"), rIn:$("r-in"), rOut:$("r-out"),
+    thrSt:$("thr-st"), extRt:$("ext-rt"), extSt:$("ext-st"), alert:$("alert"),
+    ledRt:$("led-rt"), vRt:$("v-rt"), ledCpu:$("led-cpu"), vCpu:$("v-cpu"), tMem:$("t-mem"), vMem:$("v-mem"), sp:$("sp-ln")
+  };
+  var QMAX = 600000;
+  var lastPhase = "";
+
+  // ---------- 畫一格 ----------
+  function draw(t){
+    t = Math.max(0, Math.min(DUR, t));
+    var T = t - 2, q = queueAt(T), down = T >= 32 && T < 33, after = T >= 33, rush = T >= 0 && !down;
+    var phase = T < 0 ? "calm" : T < 5 ? "start" : T < 20 ? "climb" : T < 32 ? "high" : down ? "oom" : "again";
+
+    el.clock.textContent = clock(t);
+    if (phase !== lastPhase){
+      el.say.textContent = SAY[phase];
+      fig.classList.toggle("down", down);
+      fig.classList.toggle("after", after);
+      lastPhase = phase;
+    }
+
+    // 上游
+    el.reqRate.textContent = down ? "進來 0 筆" : rush ? "每秒 300 筆" : "每秒 30 筆";
+    el.reqSt.textContent = down ? "Pod 重新啟動中" : rush ? "雙十一晚上 8 點起" : "平常的流量";
+    el.req.classList.toggle("off", down); el.api.classList.toggle("off", down);
+    el.apiChip.textContent = down ? "Pod 重新啟動中" : "↩ 馬上回 202，訂單成立";
+
+    // 佇列
+    el.qFill.style.transform = "scaleY(" + Math.min(1, q / QMAX).toFixed(4) + ")";
+    el.qGhost.style.height = (down ? (298 * 32 * 60 / QMAX * 100) : 0).toFixed(1) + "%";
+    el.qNum.textContent = down ? "0" : fmtQ(q);
+    el.qLost.textContent = after ? "上一輪：約 57 萬個工作跟著 Pod 消失" : "約 57 萬個出貨工作跟著 Pod 一起消失";
+    el.rIn.textContent = down ? "0" : rush ? "300" : "30";
+    el.rOut.textContent = down ? "0" : rush ? "2" : "30";
+
+    // 執行緒
+    for (var i = 0; i < 16; i++){
+      var c = "";
+      if (down) c = "";
+      else if (rush) c = "w";
+      else c = ((Math.floor(t * 40) + i * 5) % 16) < 6 ? "b" : "";
+      if (dots[i].className !== c) dots[i].className = c;
+    }
+    el.thr.classList.toggle("off", down);
+    el.thrSt.textContent = down ? "Pod 重新啟動中" : rush ? "全部卡在等物流 API：每筆 8 秒，每秒只做得完 2 筆" : "每筆 200ms，每秒做得完 80 筆";
+    el.extRt.textContent = rush || down ? "回應 8 秒" : "回應 200ms";
+    el.extSt.textContent = rush || down ? "物流商的系統也過載" : "平常";
+
+    // 監控
+    el.alert.textContent = down ? "Pod 被 OOMKilled，重新啟動" : "沒有告警";
+    el.ledRt.className = "led" + (down ? " off" : ""); el.vRt.textContent = down ? "—" : "正常";
+    el.ledCpu.className = "led" + (down ? " off" : ""); el.vCpu.textContent = down ? "—" : (T >= 5 ? "20%" : "正常");
+    el.tMem.classList.toggle("bad", down);
+    el.vMem.textContent = T < 0 ? "300 MB" : T < 20 ? "一路往上爬" : T < 21 ? "2 GB" : T < 32 ? "2 GB 以上，還在爬" : down ? "超過上限 → OOMKilled" : "從 300 MB 又往上爬";
+
+    var pts = [], step = 0.5;
+    for (var s = 0; s <= t + 1e-6; s += step){
+      var Ts = s - 2;
+      if (Ts >= 32 && Ts - step < 32) pts.push(((s) / DUR * 200).toFixed(1) + "," + memY(MLIM).toFixed(1));
+      pts.push((s / DUR * 200).toFixed(1) + "," + memY(memAt(Ts)).toFixed(1));
+    }
+    pts.push((t / DUR * 200).toFixed(1) + "," + memY(memAt(T)).toFixed(1));
+    el.sp.setAttribute("points", pts.join(" "));
+
+    // 刻度
+    var curKey = 0;
+    for (var k = 0; k < KEYS.length; k++){ if (t >= KEYS[k].t - 0.6) curKey = k; }
+    if (t < KEYS[0].t - 0.6) curKey = 0;
+    tickBtns.forEach(function(b, j){ b.setAttribute("aria-current", j === curKey ? "true" : "false"); });
+    return t;
+  }
+
+  // ---------- 時間軸與播放 ----------
+  var scrub = $("uq-scrub"), playBtn = $("uq-play"), playIc = $("uq-play-ic");
+  var cur = REST, playing = false, visible = true, raf = 0, last = 0, holdUntil = 0, stepTimer = 0;
+
+  function setIcon(){
+    playIc.setAttribute("d", playing ? "M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z" : "M4 2.5v11l9-5.5z");
+    playBtn.setAttribute("aria-label", playing ? "暫停" : "播放");
+  }
+  function seek(t){ cur = draw(t); scrub.value = String(cur); return cur; }
+  function pause(){ playing = false; cancelAnimationFrame(raf); raf = 0; clearTimeout(stepTimer); holdUntil = 0; setIcon(); }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (now < holdUntil){ raf = requestAnimationFrame(frame); return; }
+    var next = cur + dt * SPEED;
+    for (var k = 0; k < KEYS.length; k++){
+      if (cur < KEYS[k].t && next >= KEYS[k].t){ next = KEYS[k].t; holdUntil = now + HOLD; break; }
+    }
+    seek(next);
+    if (cur >= DUR){ pause(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+  function stepTick(){ // 減少動態：一格一格跳
+    if (!playing) return;
+    var nk = null;
+    for (var k = 0; k < KEYS.length; k++){ if (KEYS[k].t > cur + 0.01){ nk = KEYS[k]; break; } }
+    if (!nk){ pause(); return; }
+    seek(nk.t);
+    stepTimer = setTimeout(stepTick, 2200);
+  }
+  function play(){
+    if (cur >= DUR - 0.02 || Math.abs(cur - REST) < 0.005) seek(0);
+    playing = true; setIcon();
+    if (reduce.matches){ stepTick(); return; }
+    last = performance.now(); holdUntil = 0;
+    if (!raf && visible) raf = requestAnimationFrame(frame);
+  }
+  playBtn.addEventListener("click", function(){ playing ? pause() : play(); });
+  scrub.addEventListener("input", function(){ pause(); seek(parseFloat(scrub.value)); });
+  fig.addEventListener("keydown", function(e){
+    if (e.target === scrub) return;
+    var idx = 0;
+    for (var k = 0; k < KEYS.length; k++){ if (cur >= KEYS[k].t - 0.01) idx = k; }
+    if (e.key === "ArrowRight"){ pause(); seek(KEYS[Math.min(KEYS.length - 1, cur < KEYS[0].t - 0.01 ? 0 : idx + 1)].t); e.preventDefault(); }
+    else if (e.key === "ArrowLeft"){ pause(); seek(KEYS[Math.max(0, idx - 1)].t); e.preventDefault(); }
+    else if (e.key === " " && e.target === fig){ playing ? pause() : play(); e.preventDefault(); }
+    else if (e.key === "Home"){ pause(); seek(0); e.preventDefault(); }
+    else if (e.key === "End"){ pause(); seek(DUR); e.preventDefault(); }
+  });
+
+  // 主題切換
+  $("uq-theme").addEventListener("click", function(){
+    var root = document.documentElement;
+    var dark = root.getAttribute("data-theme") ? root.getAttribute("data-theme") === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+
+  // 只在看得到時跑
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible && playing && !reduce.matches && !raf){ last = performance.now(); raf = requestAnimationFrame(frame); }
+    }, {rootMargin:"120px"}).observe(fig);
+  }
+
+  // 高度回報給外層頁面（尺寸變化時最多一則；變大變小都回報）
+  // 外層若讀 documentElement.scrollHeight，它永遠不會小於 iframe 目前的高度，
+  // 所以內容變矮時，這裡在下一格把網站的 iframe 縮回內容高度（只碰 .draw-fig__frame）。
+  var lastH = 0, shrinkRaf = 0;
+  function shrinkHost(){
+    shrinkRaf = 0;
+    try {
+      var fe = window.frameElement;
+      if (!fe || !fe.classList || !fe.classList.contains("draw-fig__frame")) return;
+      var h = Math.ceil(document.body.scrollHeight);
+      if (h > 0 && fe.offsetHeight - h > 1) fe.style.height = h + "px";
+    } catch(e){}
+  }
+  if ("ResizeObserver" in window && window.parent !== window){
+    new ResizeObserver(function(entries){
+      var h = Math.ceil(entries[0].borderBoxSize ? entries[0].borderBoxSize[0].blockSize : fig.offsetHeight);
+      if (h !== lastH){ lastH = h; try { window.parent.postMessage({type:"fig-height", fig:"unbounded-queue-oom", height:h}, "*"); } catch(e){} }
+      if (!shrinkRaf) shrinkRaf = requestAnimationFrame(shrinkHost);
+    }).observe(fig);
+  }
+
+  window.DUR = DUR;
+  window.seek = function(t){ pause(); return seek(+t); };
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:KEYS.map(function(k){ return k.t; })}; };
+
+  seek(REST); setIcon();
+})();
+</script>
+</body>
+</html>

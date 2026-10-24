@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DELETE 與 DROP 分割</title>
+<style>
+:root{
+  --paper:#ffffff; --paper-2:#f4f5f7; --ink:#2d3142; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(45,49,66,.14); --rule-solid:#c9cbd1;
+  --bar:#7d879c; --bar-ok:#4f7a5c; --track:rgba(45,49,66,.08);
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111; --hot-text:#92400e;
+  --row:#9aa3b5; --dead:#c3c7cf; --dead-stripe:#8d94a3; --free:transparent;
+  --ok:#2f6b45;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --paper-2:#272b36; --ink:#eef0f3; --muted:#b9bfcb; --soft:#a3abba;
+    --rule:rgba(238,240,243,.14); --rule-solid:rgba(238,240,243,.28);
+    --bar:#9aa3b5; --bar-ok:#7fb48f; --track:rgba(238,240,243,.10);
+    --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fcd34d;
+    --row:#6f7891; --dead:#3a3f4c; --dead-stripe:#5d6475;
+    --ok:#86c79a;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --paper-2:#272b36; --ink:#eef0f3; --muted:#b9bfcb; --soft:#a3abba;
+  --rule:rgba(238,240,243,.14); --rule-solid:rgba(238,240,243,.28);
+  --bar:#9aa3b5; --bar-ok:#7fb48f; --track:rgba(238,240,243,.10);
+  --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fcd34d;
+  --row:#6f7891; --dead:#3a3f4c; --dead-stripe:#5d6475;
+  --ok:#86c79a;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  font-size:14px;line-height:1.45;-webkit-text-size-adjust:100%}
+.fig{margin:0;padding:12px 16px 16px;box-sizing:border-box;max-width:100%;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--hot-stroke);border-radius:8px}
+.fig *{box-sizing:border-box}
+.code{font-family:ui-monospace,"Cascadia Code",Consolas,"Noto Sans Mono","Noto Sans TC","Microsoft JhengHei",monospace;font-size:.92em;overflow-wrap:anywhere}
+
+/* clock */
+.clock{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 12px}
+.clock .step{font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:13px;color:var(--soft);font-weight:600}
+.clock .when{font-size:20px;font-weight:700;letter-spacing:.01em}
+
+/* lanes */
+.lanes{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:640px){.lanes{grid-template-columns:1fr}}
+.lane{border:1px solid var(--rule);background:var(--paper-2);border-radius:8px;padding:12px 12px 12px;min-width:0}
+.lane h3{margin:0;font-size:15px;font-weight:700;line-height:1.35}
+.lane .sub{margin:2px 0 8px;font-size:13px;color:var(--muted)}
+.status{min-height:64px;margin:8px 0 8px;padding:8px 12px;border-radius:6px;font-size:14px;
+  border:1px solid var(--rule);background:var(--paper)}
+.status.hot{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.status.done{border-color:var(--bar-ok)}
+.status .tag{display:inline-block;font-size:12px;font-weight:700;margin-right:6px}
+
+/* rows grid */
+.rows{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;padding:8px;border-radius:6px;border:1px solid transparent}
+.rows.hot{border-color:var(--hot-stroke);background:var(--hot-fill)}
+.cell{height:16px;border-radius:2px;background:var(--row)}
+.cell.dead{background:repeating-linear-gradient(135deg,var(--dead) 0 3px,var(--dead-stripe) 3px 5px)}
+.cell.free{background:var(--free);box-shadow:inset 0 0 0 1px var(--dead-stripe)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:6px 0 0;font-size:12px;color:var(--soft)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+.legend .k-row{background:var(--row)}
+.legend .k-dead{background:repeating-linear-gradient(135deg,var(--dead) 0 3px,var(--dead-stripe) 3px 5px)}
+.legend .k-free{box-shadow:inset 0 0 0 1px var(--dead-stripe)}
+.tablesize{margin-top:4px;font-size:13px;color:var(--muted);min-height:20px}
+.tablesize.hot{color:var(--hot-text);font-weight:700}
+
+/* partitions */
+.parts{position:relative;height:124px}
+.parent{position:absolute;left:0;right:0;top:0;height:64px;border:1.5px solid var(--rule-solid);border-radius:6px;padding:20px 6px 6px;display:flex;gap:6px;background:var(--paper)}
+.parent .pname{position:absolute;top:2px;left:8px;font-size:12px;color:var(--soft)}
+.pb{flex:1 1 0;min-width:0;height:36px;border-radius:4px;border:1px solid var(--rule-solid);background:var(--paper-2);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;line-height:1.2;text-align:center;white-space:nowrap;overflow:hidden}
+.pb small{font-size:12px;color:var(--soft)}
+.pb.mid{flex:1.6 1 0}
+.slot-old{flex:1 1 0;min-width:0;height:36px}
+.old{position:absolute;top:26px;height:36px;border-radius:4px;border:2px solid var(--hot-stroke);background:var(--hot-fill);color:var(--hot-ink);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;line-height:1.2;white-space:nowrap;will-change:transform,opacity}
+.old small{font-size:12px}
+.os{position:absolute;left:0;right:0;top:76px;height:44px;border:1.5px dashed var(--rule-solid);border-radius:6px;display:flex;align-items:center;justify-content:center;
+  font-size:13px;color:var(--soft);padding:0 8px;text-align:center}
+.os.lit{border-style:solid;border-color:var(--bar-ok);color:var(--ok);font-weight:700}
+
+/* meters */
+.meters{display:grid;gap:6px;margin-top:4px}
+.m{display:grid;grid-template-columns:76px 1fr 96px;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;border:1px solid transparent;min-height:32px}
+.m .lb{font-size:13px;color:var(--muted)}
+.m .tr{height:10px;border-radius:5px;background:var(--track);overflow:hidden}
+.m .tr b{display:block;height:100%;width:0;border-radius:5px;background:var(--bar);transform-origin:left}
+.m .tr.none{background:none}
+.m .v{font-size:13px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.m.ok .tr b{background:var(--bar-ok)}
+.m.ok .v{color:var(--ok)}
+.m.hot{background:var(--hot-fill);border-color:var(--hot-stroke)}
+.m.hot .lb,.m.hot .v{color:var(--hot-ink)}
+.m.hot .tr b{background:var(--hot-stroke)}
+@media (max-width:380px){.m{grid-template-columns:68px 1fr 84px;gap:6px}}
+
+/* controls */
+.ctl{margin-top:14px;display:grid;grid-template-columns:auto 1fr;gap:10px 12px;align-items:center}
+.btn{min-height:36px;min-width:36px;padding:0 12px;border-radius:6px;border:1px solid var(--rule-solid);background:var(--paper);color:var(--ink);
+  font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn:focus-visible{outline:2px solid var(--hot-stroke);outline-offset:1px}
+.play{min-width:84px}
+.scrub{width:100%;margin:0;accent-color:var(--hot-stroke);height:32px}
+.steps{grid-column:1/-1;display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.steps .btn{padding:0 2px;font-size:12px;min-height:32px;font-family:ui-monospace,"Cascadia Code",Consolas,monospace}
+.steps .btn[aria-current="step"]{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.theme{grid-column:1/-1;justify-self:end;min-height:32px;font-size:12px;font-weight:500;color:var(--soft)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="delete-vs-drop" data-dur="19" data-rest="16.2" tabindex="0"
+  aria-label="動畫：同一天凌晨 3 點清理 api_logs 的兩種做法並排比較。沒分割時 DELETE 約 3000 萬列，WAL 暴增、磁碟從 70% 到 92%、讀取副本延遲 40 分鐘、早上 API p99 從 80 毫秒變 1.2 秒，跑完後表的大小幾乎沒變小；按天分割時對 api_logs_2026_07_25 做 DETACH CONCURRENTLY 再 DROP TABLE，通常不到 1 秒結束，WAL 幾乎沒增加、副本沒有延遲、不用 vacuum。">
+
+  <div class="clock" aria-hidden="true"><span class="step" id="stepNo">T6</span><span class="when" id="when">早上上班</span></div>
+  <div class="sr" aria-live="polite" id="live"></div>
+
+  <div class="lanes">
+    <section class="lane" aria-label="沒分割：DELETE">
+      <h3>沒分割：<span class="code">DELETE</span></h3>
+      <div class="sub">要處理約 3000 萬列（剛滿 91 天的那一天）</div>
+      <div class="rows" id="rows" aria-hidden="true"></div>
+      <div class="legend" aria-hidden="true"><span><i class="k-row"></i>資料列</span><span><i class="k-dead"></i>死元組</span><span><i class="k-free"></i>回收後的空位</span></div>
+      <div class="tablesize" id="tsize">整張表 1.8 TB</div>
+      <div class="status" id="stA"></div>
+      <div class="meters">
+        <div class="m" id="mDisk"><span class="lb">磁碟使用率</span><span class="tr"><b></b></span><span class="v"></span></div>
+        <div class="m" id="mWal"><span class="lb">WAL</span><span class="tr"><b></b></span><span class="v"></span></div>
+        <div class="m" id="mLag"><span class="lb">副本延遲</span><span class="tr"><b></b></span><span class="v"></span></div>
+        <div class="m" id="mP99"><span class="lb">API p99</span><span class="tr"><b></b></span><span class="v"></span></div>
+      </div>
+    </section>
+
+    <section class="lane" aria-label="按天分割：DETACH 加 DROP">
+      <h3>按天分割：<span class="code">DETACH</span> + <span class="code">DROP</span></h3>
+      <div class="sub">要處理 1 個分割，不是 3000 萬列</div>
+      <div class="parts" id="parts" aria-hidden="true">
+        <div class="parent" id="parent">
+          <span class="pname code">api_logs</span>
+          <div class="slot-old" id="slot"></div>
+          <div class="pb mid">中間 89 個<small>分割</small></div>
+          <div class="pb">10/23<small>今天</small></div>
+        </div>
+        <div class="old" id="old">7/25<small>第 91 天</small></div>
+        <div class="os" id="os">作業系統的磁碟空間</div>
+      </div>
+      <div class="status" id="stB"></div>
+      <div class="meters">
+        <div class="m" id="nSpace"><span class="lb">磁碟空間</span><span class="tr none"></span><span class="v"></span></div>
+        <div class="m" id="nWal"><span class="lb">WAL</span><span class="tr"><b></b></span><span class="v"></span></div>
+        <div class="m" id="nLag"><span class="lb">副本延遲</span><span class="tr"><b></b></span><span class="v"></span></div>
+        <div class="m" id="nVac"><span class="lb">vacuum</span><span class="tr none"></span><span class="v"></span></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="ctl">
+    <button class="btn play" id="play" type="button" aria-label="播放">▶ 播放</button>
+    <input class="scrub" id="scrub" type="range" min="0" max="19" step="0.05" value="16.2" aria-label="時間軸">
+    <div class="steps" id="steps" role="group" aria-label="跳到某一步"></div>
+    <button class="btn theme" id="theme" type="button" aria-label="切換深色或淺色">切換深淺色</button>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var fig = document.getElementById('fig');
+  var DUR = +fig.dataset.dur, REST = +fig.dataset.rest;
+  // segments: T1 is longer so the DROP lane's four quick steps can be seen inside 3:00
+  var SEG = [[0,4],[4,6.5],[6.5,9],[9,11.5],[11.5,14],[14,16.5],[16.5,19]];
+  var WHEN = ['凌晨 3:00','凌晨 3:00 之後','凌晨 3:30','凌晨 3:30 之後','凌晨，報表','早上上班','跑完之後'];
+  var A = [ // DELETE lane status per step
+    ['開始','清理工作開始 <span class="code">DELETE</span>，一列一列把剛滿 91 天的資料標記成死元組。'],
+    ['WAL','每標記一列就寫一筆 WAL，WAL 目錄快速變大，磁碟使用率從 70% 往上衝。'],
+    ['告警','磁碟告警響了：使用率 92%。'],
+    ['副本','讀取副本要把這些 WAL 一筆一筆套用，跟不上主資料庫：複寫延遲 40 分鐘。'],
+    ['報表','報表頁面從讀取副本讀資料：客戶看到的是 40 分鐘前的用量。'],
+    ['還沒跑完','<span class="code">DELETE</span> 還沒跑完，跟白天的 API 寫入搶磁碟讀寫：p99 從 80 ms 變成 1.2 秒。'],
+    ['跑完','autovacuum 回收死元組，空間只能給這張表之後的寫入重複使用，通常不還給作業系統：表的大小幾乎沒變小。']
+  ];
+  var B = [ // DROP lane sub-steps inside T1 (t in 0..4)
+    ['1','對最舊那天的分割 <span class="code">api_logs_2026_07_25</span> 下 <span class="code">DETACH ... CONCURRENTLY</span>。'],
+    ['2','<span class="code">CONCURRENTLY</span> 等所有正在使用這張表的交易結束。'],
+    ['3','把分割拆下來：<span class="code">api_logs</span> 底下少了 1 個分割。'],
+    ['4','<span class="code">DROP TABLE</span> 刪掉拆下來的表，等於直接刪檔案，空間立刻還給作業系統。']
+  ];
+  var B_DONE = '清理結束：WAL 幾乎沒增加，副本沒有延遲，也沒有 vacuum 要做。沒有長交易擋路時，通常不到 1 秒。';
+
+  function clamp(x,a,b){return x<a?a:x>b?b:x}
+  function ease(x){x=clamp(x,0,1);return 1-Math.pow(1-x,3)}
+  function stepOf(t){for(var i=SEG.length-1;i>=0;i--){if(t>=SEG[i][0])return i}return 0}
+  function prog(t,i){var s=SEG[i];return clamp((t-s[0])/((s[1]-s[0])*0.6),0,1)} // settles at 60% of a step
+  // piecewise value: keys = [[t,v],...]
+  function pw(keys,t){if(t<=keys[0][0])return keys[0][1];for(var i=1;i<keys.length;i++){if(t<=keys[i][0]){var a=keys[i-1],b=keys[i];return a[1]+(b[1]-a[1])*ease((t-a[0])/(b[0]-a[0]))}}return keys[keys.length-1][1]}
+
+  // build rows grid once
+  var rowsEl=document.getElementById('rows'), cells=[];
+  for(var i=0;i<30;i++){var c=document.createElement('span');c.className='cell';rowsEl.appendChild(c);cells.push(c)}
+  var lastCell=[];
+  // build step buttons once
+  var stepsEl=document.getElementById('steps'), stepBtns=[];
+  SEG.forEach(function(s,i){var b=document.createElement('button');b.type='button';b.className='btn';b.textContent='T'+(i+1);
+    b.setAttribute('aria-label','跳到 T'+(i+1)+'：'+WHEN[i]);b.addEventListener('click',function(){pause();seek(s[0]+(s[1]-s[0])*0.7)});stepsEl.appendChild(b);stepBtns.push(b)});
+
+  var $=function(id){return document.getElementById(id)};
+  var el={stepNo:$('stepNo'),when:$('when'),stA:$('stA'),stB:$('stB'),tsize:$('tsize'),old:$('old'),slot:$('slot'),parent:$('parent'),os:$('os'),
+    disk:$('mDisk'),wal:$('mWal'),lag:$('mLag'),p99:$('mP99'),space:$('nSpace'),nwal:$('nWal'),nlag:$('nLag'),vac:$('nVac'),scrub:$('scrub'),live:$('live')};
+  function meter(m,frac,text,cls){var b=m.querySelector('b');if(b)b.style.transform='scaleX('+clamp(frac,0,1).toFixed(4)+')',b.style.width='100%';
+    var v=m.querySelector('.v');if(v.textContent!==text)v.textContent=text;m.className='m'+(cls?' '+cls:'')}
+
+  var geo=null; // cached slot geometry, read once per resize
+  function measure(){var sr=el.slot.getBoundingClientRect(),wr=el.parent.parentNode.getBoundingClientRect();
+    geo={left:sr.left-wr.left,width:sr.width,top:sr.top-wr.top}}
+
+  var lastStep=-1,lastB=-2;
+  function draw(t){
+    var s=stepOf(t), p=prog(t,s);
+    if(s!==lastStep){el.stepNo.textContent='T'+(s+1);el.when.textContent=WHEN[s];
+      el.stA.innerHTML='<span class="tag">T'+(s+1)+'</span>'+A[s][1];
+      stepBtns.forEach(function(b,i){if(i===s)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current')});
+      el.live.textContent='T'+(s+1)+' '+WHEN[s]; lastStep=s}
+    el.stA.className='status hot';
+
+    // rows: dead fraction, then vacuum turns dead cells into reusable empty slots
+    var dead=pw([[0,0],[4,.1],[6.5,.3],[9,.45],[11.5,.6],[14,.7],[16.5,.85],[17.6,1]],t);
+    var freed=pw([[17.6,0],[19,1]],t);
+    var nd=Math.round(dead*30), nf=Math.round(freed*30);
+    for(var i=0;i<30;i++){var k=i<nf?'cell free':i<nd?'cell dead':'cell';if(lastCell[i]!==k){cells[i].className=k;lastCell[i]=k}}
+    rowsEl.className='rows'+((s===0||s===6)?' hot':'');
+    var tsText=s===6?'整張表 1.8 TB → 幾乎沒變小':'整張表 1.8 TB';
+    if(el.tsize.textContent!==tsText)el.tsize.textContent=tsText;
+    el.tsize.className='tablesize'+(s===6?' hot':'');
+
+    // DELETE meters
+    var disk=pw([[4,70],[6.5,84],[9,92]],t);
+    meter(el.disk,disk/100, t<4?'70%':t<6.5?'70% ↑':'92% 告警', (s===1||s===2)?'hot':'');
+    var wal=pw([[0,.04],[4,.08],[6.5,.6],[9,.85],[11.5,.9]],t);
+    meter(el.wal,wal, t<4?'開始寫入':t<6.5?'快速變大':'暴增', s===1?'hot':'');
+    var lag=pw([[9,0],[11.5,40]],t);
+    meter(el.lag,lag/40, t<9?'—':Math.round(lag)+' 分鐘', (s===3||s===4)?'hot':'');
+    var p99=pw([[14,80],[16.5,1200]],t);
+    meter(el.p99,p99/1200, t<14?'80 ms':(p99>=1195?'1.2 秒':Math.round(p99)+' ms'), s===5?'hot':'');
+
+    // DROP lane: four quick steps inside T1, then finished
+    var bi=t<4?Math.floor(t):4;
+    if(bi!==lastB){el.stB.innerHTML=bi<4?'<span class="tag">T1 · '+B[bi][0]+'/4</span>'+B[bi][1]:'<span class="tag">✓</span>'+B_DONE;lastB=bi}
+    el.stB.className='status '+(bi<4?'hot':'done');
+    if(!geo)measure();
+    // old partition: sits in its slot, waits (pulse), slides down out of api_logs, then is dropped
+    var down=pw([[2,0],[2.8,1]],t), fade=pw([[3,0],[3.8,1]],t);
+    var wait=(t>=1&&t<2)?0.5+0.5*Math.cos((t-1)*Math.PI*4):1;
+    var oy=down*(80-geo.top);
+    el.old.style.top=geo.top+'px';el.old.style.left=geo.left+'px';el.old.style.width=geo.width+'px';
+    el.old.style.transform='translateY('+oy.toFixed(1)+'px) scale('+(1-0.25*fade).toFixed(3)+')';
+    el.old.style.opacity=(t<3?(0.55+0.45*wait):(1-fade)).toFixed(3);
+    el.old.style.visibility=fade>=0.999?'hidden':'visible';
+    el.os.className='os'+(t>=3.4?' lit':'');
+    var osText=t>=3.4?'空間立刻還給作業系統':'作業系統的磁碟空間';
+    if(el.os.textContent!==osText)el.os.textContent=osText;
+
+    meter(el.space,0,t>=3.4?'立刻還回去':'—',t>=3.4?'ok':'');
+    meter(el.nwal,0.03,'幾乎沒增加','ok');
+    meter(el.nlag,0,'沒有延遲','ok');
+    meter(el.vac,0,t>=4?'不用做':'—',t>=4?'ok':'');
+    if(document.activeElement!==el.scrub)el.scrub.value=t.toFixed(2);
+  }
+
+  // clock, loop (only while playing and visible)
+  var t=REST, playing=false, visible=true, raf=0, last=0;
+  var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var playBtn=$('play');
+  function setPlay(on){playing=on;playBtn.textContent=on?'❚❚ 暫停':'▶ 播放';playBtn.setAttribute('aria-label',on?'暫停':'播放');arm()}
+  function arm(){if(playing&&visible&&!raf){last=0;raf=requestAnimationFrame(tick)}}
+  function tick(now){raf=0;if(!playing||!visible)return;if(last){t+=Math.min(0.1,(now-last)/1000);if(t>=DUR){t=DUR;draw(t);setPlay(false);return}}
+    last=now;draw(t);raf=requestAnimationFrame(tick)}
+  function pause(){if(playing)setPlay(false)}
+  function seek(x){t=clamp(+x||0,0,DUR);draw(t)}
+  playBtn.addEventListener('click',function(){if(playing){setPlay(false)}else{if(t>=DUR-0.01||t===REST&&!played)t=0;played=true;setPlay(true)}});
+  var played=false;
+  el.scrub.addEventListener('input',function(){pause();seek(el.scrub.value)});
+  fig.addEventListener('keydown',function(e){
+    if(e.target===el.scrub)return;
+    var s=stepOf(t);
+    if(e.key==='ArrowRight'){pause();var n=Math.min(6,s+1);seek(SEG[n][0]+(SEG[n][1]-SEG[n][0])*0.7);e.preventDefault()}
+    else if(e.key==='ArrowLeft'){pause();var q=Math.max(0,s-1);seek(SEG[q][0]+(SEG[q][1]-SEG[q][0])*0.7);e.preventDefault()}
+    else if((e.key===' '||e.key==='Enter')&&e.target===fig){playBtn.click();e.preventDefault()}
+  });
+  $('theme').addEventListener('click',function(){var r=document.documentElement;
+    var dark=r.getAttribute('data-theme')?r.getAttribute('data-theme')==='dark':(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);
+    r.setAttribute('data-theme',dark?'light':'dark')});
+  if('IntersectionObserver' in window){new IntersectionObserver(function(es){visible=es[0].isIntersecting;arm()},{rootMargin:'120px'}).observe(fig)}
+  window.addEventListener('resize',function(){geo=null;draw(t)});
+  if('ResizeObserver' in window&&window.parent!==window){var lastH=0;new ResizeObserver(function(es){var h=Math.ceil(es[0].contentRect.height);
+    if(h!==lastH){lastH=h;try{window.parent.postMessage({type:'figure-height',fig:'delete-vs-drop',height:h},'*')}catch(e){}}}).observe(document.body)}
+  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){geo=null;draw(t)});
+
+  window.DUR=DUR;
+  window.seek=function(x){pause();seek(x)};
+  window.timeline=function(){return {dur:DUR,rest:REST,segments:SEG}};
+  // first frame: the rest frame (T6); never autoplay — reduced motion or not, the reader presses play
+  requestAnimationFrame(function(){draw(t)});
+  draw(t);
+  void reduce;
+})();
+</script>
+</body>
+</html>

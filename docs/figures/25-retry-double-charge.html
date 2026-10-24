@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>逾時重送與冪等</title>
+<style>
+:root{
+  --paper:#f5f5f5; --paper-2:#e9e9ec; --card:#ffffff; --ink:#2d3142; --ink-strong:#111111;
+  --muted:#4f5d75; --soft:#5a6580; --rule:rgba(45,49,66,.16); --rule-solid:#a9adb8;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111;
+  --ok:#2f6f4f;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1f2230; --paper-2:#2d3142; --card:#272b3a; --ink:#f5f5f5; --ink-strong:#ffffff;
+    --muted:#bfc0c0; --soft:#a3acc0; --rule:rgba(245,245,245,.16); --rule-solid:#6b7186;
+    --hot-fill:#5c3d0e; --hot-stroke:#f59e0b; --hot-ink:#fef3c7;
+    --ok:#7fc8a0;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1f2230; --paper-2:#2d3142; --card:#272b3a; --ink:#f5f5f5; --ink-strong:#ffffff;
+  --muted:#bfc0c0; --soft:#a3acc0; --rule:rgba(245,245,245,.16); --rule-solid:#6b7186;
+  --hot-fill:#5c3d0e; --hot-stroke:#f59e0b; --hot-ink:#fef3c7;
+  --ok:#7fc8a0;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;}
+.fig{box-sizing:border-box;max-width:760px;margin:0 auto;padding:12px 16px 14px;outline:none}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--hot-stroke) inset;border-radius:8px}
+.fig *{box-sizing:border-box}
+.fig-modes{display:flex;gap:0;border:1px solid var(--rule-solid);border-radius:8px;overflow:hidden;width:max-content;max-width:100%;margin:0 0 10px}
+.fig-modes button{appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14px;
+  min-height:36px;padding:6px 14px;cursor:pointer;white-space:nowrap}
+.fig-modes button+button{border-left:1px solid var(--rule-solid)}
+.fig-modes button[aria-pressed="true"]{background:var(--ink);color:var(--paper);font-weight:600}
+.fig-stage{display:block;width:100%;height:auto}
+.fig-stage text{font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif}
+.fig-stage .mono{font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,"Noto Sans Mono CJK TC",monospace}
+.fig-read{display:flex;gap:10px;align-items:baseline;margin:8px 0 10px;min-height:3em;font-size:15px;line-height:1.5}
+.fig-read b{flex:none;font-size:15px;color:var(--hot-stroke);font-variant-numeric:tabular-nums;min-width:4.6em}
+.fig-read span{flex:1;min-width:0}
+.fig-ctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fig-ctrl button{appearance:none;font:inherit;font-size:14px;min-height:36px;min-width:36px;padding:6px 12px;border-radius:8px;
+  border:1px solid var(--rule-solid);background:var(--card);color:var(--ink);cursor:pointer}
+.fig-ctrl button:hover{border-color:var(--ink)}
+.fig-ctrl .play{font-weight:600}
+.fig-ctrl .theme{margin-left:auto}
+.fig-track{margin-top:10px}
+.fig-track input{width:100%;margin:0;accent-color:var(--hot-stroke);height:28px;cursor:pointer}
+.fig-ticks{display:flex;margin-top:2px}
+.fig-ticks span{flex:1;text-align:center;font-size:12px;color:var(--soft);font-variant-numeric:tabular-nums;
+  border-top:2px solid var(--rule);padding-top:3px;white-space:nowrap}
+.fig-ticks span+span{border-left:1px solid var(--rule)}
+.fig-ticks span.on{color:var(--ink);font-weight:700;border-top-color:var(--hot-stroke)}
+@media (max-width:420px){
+  .fig{padding:10px 16px 12px}
+  .fig-modes button{padding:6px 10px}
+  .fig-ctrl{gap:6px}
+  .fig-ctrl button{padding:6px 9px}
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="retry-double-charge" data-dur="9.6" data-rest="9.6" tabindex="0"
+  aria-label="結帳 API 逾時重送的動畫：沒有 Idempotency-Key 時，用戶端 10 秒逾時後重送，後端建立兩筆訂單、扣款 1,000 元；帶同一個 key 時，第 2 次回 409、第 3 次回存好的 201，只有一筆訂單、扣 500 元。">
+  <div class="fig-modes" role="group" aria-label="切換情境">
+    <button type="button" data-mode="nokey" aria-pressed="true">沒有 key</button>
+    <button type="button" data-mode="key" aria-pressed="false">帶 Idempotency-Key</button>
+  </div>
+
+  <svg class="fig-stage" viewBox="0 0 600 448" role="img" aria-labelledby="retry-double-charge-title retry-double-charge-desc">
+    <title id="retry-double-charge-title">逾時重送：沒有 key 與帶 Idempotency-Key 的對照</title>
+    <desc id="retry-double-charge-desc">用戶端、訂單 API、金流商三方之間的請求與回應，以及 orders 表筆數、key 表狀態和使用者被扣的錢隨時間的變化。</desc>
+    <defs>
+      <marker id="rdc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--rule-solid)"/>
+      </marker>
+    </defs>
+    <!-- lifeline stubs and wires (drawn before boxes) -->
+    <g stroke="var(--rule-solid)" stroke-width="2" fill="none">
+      <line x1="96" y1="144" x2="96" y2="252" stroke-dasharray="4 5"/>
+      <line x1="300" y1="144" x2="300" y2="252" stroke-dasharray="4 5"/>
+      <line x1="504" y1="144" x2="504" y2="252" stroke-dasharray="4 5"/>
+      <line x1="96" y1="184" x2="512" y2="184" marker-end="url(#rdc-arrow)"/>
+      <line x1="504" y1="236" x2="88" y2="236" marker-end="url(#rdc-arrow)"/>
+    </g>
+    <!-- actors -->
+    <g id="rdc-actors"></g>
+    <!-- result cards -->
+    <g id="rdc-cards"></g>
+    <!-- packets (on top) -->
+    <g id="rdc-packets"></g>
+  </svg>
+
+  <div class="fig-read" aria-live="polite"><b id="rdc-sec">第 19 秒</b><span id="rdc-cap"></span></div>
+
+  <div class="fig-ctrl">
+    <button type="button" class="play" aria-label="播放">▶ 播放</button>
+    <button type="button" class="prev" aria-label="上一步">◀</button>
+    <button type="button" class="next" aria-label="下一步">▶|</button>
+    <button type="button" class="theme" aria-label="切換深淺色">◐</button>
+  </div>
+  <div class="fig-track">
+    <input type="range" min="0" max="9.6" step="0.01" value="9.6" aria-label="時間軸">
+    <div class="fig-ticks" aria-hidden="true"></div>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var S = 1.6;                       // playback seconds per step
+  var CX = {c:96, a:300, p:504};     // lifeline centres
+  var WIRE = {req:184, res:236};
+  var fig = document.querySelector(".fig");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- facts, from the article's two timeline tables ----
+  var MODES = {
+    nokey: {
+      key: null,
+      steps: [
+        { sec:"第 0 秒", cap:"用戶端送出第 1 次 POST /orders，後端執行 INSERT，建立訂單 A。",
+          pre:{c:["送出","第 1 次"]},
+          pk:[{f:"c",t:"a",l:"POST #1",on:{a:["INSERT","訂單 A"],orders:["A"]}}] },
+        { sec:"第 0.1 秒", cap:"後端呼叫金流商扣 500 元，金流商開始處理第 1 筆。",
+          pre:{c:["等待回應",""],a:["呼叫金流商","扣 500 元"]},
+          pk:[{f:"a",t:"p",l:"扣 500",on:{p:["處理中","第 1 筆"]}}] },
+        { sec:"第 10 秒", cap:"等滿 10 秒沒回應，用戶端送出一模一樣的第 2 次。後端分不出這是重試，當成新訂單，又 INSERT 了訂單 B。",
+          pre:{c:["逾時 10 秒","送第 2 次"]},
+          pk:[{f:"c",t:"a",l:"POST #2",hot:1,on:{a:["又 INSERT","訂單 B"],orders:["A","B"],hot:["a"]}}] },
+        { sec:"第 10.1 秒", cap:"後端再呼叫金流商扣 500 元，金流商開始處理第 2 筆。",
+          pre:{c:["等待回應",""],a:["呼叫金流商","再扣 500 元"]},
+          pk:[{f:"a",t:"p",l:"扣 500",hot:1,on:{p:["處理中","第 1、2 筆"],hot:["p"]}}] },
+        { sec:"第 11 秒", cap:"第 1 筆扣款成功，後端回 201 訂單 A，但用戶端已經不等第 1 次的回應了，沒人收。",
+          pre:{c:["不等第 1 次","的回應了"]},
+          pk:[{f:"p",t:"a",l:"成功 #1",on:{p:["第 1 筆成功","第 2 筆處理中"],money:500}},
+              {f:"a",t:"c",l:"201 A",dead:1,on:{a:["回 201","訂單 A"]}}] },
+        { sec:"第 19 秒", cap:"第 2 筆也扣款成功，用戶端收到 201 訂單 B，顯示「付款成功」。看起來只買一次，其實扣了兩次。",
+          pre:{},
+          pk:[{f:"p",t:"a",l:"成功 #2",hot:1,on:{p:["2 筆都","扣款成功"],money:1000,hot:["money"]}},
+              {f:"a",t:"c",l:"201 B",on:{a:["回 201","訂單 B"],c:["顯示","付款成功"]}}] }
+      ]
+    },
+    key: {
+      key: true,
+      steps: [
+        { sec:"第 0 秒", cap:"用戶端送出第 1 次，帶 k1。後端寫入 k1 成功，呼叫金流商扣 500 元。",
+          pre:{c:["送出第 1 次","帶 k1"]},
+          pk:[{f:"c",t:"a",l:"#1 帶 k1",on:{a:["寫入 k1","呼叫金流商"],key:["處理中",""]}},
+              {f:"a",t:"p",l:"扣 500",on:{p:["處理中",""]}}] },
+        { sec:"第 10 秒", cap:"逾時，用戶端送出第 2 次，還是帶 k1。key 寫不進去、指紋一樣、第一次還沒做完，後端回 409。",
+          pre:{c:["逾時","送第 2 次"]},
+          pk:[{f:"c",t:"a",l:"#2 帶 k1",hot:1,on:{a:["k1 處理中","回 409"],hot:["a"]}},
+              {f:"a",t:"c",l:"409",hot:1}] },
+        { sec:"第 11 秒", cap:"用戶端收到 409，等一下再試。扣款成功，後端建立訂單 A，存下回應 201。",
+          pre:{c:["收到 409","等一下再試"]},
+          pk:[{f:"p",t:"a",l:"扣款成功",on:{p:["扣款成功",""],a:["建立訂單 A","存下 201"],orders:["A"],money:500,key:["已完成","存了 201"]}}] },
+        { sec:"第 13 秒", cap:"用戶端送出第 3 次，帶 k1。key 寫不進去、指紋一樣、已經完成，後端直接回存好的 201，不再扣款。",
+          pre:{c:["送出第 3 次","帶 k1"]},
+          pk:[{f:"c",t:"a",l:"#3 帶 k1",hot:1,on:{a:["k1 已完成","回存好的 201"],hot:["a","key"]}}] },
+        { sec:"第 13.1 秒", cap:"用戶端收到 201 訂單 A，顯示「付款成功」。訂單只有 1 筆，錢只扣 500 元。",
+          pre:{},
+          pk:[{f:"a",t:"c",l:"201 A",hot:1,on:{c:["顯示","付款成功"]}}] }
+      ]
+    }
+  };
+
+  // ---- build the SVG once ----
+  function el(name, attrs, parent, text){
+    var n = document.createElementNS(NS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  var actors = {};
+  var gA = document.getElementById("rdc-actors");
+  [["c","用戶端",8],["a","訂單 API",212],["p","金流商",416]].forEach(function(r){
+    var g = el("g", {}, gA);
+    var box = el("rect", {x:r[2], y:8, width:176, height:136, rx:8, "stroke-width":2}, g);
+    el("text", {x:r[2]+88, y:50, "text-anchor":"middle", "font-size":28, "font-weight":600, fill:"var(--ink)"}, g, r[1]);
+    el("line", {x1:r[2]+20, y1:66, x2:r[2]+156, y2:66, stroke:"var(--rule)", "stroke-width":2}, g);
+    var s1 = el("text", {x:r[2]+88, y:100, "text-anchor":"middle", "font-size":26, fill:"var(--ink)"}, g);
+    var s2 = el("text", {x:r[2]+88, y:132, "text-anchor":"middle", "font-size":26, fill:"var(--ink)"}, g);
+    actors[r[0]] = {box:box, s1:s1, s2:s2};
+  });
+
+  var gC = document.getElementById("rdc-cards");
+  function card(x, title){
+    var g = el("g", {}, gC);
+    var box = el("rect", {x:x, y:272, width:176, height:168, rx:8, "stroke-width":2}, g);
+    el("text", {x:x+88, y:308, "text-anchor":"middle", "font-size":26, "font-weight":600, fill:"var(--ink)"}, g, title);
+    return {g:g, box:box, x:x};
+  }
+  var cOrders = card(8, "orders 表");
+  var tiles = [0,1].map(function(i){
+    var g = el("g", {}, cOrders.g);
+    var r = el("rect", {x:24, y:324+i*52, width:144, height:40, rx:6, "stroke-width":2}, g);
+    var t = el("text", {x:96, y:353+i*52, "text-anchor":"middle", "font-size":26}, g);
+    return {g:g, r:r, t:t};
+  });
+  var ordersEmpty = el("text", {x:96, y:380, "text-anchor":"middle", "font-size":26, fill:"var(--soft)"}, cOrders.g, "0 筆");
+
+  var cKey = card(212, "key 表");
+  var keyChip = el("rect", {x:256, y:324, width:88, height:40, rx:6, "stroke-width":2}, cKey.g);
+  var keyName = el("text", {x:300, y:353, "text-anchor":"middle", "font-size":26, "class":"mono"}, cKey.g, "k1");
+  var keyL1 = el("text", {x:300, y:396, "text-anchor":"middle", "font-size":26}, cKey.g);
+  var keyL2 = el("text", {x:300, y:428, "text-anchor":"middle", "font-size":26}, cKey.g);
+
+  var cMoney = card(416, "被扣的錢");
+  var moneyNum = el("text", {x:504, y:380, "text-anchor":"middle", "font-size":40, "font-weight":700}, cMoney.g);
+  var moneyNote = el("text", {x:504, y:424, "text-anchor":"middle", "font-size":26, fill:"var(--soft)"}, cMoney.g);
+
+  var gP = document.getElementById("rdc-packets");
+  var pills = [0,1].map(function(){
+    var g = el("g", {opacity:0}, gP);
+    var r = el("rect", {x:0, y:-20, height:40, rx:20, "stroke-width":2}, g);
+    var tip = el("path", {d:"", "stroke-width":0}, g);
+    var t = el("text", {x:0, y:9, "text-anchor":"middle", "font-size":26, "font-weight":600}, g);
+    return {g:g, r:r, tip:tip, t:t, w:0, label:null};
+  });
+
+  function textW(s){ var w = 0; for (var i=0;i<s.length;i++){ w += /[⺀-￿]/.test(s[i]) ? 26 : 15.6; } return w; }
+
+  // ---- state at time t ----
+  var mode = "nokey";
+  var EMPTY = {c:["",""], a:["",""], p:["",""]};
+  function initial(){
+    return {c:["準備結帳",""], a:["",""], p:["",""], orders:[], money:0, key:mode==="key"?["",""]:null, hot:[]};
+  }
+  function apply(st, patch){
+    for (var k in patch){ if (k !== "hot") st[k] = patch[k]; }
+    if (patch.hot) st.hot = st.hot.concat(patch.hot);
+  }
+  function windows(n){ return n === 1 ? [[0.06,0.5]] : [[0.04,0.34],[0.38,0.68]]; }
+  function ease(x){ return x<.5 ? 4*x*x*x : 1-Math.pow(-2*x+2,3)/2; }
+
+  function stateAt(t){
+    var steps = MODES[mode].steps, N = steps.length;
+    var u = Math.max(0, Math.min(t / S, N - 1e-6));
+    var k = Math.floor(u), p = u - k;
+    var st = initial();
+    for (var i=0;i<k;i++){ apply(st, steps[i].pre); steps[i].pk.forEach(function(q){ if (q.on) apply(st, q.on); }); }
+    st.hot = [];
+    var cur = steps[k];
+    apply(st, cur.pre);
+    var w = windows(cur.pk.length), packets = [];
+    cur.pk.forEach(function(q, j){
+      var a = w[j][0], b = w[j][1];
+      if (p < a) { packets.push(null); return; }
+      var f = Math.min(1, (p - a) / (b - a));
+      packets.push({q:q, f:ease(f), arrived:f >= 1});
+      if (f >= 1 && q.on) apply(st, q.on);
+    });
+    st.k = k; st.packets = packets;
+    return st;
+  }
+
+  // ---- paint ----
+  var secEl = document.getElementById("rdc-sec"), capEl = document.getElementById("rdc-cap");
+  var ticks = fig.querySelector(".fig-ticks"), range = fig.querySelector('input[type="range"]');
+  var lastK = -1, lastMode = null;
+
+  function setText(n, s){ if (n.textContent !== s) n.textContent = s; }
+  function paintBox(rect, hot){
+    rect.setAttribute("fill", hot ? "var(--hot-fill)" : "var(--card)");
+    rect.setAttribute("stroke", hot ? "var(--hot-stroke)" : "var(--rule-solid)");
+  }
+  function ink(hot){ return hot ? "var(--hot-ink)" : "var(--ink)"; }
+
+  function paint(t){
+    var st = stateAt(t), steps = MODES[mode].steps;
+    ["c","a","p"].forEach(function(id){
+      var A = actors[id], hot = st.hot.indexOf(id) >= 0;
+      paintBox(A.box, hot);
+      setText(A.s1, st[id][0]); setText(A.s2, st[id][1]);
+      A.s1.setAttribute("fill", ink(hot)); A.s2.setAttribute("fill", ink(hot));
+    });
+    // orders
+    paintBox(cOrders.box, false);
+    tiles.forEach(function(T, i){
+      var name = st.orders[i];
+      T.g.setAttribute("opacity", name ? 1 : 0);
+      if (name){
+        var hot = i === 1;
+        paintBox(T.r, hot); T.t.setAttribute("fill", ink(hot));
+        setText(T.t, "訂單 " + name);
+      }
+    });
+    ordersEmpty.setAttribute("opacity", st.orders.length ? 0 : 1);
+    // key
+    var keyHot = st.hot.indexOf("key") >= 0;
+    paintBox(cKey.box, keyHot);
+    if (st.key){
+      keyChip.setAttribute("opacity", 1); keyName.setAttribute("opacity", 1);
+      paintBox(keyChip, false); keyChip.setAttribute("fill", "var(--paper-2)");
+      keyName.setAttribute("fill", "var(--ink)");
+      setText(keyL1, st.key[0] || "還沒寫入"); setText(keyL2, st.key[1]);
+      keyL1.setAttribute("fill", ink(keyHot)); keyL2.setAttribute("fill", ink(keyHot));
+    } else {
+      keyChip.setAttribute("opacity", 0); keyName.setAttribute("opacity", 0);
+      setText(keyL1, "沒有 key"); setText(keyL2, "分不出重試");
+      keyL1.setAttribute("fill", "var(--soft)"); keyL2.setAttribute("fill", "var(--soft)");
+    }
+    // money
+    var mHot = st.hot.indexOf("money") >= 0;
+    paintBox(cMoney.box, mHot);
+    setText(moneyNum, st.money.toLocaleString("en-US") + " 元");
+    moneyNum.setAttribute("fill", ink(mHot));
+    setText(moneyNote, st.money ? "扣款 " + (st.money / 500) + " 次" : "還沒扣款");
+    moneyNote.setAttribute("fill", mHot ? "var(--hot-ink)" : "var(--soft)");
+    // packets
+    pills.forEach(function(P, j){
+      var pk = st.packets[j];
+      if (!pk){ P.g.setAttribute("opacity", 0); return; }
+      var q = pk.q, right = CX[q.t] > CX[q.f];
+      if (P.label !== q.l){
+        P.label = q.l; P.w = textW(q.l) + 32;
+        P.r.setAttribute("x", -P.w/2); P.r.setAttribute("width", P.w);
+        P.t.textContent = q.l;
+      }
+      var h = P.w/2;
+      P.tip.setAttribute("d", right ? "M"+(h-2)+",-9 L"+(h+10)+",0 L"+(h-2)+",9 z" : "M"+(-h+2)+",-9 L"+(-h-10)+",0 L"+(-h+2)+",9 z");
+      var x = CX[q.f] + (CX[q.t] - CX[q.f]) * pk.f;
+      var y = right ? WIRE.req : WIRE.res;
+      P.g.setAttribute("transform", "translate(" + x.toFixed(1) + "," + y + ")");
+      var hot = !!q.hot;
+      P.r.setAttribute("fill", hot ? "var(--hot-fill)" : "var(--card)");
+      P.r.setAttribute("stroke", hot ? "var(--hot-stroke)" : "var(--muted)");
+      P.r.setAttribute("stroke-dasharray", q.dead && pk.arrived ? "6 5" : "none");
+      P.tip.setAttribute("fill", hot ? "var(--hot-stroke)" : "var(--muted)");
+      P.t.setAttribute("fill", ink(hot));
+      P.t.setAttribute("class", /^[#A-Z0-9]/.test(q.l) ? "mono" : "");
+      P.g.setAttribute("opacity", q.dead && pk.arrived ? 0.5 : 1);
+    });
+    // readout + ticks
+    if (st.k !== lastK || mode !== lastMode){
+      setText(secEl, steps[st.k].sec); setText(capEl, steps[st.k].cap);
+      var spans = ticks.children;
+      for (var i=0;i<spans.length;i++) spans[i].className = i === st.k ? "on" : "";
+      lastK = st.k; lastMode = mode;
+    }
+    range.value = t;
+  }
+
+  // ---- controller ----
+  var t = 0, playing = false, raf = 0, visible = true, lastTs = 0;
+  function dur(){ return MODES[mode].steps.length * S; }
+  function restT(){ return dur(); }
+  function buildTicks(){
+    ticks.innerHTML = "";
+    MODES[mode].steps.forEach(function(s){
+      var sp = document.createElement("span");
+      sp.textContent = s.sec.replace("第 ", "").replace(" 秒", "s");
+      ticks.appendChild(sp);
+    });
+    range.max = dur();
+    fig.setAttribute("data-dur", dur());
+    fig.setAttribute("data-rest", restT());
+    lastK = -1;
+  }
+  var playBtn = fig.querySelector(".play");
+  function setPlaying(v){
+    playing = v;
+    playBtn.textContent = v ? "❚❚ 暫停" : "▶ 播放";
+    playBtn.setAttribute("aria-label", v ? "暫停" : "播放");
+    if (v) arm(); else stop();
+  }
+  function arm(){ if (!raf && playing && visible){ lastTs = 0; raf = requestAnimationFrame(tick); } }
+  function stop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function tick(ts){
+    raf = 0;
+    if (!playing || !visible) return;
+    if (lastTs) t = Math.min(dur(), t + (ts - lastTs) / 1000);
+    lastTs = ts;
+    paint(t);
+    if (t >= dur()){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function seek(v){ t = Math.max(0, Math.min(dur(), +v || 0)); setPlaying(false); paint(t); }
+  window.seek = seek;
+  Object.defineProperty(window, "DUR", {get: dur, configurable:true});
+  window.timeline = function(){ return {dur: dur(), rest: restT(), mode: mode}; };
+  window.setMode = function(m){ setMode(m); };
+
+  function setMode(m){
+    if (!MODES[m]) return;
+    mode = m;
+    fig.querySelectorAll(".fig-modes button").forEach(function(b){ b.setAttribute("aria-pressed", b.getAttribute("data-mode") === m ? "true" : "false"); });
+    buildTicks();
+    if (reduce){ seek(restT()); }
+    else { t = 0; paint(0); setPlaying(true); }
+  }
+  function stepTo(d){
+    var N = MODES[mode].steps.length;
+    var k = Math.min(N - 1, Math.floor(Math.min(t, dur() - 1e-6) / S + 1e-6));
+    var settled = (t / S) - k >= 0.7;
+    var nk = d > 0 ? (settled ? k + 1 : k) : (settled ? k : k - 1);
+    nk = Math.max(0, Math.min(N - 1, nk));
+    seek(nk * S + (nk === N - 1 ? S : S * 0.75));
+  }
+
+  fig.querySelectorAll(".fig-modes button").forEach(function(b){
+    b.addEventListener("click", function(){ setMode(b.getAttribute("data-mode")); });
+  });
+  playBtn.addEventListener("click", function(){
+    if (playing){ setPlaying(false); return; }
+    if (t >= dur() - 1e-3) t = 0;
+    setPlaying(true);
+  });
+  fig.querySelector(".prev").addEventListener("click", function(){ stepTo(-1); });
+  fig.querySelector(".next").addEventListener("click", function(){ stepTo(1); });
+  range.addEventListener("input", function(){ seek(range.value); });
+  fig.addEventListener("keydown", function(e){
+    if (e.target !== fig) return;
+    if (e.key === "ArrowRight"){ stepTo(1); e.preventDefault(); }
+    else if (e.key === "ArrowLeft"){ stepTo(-1); e.preventDefault(); }
+    else if (e.key === " " || e.key === "Enter"){ playBtn.click(); e.preventDefault(); }
+  });
+  fig.querySelector(".theme").addEventListener("click", function(){
+    var root = document.documentElement;
+    var cur = root.getAttribute("data-theme");
+    var dark = cur ? cur === "dark" : (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) arm(); else stop();
+    }, {rootMargin:"120px"}).observe(fig);
+  }
+
+  // start paused at the rest frame: the incident's outcome (2 orders, 1,000 元)
+  buildTicks();
+  t = restT(); paint(t);
+})();
+</script>
+</body>
+</html>

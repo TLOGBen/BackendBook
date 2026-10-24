@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CQRS 讀模型落後時間軸</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#6b7280; --faint:#9ca3af;
+  --line:#cbd5e1; --node:#f8fafc; --node-stroke:#94a3b8;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111;
+  --track:#e5e7eb; --btn:#f3f4f6; --btn-ink:#1f2937; --focus:#2563eb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2028; --ink:#e5e7eb; --muted:#a1a1aa; --faint:#71717a;
+    --line:#4b5563; --node:#262a35; --node-stroke:#64748b;
+    --hot-fill:#5b3a0a; --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+    --track:#374151; --btn:#2d3240; --btn-ink:#e5e7eb; --focus:#60a5fa;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2028; --ink:#e5e7eb; --muted:#a1a1aa; --faint:#71717a;
+  --line:#4b5563; --node:#262a35; --node-stroke:#64748b;
+  --hot-fill:#5b3a0a; --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+  --track:#374151; --btn:#2d3240; --btn-ink:#e5e7eb; --focus:#60a5fa;
+  color-scheme: dark;
+}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-text-size-adjust:100%;
+}
+.fig{margin:0;padding:12px 16px 16px;box-sizing:border-box;width:100%;max-width:760px;margin-inline:auto;container-type:inline-size;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--focus);border-radius:8px}
+.fig *{box-sizing:border-box}
+.stage{width:100%;margin-inline:auto}
+.stage svg{display:block;width:100%;height:auto}
+.stage.narrow{max-width:440px}
+.mono{font-family:ui-monospace,"SFMono-Regular","Cascadia Mono",Consolas,"Liberation Mono",monospace}
+svg text{fill:var(--ink)}
+svg .n-box{fill:var(--node);stroke:var(--node-stroke);stroke-width:1.5}
+svg .n-box.hot{fill:var(--hot-fill);stroke:var(--hot-stroke);stroke-width:2}
+svg .n-name{font-weight:600;font-size:16px}
+svg .n-sub{font-size:14px;fill:var(--muted)}
+svg .n-sub.hot{fill:var(--hot-ink)}
+svg .lbl{font-size:13.5px;fill:var(--muted)}
+svg .val{font-size:14px}
+svg .val.none{fill:var(--faint)}
+svg .pill{fill:none;stroke:none}
+svg .pill.hot{fill:var(--hot-fill);stroke:var(--hot-stroke);stroke-width:1.5;stroke-dasharray:4 3}
+svg .pill.on{fill:var(--node);stroke:var(--node-stroke);stroke-width:1}
+svg .note{font-size:14px;font-weight:600}
+svg .note.hot{fill:var(--hot-stroke)}
+svg .note.ok{fill:var(--muted);font-weight:400}
+svg .edge{stroke:var(--line);stroke-width:2;fill:none}
+svg .edge.hot{stroke:var(--hot-stroke);stroke-width:3}
+svg .e-lbl{font-size:13.5px;fill:var(--muted)}
+svg .e-lbl.hot{fill:var(--hot-stroke);font-weight:600}
+svg .e-mask{fill:var(--bg)}
+svg .dot{fill:var(--hot-fill);stroke:var(--hot-stroke);stroke-width:2.5}
+svg .mk{fill:var(--line)} svg .mk.hot{fill:var(--hot-stroke)}
+
+.readout{margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:12px}
+.ro-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.ro-step{font-weight:700;font-size:14px;border-radius:4px;padding:2px 8px;background:var(--hot-fill);color:var(--hot-ink);border:1px solid var(--hot-stroke)}
+.ro-title{font-weight:600;font-size:15px}
+.ro-desc{margin:6px 0 10px;font-size:14px;line-height:1.6;color:var(--ink)}
+.ro-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.cell{border-radius:6px;background:var(--btn);padding:8px;min-width:0}
+.cell .k{font-size:12px;color:var(--muted);line-height:1.4}
+.cell .v{font-size:14px;font-weight:600;margin-top:2px;line-height:1.4}
+.cell.hot{background:var(--hot-fill);box-shadow:inset 0 0 0 1.5px var(--hot-stroke)}
+.cell.hot .k,.cell.hot .v{color:var(--hot-ink)}
+
+.ctrl{margin-top:12px}
+.btns{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btns button,.steps button{
+  font:inherit;font-size:14px;min-height:36px;padding:4px 12px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--node-stroke);background:var(--btn);color:var(--btn-ink)
+}
+.btns button:focus-visible,.steps button:focus-visible,input[type=range]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.btns .play{font-weight:600;min-width:72px}
+.btns .theme{margin-left:auto;padding:4px 10px}
+.tl{position:relative;margin-top:12px;padding-top:4px}
+.steps{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.steps button{padding:4px 0;font-weight:600}
+.steps button[aria-current="step"]{background:var(--hot-fill);color:var(--hot-ink);border-color:var(--hot-stroke)}
+.track{position:relative;height:36px;margin-top:6px}
+.gap{position:absolute;top:13px;height:10px;border-radius:5px;background:var(--hot-fill);border:1.5px solid var(--hot-stroke);pointer-events:none}
+.gap-lbl{position:absolute;top:36px;font-size:12px;color:var(--hot-stroke);white-space:nowrap;font-weight:600}
+.track input{position:absolute;inset:0;width:100%;height:36px;margin:0;background:transparent;accent-color:var(--hot-stroke);cursor:pointer}
+.track .rail{position:absolute;left:0;right:0;top:16px;height:4px;border-radius:2px;background:var(--track);pointer-events:none}
+.spacer{height:22px}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="read-lag-timeline" data-dur="10" data-rest="5.9" tabindex="0"
+  aria-label="CQRS 下單後馬上查列表的時間軸：T1 Command API 在同一個交易寫入 orders 與 domain_events；T2 使用者拿到 201 order_id=42；T3 馬上 GET /orders，讀模型 order_list_view 還沒有 42 號，列表看不到；T4 投影程式處理 OrderPlaced 更新讀模型；T5 再查才看得到 42 號。">
+  <div class="stage" id="stage"></div>
+
+  <div class="readout" aria-live="polite">
+    <div class="ro-head"><span class="ro-step" id="roStep">T3</span><span class="ro-title" id="roTitle"></span></div>
+    <div class="ro-desc" id="roDesc"></div>
+    <div class="ro-grid">
+      <div class="cell" id="c0"><div class="k">寫入 DB 的 42 號</div><div class="v" id="v0"></div></div>
+      <div class="cell" id="c1"><div class="k">讀模型的 42 號</div><div class="v" id="v1"></div></div>
+      <div class="cell" id="c2"><div class="k">列表頁看到 42 號嗎</div><div class="v" id="v2"></div></div>
+    </div>
+  </div>
+
+  <div class="ctrl">
+    <div class="btns">
+      <button type="button" class="play" id="play" aria-label="播放">▶ 播放</button>
+      <button type="button" id="prev" aria-label="上一步">上一步</button>
+      <button type="button" id="next" aria-label="下一步">下一步</button>
+      <button type="button" class="theme" id="theme" aria-label="切換深淺色">◐</button>
+    </div>
+    <div class="tl">
+      <div class="steps" id="steps" role="group" aria-label="跳到某一步">
+        <button type="button" data-k="0">T1</button><button type="button" data-k="1">T2</button><button type="button" data-k="2">T3</button><button type="button" data-k="3">T4</button><button type="button" data-k="4">T5</button>
+      </div>
+      <div class="track">
+        <div class="rail"></div>
+        <div class="gap" id="gap"></div>
+        <input type="range" id="scrub" min="0" max="10" step="0.05" value="5.9" aria-label="時間軸">
+        <div class="gap-lbl" id="gapLbl">空窗：寫入 DB 有，讀模型還沒有</div>
+      </div>
+      <div class="spacer"></div>
+    </div>
+  </div>
+</figure>
+
+<script>
+(function(){
+"use strict";
+var DUR = 10, REST = 5.9;
+window.DUR = DUR;
+var NS = "http://www.w3.org/2000/svg";
+
+/* ---------- timeline (seconds) ---------- */
+// each step is 2 s; motions: [edgeId, start, end, reverse?]
+var MOVES = [
+  ["post",0.0,0.7],["commit",0.7,1.3],
+  ["e201",2.0,2.8],
+  ["get",4.0,4.6],["select",4.6,4.9],["select",4.9,5.2,true],["res",5.2,5.8],
+  ["poll",6.0,6.7],["upd",6.7,7.4],
+  ["get",8.0,8.6],["select",8.6,8.9],["select",8.9,9.2,true],["res",9.2,9.8]
+];
+var T_COMMIT = 1.3, T_201 = 2.8, T_SEE_NONE = 5.8, T_UPD = 7.4, T_SEE = 9.8;
+var GAP0 = T_COMMIT, GAP1 = T_UPD;
+
+var STEPS = [
+  {k:"T1", title:"送出 POST /orders", desc:"Command API 在同一個交易裡寫 orders 與 domain_events，然後 COMMIT。寫入 DB 從這一刻起就有 42 號。"},
+  {k:"T2", title:"拿到 201", desc:"使用者拿到 201 和 order_id=42 version=1。訂單已經成立。"},
+  {k:"T3", title:"馬上打 GET /orders", desc:"Query API 只讀讀取 DB，裡面還沒有 42 號，所以列表看不到。訂單其實已經成立，只是讀模型還沒追上。"},
+  {k:"T4", title:"投影程式處理 OrderPlaced", desc:"投影程式在背景撈出未處理事件，冪等更新 order_list_view。讀模型這時才有 42 號。"},
+  {k:"T5", title:"再打一次 GET /orders", desc:"讀模型追上了，這次列表看得到 42 號。"}
+];
+
+/* ---------- two layouts ---------- */
+var L = {
+  wide: { vb:[720,376], userName:"使用者（前端）",
+    nodes:{ user:[40,16,640,48], cmd:[40,112,200,56], qry:[480,112,200,56],
+            wdb:[40,208,200,152], rdb:[480,208,200,152], proj:[280,256,160,56] },
+    edges:{ post:[[80,64],[80,112]], e201:[[200,112],[200,64]], commit:[[140,168],[140,208]],
+            get:[[640,64],[640,112]], res:[[520,112],[520,64]], select:[[580,168],[580,208]],
+            poll:[[240,284],[280,284]], upd:[[440,284],[480,284]] },
+    labels:{ post:["POST /orders",88,93,"start",true], e201:["201",208,93,"start",true],
+             commit:["同一交易",148,193,"start",false], get:["GET /orders",632,93,"end",true],
+             res:["結果",512,93,"end",false], select:["SELECT",588,193,"start",true] }
+  },
+  narrow: { vb:[320,440], userName:"使用者",
+    nodes:{ user:[8,8,304,44], cmd:[8,104,144,52], qry:[168,104,144,52],
+            wdb:[8,196,144,152], rdb:[168,196,144,152], proj:[8,388,304,44] },
+    edges:{ post:[[48,52],[48,104]], e201:[[112,104],[112,52]], commit:[[80,156],[80,196]],
+            get:[[272,52],[272,104]], res:[[208,104],[208,52]], select:[[240,156],[240,196]],
+            poll:[[80,348],[80,388]], upd:[[240,388],[240,348]] },
+    labels:{}
+  }
+};
+
+var stage = document.getElementById("stage");
+var mode = null, E = {};
+
+function el(tag, attrs, parent, text){
+  var n = document.createElementNS(NS, tag);
+  for (var a in attrs) n.setAttribute(a, attrs[a]);
+  if (text != null) n.textContent = text;
+  if (parent) parent.appendChild(n);
+  return n;
+}
+
+function build(m){
+  mode = m; var S = L[m]; E = {edges:{}, labels:{}, boxes:{}};
+  stage.className = "stage " + m;
+  stage.textContent = "";
+  var svg = el("svg", {viewBox:"0 0 "+S.vb[0]+" "+S.vb[1], role:"img", "aria-labelledby":"rl-title rl-desc"}, stage);
+  el("title",{id:"rl-title"},svg,"CQRS：寫入 DB 先有 42 號，讀模型晚一步");
+  el("desc",{id:"rl-desc"},svg,"使用者、Command API、寫入 DB、投影程式、讀取 DB、Query API 之間的資料流，以及兩個 DB 裡 42 號訂單的狀態。");
+  var defs = el("defs",{},svg);
+  ["mk","mkh"].forEach(function(id){
+    var mk = el("marker",{id:"rl-"+id, viewBox:"0 0 10 10", refX:"9", refY:"5", markerWidth:"7", markerHeight:"7", orient:"auto-start-reverse"}, defs);
+    el("path",{d:"M0,0 L10,5 L0,10 z", "class": id==="mk" ? "mk" : "mk hot"}, mk);
+  });
+  // edges first (under boxes)
+  var gE = el("g",{},svg);
+  for (var id in S.edges){
+    var p = S.edges[id];
+    E.edges[id] = el("line",{x1:p[0][0],y1:p[0][1],x2:p[1][0],y2:p[1][1],"class":"edge","marker-end":"url(#rl-mk)"}, gE);
+  }
+  // labels with masks
+  for (var lid in S.labels){
+    var lb = S.labels[lid];
+    var g = el("g",{},svg);
+    var w = textW(lb[0], lb[4]), h = 18;
+    var x = lb[3]==="end" ? lb[1]-w-4 : lb[1]-4;
+    el("rect",{x:x,y:lb[2]-14,width:w+8,height:h+4,rx:3,"class":"e-mask"},g);
+    E.labels[lid] = el("text",{x:lb[1],y:lb[2],"text-anchor":lb[3],"class":"e-lbl"+(lb[4]?" mono":"")},g,lb[0]);
+  }
+  // boxes
+  var N = S.nodes;
+  function box(id){ var b=N[id]; E.boxes[id]=el("rect",{x:b[0],y:b[1],width:b[2],height:b[3],rx:8,"class":"n-box"},svg); return b; }
+  var u = box("user");
+  el("text",{x:u[0]+14,y:u[1]+u[3]/2+6,"class":"n-name"},svg,S.userName);
+  E.userSt = el("text",{x:u[0]+u[2]-14,y:u[1]+u[3]/2+5,"text-anchor":"end","class":"n-sub"},svg,"");
+  var c = box("cmd");
+  el("text",{x:c[0]+12,y:c[1]+22,"class":"n-name"},svg,"Command API");
+  el("text",{x:c[0]+12,y:c[1]+42,"class":"n-sub"},svg,"改資料");
+  var q = box("qry");
+  el("text",{x:q[0]+12,y:q[1]+22,"class":"n-name"},svg,"Query API");
+  el("text",{x:q[0]+12,y:q[1]+42,"class":"n-sub"},svg,"查資料");
+  var pr = box("proj");
+  var pTwoLine = pr[3] >= 52;
+  el("text",{x:pr[0]+12,y:pTwoLine ? pr[1]+22 : pr[1]+pr[3]/2+6,"class":"n-name"},svg,"投影程式");
+  E.projSt = el("text",{x: pTwoLine ? pr[0]+12 : pr[0]+pr[2]-12, y: pTwoLine ? pr[1]+42 : pr[1]+pr[3]/2+5, "text-anchor": pTwoLine ? "start" : "end","class":"n-sub"},svg,"");
+  // write DB card
+  var w0 = box("wdb");
+  el("text",{x:w0[0]+12,y:w0[1]+24,"class":"n-name"},svg,"寫入 DB");
+  el("text",{x:w0[0]+12,y:w0[1]+50,"class":"lbl mono"},svg,"orders");
+  E.wOrdPill = el("rect",{x:w0[0]+8,y:w0[1]+56,width:w0[2]-16,height:24,rx:4,"class":"pill"},svg);
+  E.wOrd = el("text",{x:w0[0]+14,y:w0[1]+73,"class":"val"},svg,"");
+  el("text",{x:w0[0]+12,y:w0[1]+102,"class":"lbl mono"},svg,"domain_events");
+  E.wEvPill = el("rect",{x:w0[0]+8,y:w0[1]+108,width:w0[2]-16,height:40,rx:4,"class":"pill"},svg);
+  E.wEv = el("text",{x:w0[0]+14,y:w0[1]+125,"class":"val mono"},svg,"");
+  E.wEv2 = el("text",{x:w0[0]+14,y:w0[1]+143,"class":"val"},svg,"");
+  // read DB card
+  var r0 = box("rdb");
+  el("text",{x:r0[0]+12,y:r0[1]+24,"class":"n-name"},svg,"讀取 DB");
+  el("text",{x:r0[0]+12,y:r0[1]+50,"class":"lbl mono"},svg,"order_list_view");
+  E.rOrdPill = el("rect",{x:r0[0]+8,y:r0[1]+56,width:r0[2]-16,height:24,rx:4,"class":"pill"},svg);
+  E.rOrd = el("text",{x:r0[0]+14,y:r0[1]+73,"class":"val"},svg,"");
+  el("text",{x:r0[0]+12,y:r0[1]+102,"class":"lbl"},svg,"讀模型");
+  E.rNote = el("text",{x:r0[0]+12,y:r0[1]+126,"class":"note"},svg,"");
+  // moving packet
+  E.dot = el("circle",{r:7,cx:-20,cy:-20,"class":"dot"},svg);
+  paint(t);
+}
+
+function textW(s, mono){
+  var w=0; for (var i=0;i<s.length;i++){ var c=s.charCodeAt(i); w += c>0x2e80 ? 13.5 : (mono ? 8.2 : 7.6); } return Math.ceil(w);
+}
+
+/* ---------- state at t ---------- */
+function stepOf(t){ return Math.max(0, Math.min(4, Math.floor(t/2 + 1e-9))); }
+function ease(x){ return x<0?0:x>1?1:x*x*(3-2*x); }
+
+function paint(t){
+  var S = L[mode];
+  // active move
+  var act = null, f = 0;
+  for (var i=0;i<MOVES.length;i++){ var mv=MOVES[i]; if (t>=mv[1] && t<mv[2]){ act=mv; f=ease((t-mv[1])/(mv[2]-mv[1])); break; } }
+  var hotE = {}, hotN = {};
+  if (act){
+    hotE[act[0]] = true;
+    var p = S.edges[act[0]], a = act[3] ? p[1] : p[0], b = act[3] ? p[0] : p[1];
+    E.dot.setAttribute("cx", (a[0]+(b[0]-a[0])*f).toFixed(1));
+    E.dot.setAttribute("cy", (a[1]+(b[1]-a[1])*f).toFixed(1));
+    E.dot.style.display = "";
+  } else E.dot.style.display = "none";
+  var k = stepOf(t);
+  var NODES_BY_STEP = [["cmd","wdb"],["user"],["qry","rdb","user"],["proj","rdb"],["qry","rdb","user"]];
+  NODES_BY_STEP[k].forEach(function(n){ hotN[n]=true; });
+  // T3 at rest: keep the request path lit so the still frame reads
+  if (k===2 && t>=T_SEE_NONE){ hotE.get = hotE.select = hotE.res = true; }
+  if (k===4 && t>=T_SEE){ hotE.get = hotE.select = hotE.res = true; }
+  for (var id in E.edges){
+    var h = !!hotE[id];
+    E.edges[id].setAttribute("class", "edge"+(h?" hot":""));
+    E.edges[id].setAttribute("marker-end", h ? "url(#rl-mkh)" : "url(#rl-mk)");
+    if (E.labels[id]) E.labels[id].setAttribute("class", "e-lbl"+(S.labels[id][4]?" mono":"")+(h?" hot":""));
+  }
+  for (var bn in E.boxes){
+    var hot = !!hotN[bn] && bn!=="wdb" && bn!=="rdb";
+    E.boxes[bn].setAttribute("class","n-box"+(hot?" hot":""));
+  }
+  // write DB
+  var committed = t >= T_COMMIT, processed = t >= T_UPD;
+  set(E.wOrd, committed ? "42 號 version=1" : "還沒有 42 號", committed ? "val" : "val none");
+  E.wOrdPill.setAttribute("class", committed ? "pill on" : "pill");
+  set(E.wEv, committed ? "OrderPlaced" : "—", committed ? "val mono" : "val none");
+  set(E.wEv2, committed ? (processed ? "已處理" : "未處理") : "", committed && !processed ? "val" : "val none");
+  E.wEvPill.setAttribute("class", committed ? "pill on" : "pill");
+  // read DB
+  var gap = t >= GAP0 && t < GAP1;
+  set(E.rOrd, processed ? "42 號 version=1" : "沒有 42 號", processed ? "val" : (gap ? "val" : "val none"));
+  E.rOrdPill.setAttribute("class", processed ? "pill on" : (gap ? "pill hot" : "pill"));
+  set(E.rNote, processed ? "已追上" : (gap ? "還沒追上" : ""), processed ? "note ok" : "note hot");
+  // projector
+  var inProj = t >= 6.0 && t < T_UPD;
+  set(E.projSt, inProj ? "處理 OrderPlaced" : (processed ? "已處理完" : "等待新事件"), inProj ? "n-sub hot" : "n-sub");
+  // user status
+  var us = "";
+  if (t >= T_SEE) us = "列表：看得到 42 號";
+  else if (t >= T_SEE_NONE) us = "列表：看不到 42 號";
+  else if (t >= T_201) us = mode==="wide" ? "201 order_id=42 version=1" : "201 order_id=42";
+  set(E.userSt, us, "n-sub"+(hotN.user && us ? " hot":""));
+  if (us.indexOf("201")===0) E.userSt.classList.add("mono");
+  // readout
+  var st = STEPS[k];
+  roStep.textContent = st.k; roTitle.textContent = st.title; roDesc.textContent = st.desc;
+  v0.textContent = committed ? "有，version=1" : "交易還沒 commit";
+  v1.textContent = processed ? "有，version=1" : "沒有";
+  var seen = t >= T_SEE ? "看得到" : (t >= T_SEE_NONE ? "看不到" : "還沒查");
+  v2.textContent = seen;
+  c1.className = "cell" + (gap ? " hot" : "");
+  c2.className = "cell" + (seen==="看不到" ? " hot" : "");
+  // controls
+  stepBtns.forEach(function(b,i){ if (i===k) b.setAttribute("aria-current","step"); else b.removeAttribute("aria-current"); });
+  if (Math.abs(+scrub.value - t) > 0.02) scrub.value = t.toFixed(2);
+  scrub.setAttribute("aria-valuetext", st.k + "，" + st.title);
+}
+function set(n, s, cls){ if (n.textContent !== s) n.textContent = s; if (cls) n.setAttribute("class", cls); }
+
+/* ---------- controls ---------- */
+var fig = document.getElementById("fig");
+var roStep = document.getElementById("roStep"), roTitle = document.getElementById("roTitle"), roDesc = document.getElementById("roDesc");
+var v0 = document.getElementById("v0"), v1 = document.getElementById("v1"), v2 = document.getElementById("v2");
+var c1 = document.getElementById("c1"), c2 = document.getElementById("c2");
+var scrub = document.getElementById("scrub"), playBtn = document.getElementById("play");
+var stepBtns = Array.prototype.slice.call(document.querySelectorAll("#steps button"));
+var gapEl = document.getElementById("gap"), gapLbl = document.getElementById("gapLbl");
+gapEl.style.left = (GAP0/DUR*100)+"%"; gapEl.style.width = ((GAP1-GAP0)/DUR*100)+"%";
+gapLbl.style.left = (GAP0/DUR*100)+"%";
+
+var t = REST, playing = false, visible = true, raf = 0, last = 0, played = false;
+
+function setPlaying(p){
+  playing = p;
+  playBtn.textContent = p ? "❚❚ 暫停" : (t >= DUR - 1e-6 ? "↺ 重播" : "▶ 播放");
+  playBtn.setAttribute("aria-label", p ? "暫停" : "播放");
+  if (p) arm();
+}
+function arm(){ if (!raf && playing && visible){ last = 0; raf = requestAnimationFrame(tick); } }
+function tick(now){
+  raf = 0;
+  if (!playing || !visible) return;
+  if (last) t = Math.min(DUR, t + (now - last)/1000);
+  last = now;
+  paint(t);
+  if (t >= DUR){ setPlaying(false); return; }
+  raf = requestAnimationFrame(tick);
+}
+function seek(x){
+  t = Math.max(0, Math.min(DUR, +x || 0));
+  if (playing) setPlaying(false); else setPlaying(false);
+  paint(t);
+}
+window.seek = seek;
+window.timeline = function(){ return {dur:DUR, rest:REST, t:t}; };
+
+playBtn.addEventListener("click", function(){
+  if (playing){ setPlaying(false); return; }
+  if (!played || t >= DUR - 1e-6) t = 0;
+  played = true; setPlaying(true);
+});
+function goStep(k){ k = Math.max(0, Math.min(4, k)); seek(k===2 ? REST : (k*2 + 1.95)); }
+document.getElementById("prev").addEventListener("click", function(){ goStep(stepOf(t) - 1); });
+document.getElementById("next").addEventListener("click", function(){ goStep(stepOf(t) + 1); });
+stepBtns.forEach(function(b){ b.addEventListener("click", function(){ goStep(+b.getAttribute("data-k")); }); });
+scrub.addEventListener("input", function(){ played = true; seek(scrub.value); });
+fig.addEventListener("keydown", function(e){
+  if (e.target === scrub) return;
+  if (e.key === "ArrowRight"){ goStep(stepOf(t)+1); e.preventDefault(); }
+  else if (e.key === "ArrowLeft"){ goStep(stepOf(t)-1); e.preventDefault(); }
+  else if ((e.key === " " || e.key === "Enter") && e.target === fig){ playBtn.click(); e.preventDefault(); }
+});
+document.getElementById("theme").addEventListener("click", function(){
+  var root = document.documentElement, cur = root.getAttribute("data-theme");
+  var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.setAttribute("data-theme", dark ? "light" : "dark");
+});
+
+/* layout by container width (read once per resize) */
+var ro = new ResizeObserver(function(entries){
+  var w = entries[0].contentRect.width;
+  var m = w >= 660 ? "wide" : "narrow";
+  if (m !== mode) build(m);
+});
+ro.observe(fig);
+build(fig.clientWidth >= 660 ? "wide" : "narrow");
+
+/* visible-only loop */
+if ("IntersectionObserver" in window){
+  new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); }, {rootMargin:"120px"}).observe(fig);
+}
+/* reduced motion: stay paused at rest (we never autoplay anyway) */
+paint(t);
+})();
+</script>
+</body>
+</html>

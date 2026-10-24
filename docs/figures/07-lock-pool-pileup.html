@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鎖拿太久把連線池吃光</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280; --line:#c7ccd4;
+  --panel:#f8fafc; --panel2:#eef1f5;
+  --amber-fill:#fde68a; --amber-stroke:#b45309; --amber-ink:#111111;
+  --err:#b91c1c; --err-fill:#fee2e2; --err-ink:#7f1d1d;
+  --focus:#2563eb;
+  --sans:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,"PingFang TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e5e7eb; --muted:#b9bfca; --soft:#9aa2b0; --line:#454c5c;
+    --panel:#262a34; --panel2:#2f3440;
+    --amber-fill:#5b3c0c; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+    --err:#f87171; --err-fill:#451a1a; --err-ink:#fecaca;
+    --focus:#7aa2f7; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e5e7eb; --muted:#b9bfca; --soft:#9aa2b0; --line:#454c5c;
+  --panel:#262a34; --panel2:#2f3440;
+  --amber-fill:#5b3c0c; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+  --err:#f87171; --err-fill:#451a1a; --err-ink:#fecaca;
+  --focus:#7aa2f7; color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans)}
+.fig{margin:0;padding:8px 16px 12px;box-sizing:border-box;width:100%;outline:none}
+.fig:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;border-radius:6px}
+.fig .stage{width:100%;margin:0 auto}
+.fig .stage.narrow{max-width:480px}
+.fig svg{display:block;width:100%;height:auto}
+.fig .cap{display:flex;gap:8px;align-items:baseline;min-height:3.2em;margin:8px auto 4px;font-size:15px;line-height:1.55;max-width:960px}
+.fig .cap .step{flex:none;font-weight:700;color:var(--amber-stroke);white-space:nowrap}
+.fig .ctrl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:960px;margin:0 auto}
+.fig button{font:inherit;font-size:14px;min-height:36px;min-width:36px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.fig button:hover{border-color:var(--muted)}
+.fig button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.fig button.play{font-weight:700;min-width:88px}
+.fig button.on{background:var(--amber-fill);border-color:var(--amber-stroke);color:var(--amber-ink);font-weight:700}
+.fig input[type=range]{flex:1 1 160px;min-width:0;height:36px;margin:0;accent-color:var(--amber-stroke)}
+.fig .keys{display:flex;gap:6px;flex-wrap:wrap}
+.fig .theme{margin-left:auto}
+/* svg parts */
+.z-box{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.z-box.full{stroke:var(--err);stroke-width:3}
+.z-title{fill:var(--ink);font-weight:700}
+.z-sub{fill:var(--muted)}
+.z-mono{font-family:var(--mono)}
+.cnt{fill:var(--muted);font-weight:700}
+.cnt.full{fill:var(--err)}
+.slot{fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4}
+.slot.used{fill:var(--panel2);stroke:var(--soft);stroke-dasharray:none}
+.slot.hold{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5;stroke-dasharray:none}
+.tag{fill:var(--soft)}
+.tag.hold{fill:var(--amber-ink);font-weight:700}
+.tag.wait{fill:var(--muted)}
+.chip rect{fill:var(--bg);stroke:var(--ink);stroke-width:1.5}
+.chip text{fill:var(--ink);font-weight:700}
+.chip.hold rect{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2}
+.chip.hold text{fill:var(--amber-ink)}
+.chip.err rect{fill:var(--err-fill);stroke:var(--err);stroke-width:2}
+.chip.err text{fill:var(--err-ink)}
+.row{fill:var(--panel2);stroke:var(--line);stroke-width:1.5}
+.row.hold{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5}
+.row-t{fill:var(--ink)}
+.row-t.hold{fill:var(--amber-ink);font-weight:700}
+.bar-bg{fill:var(--panel2);stroke:var(--line);stroke-width:1}
+.bar{fill:var(--amber-stroke)}
+.bar.err{fill:var(--err)}
+.st{fill:var(--muted)}
+.st.err{fill:var(--err);font-weight:700}
+.st.hot{fill:var(--amber-stroke);font-weight:700}
+.wire{stroke:var(--soft);stroke-width:1.5;fill:none}
+.wire.dash{stroke-dasharray:5 4}
+.arrow{fill:var(--soft)}
+.lock path,.lock rect{fill:none;stroke:var(--amber-ink);stroke-width:2}
+.lock rect{fill:var(--amber-stroke);stroke:var(--amber-stroke)}
+@media (prefers-reduced-motion: reduce){ .fig *{transition:none!important} }
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="lock-pool-pileup" data-dur="15" data-rest="7" tabindex="0"
+  aria-label="動畫：請求 A 用 FOR UPDATE 鎖住 42 號商品後去等第三方金流，後面的請求各佔一條連線排隊等鎖，15 條連線用光，連首頁、商品列表也借不到連線，30 秒後報錯。左右方向鍵切換步驟，空白鍵播放或暫停。">
+  <div class="stage"><svg id="lpp-svg" role="img" aria-labelledby="lock-pool-pileup-title lock-pool-pileup-desc"></svg></div>
+  <figcaption class="cap" aria-live="polite"><span class="step"></span><span class="txt"></span></figcaption>
+  <div class="ctrl">
+    <button type="button" class="prev" aria-label="上一步">◀</button>
+    <button type="button" class="play" aria-label="播放">▶ 播放</button>
+    <button type="button" class="next" aria-label="下一步">▶▶</button>
+    <input type="range" min="0" max="15" step="0.01" value="7" aria-label="時間軸">
+    <div class="keys" role="group" aria-label="跳到步驟"></div>
+    <button type="button" class="theme" aria-label="切換深淺色">◐</button>
+  </div>
+</figure>
+<script>
+(function(){
+  'use strict';
+  var fig = document.querySelector('.fig');
+  var svg = document.getElementById('lpp-svg');
+  var stage = fig.querySelector('.stage');
+  var DUR = +fig.dataset.dur, REST = +fig.dataset.rest;
+  var NS = 'http://www.w3.org/2000/svg';
+
+  // ---------- timeline (動畫秒數；真實時間只寫在圖說：T4 = 1.5 秒後、T5 = 30 秒後) ----------
+  var KEYS = [
+    {t:2,    step:'T1',            cap:'A 借到連線，用 FOR UPDATE 鎖住 42 號，接著在同一個交易裡呼叫第三方金流。鎖要到 COMMIT 才放開。'},
+    {t:4,    step:'T2',            cap:'B 借到連線，想鎖 42 號，被 A 擋住。B 一邊排隊等鎖，一邊佔著一條連線。'},
+    {t:7,    step:'T3',            cap:'C 到 O 共 13 個請求各借一條連線，全部排在 B 後面等鎖。15 條用光，連首頁、商品列表這種跟 42 號無關的請求也借不到連線。'},
+    {t:10.5, step:'T4（1.5 秒後）', cap:'金流回來，A 扣庫存、提交，放開鎖、還連線。B 拿到鎖，換它呼叫金流；A 還的那條馬上被下一個請求借走，池還是滿的。'},
+    {t:14,   step:'T5（30 秒後）',  cap:'排在池外的請求等滿 30 秒還借不到連線，報錯 QueuePool limit ... timed out，p99 延遲從 80ms 飆到 30 秒。'}
+  ];
+  var CAP_FROM = [0, 2.4, 4.3, 8.0, 12.8];
+  var MOVE = 0.5, LEAVE = 0.4;
+  var T_LOCK_A = 1.2, T_PAY_BACK = 9.0, T_HAND = 9.6, T_FAIL = 13.4, T_OUT_WAIT = 6.9;
+  var PAY_SPAN = T_PAY_BACK - T_LOCK_A;
+
+  var ACTORS = [{name:'A', slot:0, inT:0.5, outT:9.5}, {name:'B', slot:1, inT:2.6}];
+  'CDEFGHIJKLMNO'.split('').forEach(function(c, i){ ACTORS.push({name:c, slot:2+i, inT:4.4 + i*0.14}); });
+  ACTORS.push({name:'新', slot:0, inT:9.8, fresh:true});
+  var OUTQ = [{name:'首頁', inT:6.2}, {name:'商品列表', inT:6.4}];
+
+  // ---------- two layouts ----------
+  var L = {
+    wide: {
+      vb:[960,440], fs:{title:18, text:16, chip:22, tag:16}, cntPre:'用掉 ',
+      pool:{x:256,y:56,w:408,h:360, tx:276, ty:84, cx:648},
+      slot:function(i){ var c=i%5, r=Math.floor(i/5); return {x:276+c*76, y:112+r*100, w:68, h:88}; },
+      chip:{w:52,h:40, dy:12}, tagDy:74,
+      enter:function(s){ return {x:-70, y:s.y+12}; },
+      pay:{x:704,y:56,w:232,h:136, title:[720,84], sub:[[720,110,'平均 1.5 秒，慢時 10 秒']], bar:[720,126,200,10], st:[720,168]},
+      db:{x:704,y:212,w:232,h:204, title:[720,240], row:[720,256,200,72], rowT:[[732,284,'products · id = 42',true]], rowS:[732,312], lock:[896,294],
+          bar:[720,342,200,10], eq:[720,372,'拿鎖時間＝等金流時間'], wait:[720,400,'等這把鎖：']},
+      out:{x:24,y:56,w:200,h:228, title:[40,84,'池外等連線'], sub:[40,108,'最多等 30 秒'],
+           e:function(j){ return {x:40, y:120+j*80, w:168, h:36, bar:[40,162+j*80,168,6], st:[40,186+j*80]}; }},
+      log:{x:24,y:300,w:200,h:116, title:[40,326], p99:[40,354], err:[[40,382,'QueuePool limit'],[40,404,'... timed out']]},
+      wires:[
+        {d:'M224 180 H252', arrow:[256,180,'r']},
+        {d:'M664 120 H700', arrow:[704,120,'r'], dash:true},
+        {d:'M664 312 H700', arrow:[704,312,'r']}
+      ]
+    },
+    narrow: {
+      vb:[360,700], fs:{title:17, text:15, chip:20, tag:15}, cntPre:'',
+      pool:{x:12,y:148,w:336,h:340, tx:20, ty:176, cx:340},
+      slot:function(i){ var c=i%5, r=Math.floor(i/5); return {x:20+c*64, y:200+r*96, w:60, h:88}; },
+      chip:{w:48,h:36, dy:10}, tagDy:70,
+      enter:function(s){ return {x:s.x+6, y:760}; },
+      pay:{x:12,y:12,w:160,h:124, title:[24,36], sub:[[24,58,'平均 1.5 秒'],[24,78,'慢時 10 秒']], bar:[24,92,136,8], st:[24,124]},
+      db:{x:188,y:12,w:160,h:124, title:[200,36], row:[196,46,144,50], rowT:[[204,66,'id = 42 這一列',false]], rowS:[204,88], lock:[320,70],
+          bar:[196,104,144,8], eq:null, wait:[200,128,'等鎖：']},
+      out:{x:12,y:504,w:336,h:104, title:[24,526,'池外等連線（最多等 30 秒）'], sub:null,
+           e:function(j){ return {x:24+j*164, y:538, w:148, h:32, bar:[24+j*164,576,148,6], st:[24+j*164,598]}; }},
+      log:{x:12,y:620,w:336,h:72, title:[24,644], p99:[340,644,'end'], err:[[24,676,'QueuePool limit ... timed out']]},
+      wires:[
+        {d:'M180 504 V492', arrow:[180,488,'u']},
+        {d:'M92 148 V140', arrow:[92,136,'u'], dash:true},
+        {d:'M268 148 V140', arrow:[268,136,'u']}
+      ]
+    }
+  };
+
+  // ---------- helpers ----------
+  function el(tag, attrs, parent, text){
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function setA(e, k, v){ e._c = e._c || {}; if (e._c[k] !== v){ e._c[k] = v; e.setAttribute(k, v); } }
+  function setT(e, v){ if (e._t !== v){ e._t = v; e.textContent = v; } }
+  function clamp(x){ return x < 0 ? 0 : x > 1 ? 1 : x; }
+  function easeOut(x){ x = clamp(x); return 1 - Math.pow(1 - x, 5); }
+  function easeIn(x){ x = clamp(x); return x*x*x; }
+  function lerp(a, b, p){ return a + (b - a) * p; }
+  function arrowPath(x, y, dir){
+    return dir === 'r' ? 'M'+x+' '+y+' l-8 -5 v10 z' : 'M'+x+' '+y+' l-5 8 h10 z';
+  }
+
+  var layoutName = null, P = null; // P = live parts of the current layout
+
+  function build(name){
+    var C = L[name]; layoutName = name;
+    stage.classList.toggle('narrow', name === 'narrow');
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.setAttribute('viewBox', '0 0 ' + C.vb[0] + ' ' + C.vb[1]);
+    var frag = document.createDocumentFragment();
+    el('title', {id:'lock-pool-pileup-title'}, frag, '鎖拿太久，排隊的請求把連線池吃光');
+    el('desc', {id:'lock-pool-pileup-desc'}, frag, '請求 A 鎖住 products 表 42 號這一列後去等第三方金流，後面 14 個請求各佔一條連線排隊等鎖，15 條連線全部用光，首頁和商品列表也借不到連線，等滿 30 秒後報錯。');
+    var fs = C.fs;
+    var g = el('g', {'font-family':'var(--sans)'}, frag);
+    // wires first
+    C.wires.forEach(function(w){
+      el('path', {d:w.d, 'class':'wire' + (w.dash ? ' dash' : '')}, g);
+      el('path', {d:arrowPath(w.arrow[0], w.arrow[1], w.arrow[2]), 'class':'arrow'}, g);
+    });
+    // payment
+    var p = C.pay;
+    el('rect', {x:p.x, y:p.y, width:p.w, height:p.h, rx:8, 'class':'z-box'}, g);
+    el('text', {x:p.title[0], y:p.title[1], 'font-size':fs.title, 'class':'z-title'}, g, '第三方金流');
+    p.sub.forEach(function(s){ el('text', {x:s[0], y:s[1], 'font-size':fs.text, 'class':'z-sub'}, g, s[2]); });
+    el('rect', {x:p.bar[0], y:p.bar[1], width:p.bar[2], height:p.bar[3], rx:3, 'class':'bar-bg'}, g);
+    var payBar = el('rect', {x:p.bar[0], y:p.bar[1], width:0, height:p.bar[3], rx:3, 'class':'bar'}, g);
+    var paySt = el('text', {x:p.st[0], y:p.st[1], 'font-size':fs.text, 'class':'st'}, g, '');
+    // db
+    var d = C.db;
+    el('rect', {x:d.x, y:d.y, width:d.w, height:d.h, rx:8, 'class':'z-box'}, g);
+    el('text', {x:d.title[0], y:d.title[1], 'font-size':fs.title, 'class':'z-title'}, g, 'PostgreSQL');
+    var row = el('rect', {x:d.row[0], y:d.row[1], width:d.row[2], height:d.row[3], rx:6, 'class':'row'}, g);
+    var rowTs = d.rowT.map(function(r){ return el('text', {x:r[0], y:r[1], 'font-size':fs.text, 'class':'row-t' + (r[3] ? ' z-mono' : '')}, g, r[2]); });
+    var rowS = el('text', {x:d.rowS[0], y:d.rowS[1], 'font-size':fs.text, 'class':'row-t'}, g, '');
+    var lock = el('g', {'class':'lock', transform:'translate(' + d.lock[0] + ' ' + d.lock[1] + ')'}, g);
+    el('path', {d:'M3 10 V6 a6 6 0 0 1 12 0 V10'}, lock);
+    el('rect', {x:0, y:10, width:18, height:13, rx:2}, lock);
+    el('rect', {x:d.bar[0], y:d.bar[1], width:d.bar[2], height:d.bar[3], rx:3, 'class':'bar-bg'}, g);
+    var lockBar = el('rect', {x:d.bar[0], y:d.bar[1], width:0, height:d.bar[3], rx:3, 'class':'bar'}, g);
+    if (d.eq) el('text', {x:d.eq[0], y:d.eq[1], 'font-size':fs.text, 'class':'st hot'}, g, d.eq[2]);
+    var waitT = el('text', {x:d.wait[0], y:d.wait[1], 'font-size':fs.text, 'class':'st'}, g, '');
+    // pool
+    var po = C.pool;
+    var poolBox = el('rect', {x:po.x, y:po.y, width:po.w, height:po.h, rx:8, 'class':'z-box'}, g);
+    el('text', {x:po.tx, y:po.ty, 'font-size':fs.title, 'class':'z-title'}, g, '連線池（最多 15 條）');
+    var cnt = el('text', {x:po.cx, y:po.ty, 'font-size':fs.title, 'text-anchor':'end', 'class':'cnt'}, g, '');
+    var slots = [], tags = [];
+    for (var i = 0; i < 15; i++){
+      var s = C.slot(i);
+      slots.push(el('rect', {x:s.x, y:s.y, width:s.w, height:s.h, rx:6, 'class':'slot'}, g));
+      tags.push(el('text', {x:s.x + s.w/2, y:s.y + C.tagDy, 'font-size':fs.tag, 'text-anchor':'middle', 'class':'tag'}, g, '空'));
+    }
+    // outside queue
+    var o = C.out;
+    el('rect', {x:o.x, y:o.y, width:o.w, height:o.h, rx:8, 'class':'z-box'}, g);
+    el('text', {x:o.title[0], y:o.title[1], 'font-size':fs.title, 'class':'z-title'}, g, o.title[2]);
+    if (o.sub) el('text', {x:o.sub[0], y:o.sub[1], 'font-size':fs.text, 'class':'z-sub'}, g, o.sub[2]);
+    var outs = OUTQ.map(function(q, j){
+      var e = o.e(j);
+      var bg = el('rect', {x:e.bar[0], y:e.bar[1], width:e.bar[2], height:e.bar[3], rx:3, 'class':'bar-bg'}, g);
+      var bar = el('rect', {x:e.bar[0], y:e.bar[1], width:0, height:e.bar[3], rx:3, 'class':'bar'}, g);
+      var st = el('text', {x:e.st[0], y:e.st[1], 'font-size':fs.text, 'class':'st'}, g, '');
+      return {e:e, bg:bg, bar:bar, st:st};
+    });
+    // log
+    var lg = C.log;
+    el('rect', {x:lg.x, y:lg.y, width:lg.w, height:lg.h, rx:8, 'class':'z-box'}, g);
+    el('text', {x:lg.title[0], y:lg.title[1], 'font-size':fs.title, 'class':'z-title'}, g, '監控');
+    var p99 = el('text', {x:lg.p99[0], y:lg.p99[1], 'font-size':fs.text, 'text-anchor':lg.p99[2] || 'start', 'class':'st'}, g, '');
+    var errs = lg.err.map(function(e){ return el('text', {x:e[0], y:e[1], 'font-size':fs.text, 'class':'st z-mono', 'data-msg':e[2]}, g, ''); });
+    // chips on top
+    var chipG = el('g', {}, g);
+    var chips = ACTORS.map(function(a){
+      var c = el('g', {'class':'chip', opacity:0}, chipG);
+      el('rect', {x:0, y:0, width:C.chip.w, height:C.chip.h, rx:8}, c);
+      el('text', {x:C.chip.w/2, y:C.chip.h/2 + fs.chip*0.36, 'font-size':fs.chip, 'text-anchor':'middle'}, c, a.name);
+      return c;
+    });
+    var outChips = OUTQ.map(function(q, j){
+      var e = o.e(j);
+      var c = el('g', {'class':'chip', opacity:0}, chipG);
+      el('rect', {x:0, y:0, width:e.w, height:e.h, rx:8}, c);
+      el('text', {x:e.w/2, y:e.h/2 + fs.text*0.36, 'font-size':fs.text, 'text-anchor':'middle'}, c, q.name);
+      return c;
+    });
+    svg.appendChild(frag);
+    P = {C:C, payBar:payBar, paySt:paySt, payW:p.bar[2], row:row, rowTs:rowTs, rowS:rowS, lock:lock, lockBar:lockBar, lockW:d.bar[2],
+         waitT:waitT, waitLabel:d.wait[2], poolBox:poolBox, cnt:cnt, slots:slots, tags:tags, outs:outs, p99:p99, errs:errs, chips:chips, outChips:outChips};
+  }
+
+  // ---------- the model: everything is a pure function of t ----------
+  function holderAt(t){ return t < T_LOCK_A ? null : t < T_HAND ? 'A' : 'B'; }
+  function present(a, t){ // fraction arrived, and fraction left
+    var inP = easeOut((t - a.inT) / MOVE);
+    var outP = a.outT != null ? easeIn((t - a.outT) / LEAVE) : 0;
+    return {inP: t < a.inT ? 0 : inP, outP: outP};
+  }
+  function statusOf(a, t){
+    if (a.fresh) return 'fresh';
+    if (a.name === 'A') return t < T_LOCK_A ? 'used' : t < T_PAY_BACK ? 'hold' : 'commit';
+    if (a.name === 'B') return t < T_HAND ? 'wait' : 'hold';
+    return 'wait';
+  }
+  var TAG = {used:'借到', hold:'拿著鎖', commit:'提交', wait:'等鎖', fresh:'剛借到'};
+
+  var curT = REST;
+  function render(t){
+    curT = t;
+    var C = P.C;
+    // chips + slots
+    var occ = new Array(15), used = 0, waiting = 0;
+    ACTORS.forEach(function(a, i){
+      var pr = present(a, t), chip = P.chips[i];
+      var s = C.slot(a.slot), home = {x: s.x + (s.w - C.chip.w)/2, y: s.y + C.chip.dy}, from = C.enter(s);
+      var x = lerp(from.x, home.x, pr.inP), y = lerp(from.y, home.y, pr.inP) - 28 * pr.outP;
+      var op = pr.inP <= 0 ? 0 : Math.min(1, pr.inP * 2) * (1 - pr.outP);
+      setA(chip, 'transform', 'translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ')');
+      setA(chip, 'opacity', op.toFixed(3));
+      var st = statusOf(a, t);
+      setA(chip, 'class', 'chip' + (st === 'hold' && pr.inP > 0.6 ? ' hold' : ''));
+      if (pr.inP >= 0.6 && pr.outP < 0.5){ occ[a.slot] = st; }
+    });
+    for (var k = 0; k < 15; k++){
+      var st2 = occ[k];
+      if (st2){ used++; if (st2 === 'wait') waiting++; }
+      setA(P.slots[k], 'class', 'slot' + (st2 ? (st2 === 'hold' || st2 === 'commit' ? ' hold' : ' used') : ''));
+      setA(P.tags[k], 'class', 'tag' + (st2 === 'hold' || st2 === 'commit' ? ' hold' : st2 === 'wait' ? ' wait' : ''));
+      setT(P.tags[k], st2 ? TAG[st2] : '空');
+    }
+    var full = used >= 15;
+    setT(P.cnt, C.cntPre + used + ' / 15' + (full ? ' 全用光' : ''));
+    setA(P.cnt, 'class', 'cnt' + (full ? ' full' : ''));
+    setA(P.poolBox, 'class', 'z-box' + (full ? ' full' : ''));
+    setT(P.waitT, P.waitLabel + waiting + ' 個');
+    // lock + payment (same clock: 拿鎖時間＝等金流時間)
+    var h = holderAt(t), frac;
+    if (!h) frac = 0;
+    else if (h === 'A') frac = clamp((t - T_LOCK_A) / PAY_SPAN);
+    else frac = clamp((t - T_HAND) / PAY_SPAN);
+    setA(P.lockBar, 'width', (P.lockW * frac).toFixed(1));
+    setA(P.payBar, 'width', (P.payW * frac).toFixed(1));
+    var rowHold = !!h;
+    setA(P.row, 'class', 'row' + (rowHold ? ' hold' : ''));
+    P.rowTs.forEach(function(e){ setA(e, 'class', 'row-t' + (rowHold ? ' hold' : '') + (e.getAttribute('class').indexOf('z-mono') >= 0 ? ' z-mono' : '')); });
+    setA(P.rowS, 'class', 'row-t' + (rowHold ? ' hold' : ''));
+    setA(P.lock, 'opacity', rowHold ? '1' : '0');
+    var rowText, payText, payCls = 'st';
+    if (!h){ rowText = '還沒有人鎖'; payText = '還沒有人呼叫'; }
+    else if (h === 'A' && t < T_PAY_BACK){ rowText = '鎖在 A 手上'; payText = '等 A 回應中…'; payCls = 'st hot'; }
+    else if (h === 'A'){ rowText = 'A 提交，放開鎖'; payText = 'A：1.5 秒後回來了'; }
+    else { rowText = '鎖在 B 手上'; payText = '換 B 等回應中…'; payCls = 'st hot'; }
+    setT(P.rowS, rowText); setT(P.paySt, payText); setA(P.paySt, 'class', payCls);
+    // outside queue
+    var failed = t >= T_FAIL;
+    OUTQ.forEach(function(q, j){
+      var pr = easeOut((t - q.inT) / MOVE), e = P.outs[j].e, chip = P.outChips[j];
+      var fromX = C === L.wide ? -180 : e.x, fromY = C === L.wide ? e.y : 760;
+      var x = lerp(fromX, e.x, t < q.inT ? 0 : pr), y = lerp(fromY, e.y, t < q.inT ? 0 : pr);
+      setA(chip, 'transform', 'translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ')');
+      setA(chip, 'opacity', t < q.inT ? '0' : Math.min(1, pr * 2).toFixed(3));
+      setA(chip, 'class', 'chip' + (failed ? ' err' : ''));
+      var w = clamp((t - T_OUT_WAIT) / (T_FAIL - T_OUT_WAIT));
+      var here = t >= q.inT + MOVE * 0.6;
+      setA(P.outs[j].bar, 'width', (e.bar[2] * (here ? w : 0)).toFixed(1));
+      setA(P.outs[j].bar, 'class', 'bar' + (failed ? ' err' : ''));
+      setA(P.outs[j].bg, 'opacity', here ? '1' : '0');
+      setT(P.outs[j].st, !here ? '' : failed ? '等滿 30 秒，報錯' : '借不到連線，等待中');
+      setA(P.outs[j].st, 'class', 'st' + (failed ? ' err' : ''));
+    });
+    // monitor
+    setT(P.p99, 'p99 延遲：' + (failed ? '30 秒' : '80ms'));
+    setA(P.p99, 'class', 'st' + (failed ? ' err' : ''));
+    P.errs.forEach(function(e, j){
+      setT(e, failed ? e.getAttribute('data-msg') : (j === 0 ? '（還沒有錯誤）' : ''));
+      setA(e, 'class', 'st z-mono' + (failed ? ' err' : ''));
+    });
+    // caption + controls
+    var ci = 0; for (var m = 0; m < CAP_FROM.length; m++) if (t >= CAP_FROM[m]) ci = m;
+    if (capStep._i !== ci){
+      capStep._i = ci; capStep.textContent = KEYS[ci].step; capTxt.textContent = KEYS[ci].cap;
+      keyBtns.forEach(function(b, n){ b.classList.toggle('on', n === ci); b.setAttribute('aria-pressed', n === ci ? 'true' : 'false'); });
+    }
+    if (+range.value !== t) range.value = t.toFixed(2);
+    range.setAttribute('aria-valuetext', KEYS[ci].step);
+  }
+
+  // ---------- controls ----------
+  var capStep = fig.querySelector('.cap .step'), capTxt = fig.querySelector('.cap .txt');
+  var range = fig.querySelector('input[type=range]');
+  var playBtn = fig.querySelector('.play');
+  var keysBox = fig.querySelector('.keys');
+  var keyBtns = KEYS.map(function(k, i){
+    var b = document.createElement('button'); b.type = 'button'; b.textContent = 'T' + (i + 1);
+    b.setAttribute('aria-label', '跳到 ' + k.step);
+    b.addEventListener('click', function(){ seek(k.t); });
+    keysBox.appendChild(b); return b;
+  });
+
+  var playing = false, stopAt = DUR, visible = false, raf = 0, last = 0;
+  function setPlaying(on){
+    playing = on;
+    playBtn.textContent = on ? '❚❚ 暫停' : '▶ 播放';
+    playBtn.setAttribute('aria-label', on ? '暫停' : '播放');
+    arm();
+  }
+  function arm(){
+    if (playing && visible && !raf){ last = 0; raf = requestAnimationFrame(tick); }
+  }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0; last = now;
+    var t = Math.min(stopAt, curT + dt);
+    render(t);
+    if (t >= stopAt){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function play(){
+    if (curT >= DUR - 0.01) render(0);
+    stopAt = DUR; setPlaying(true);
+  }
+  function seek(t){
+    t = Math.max(0, Math.min(DUR, +t || 0));
+    setPlaying(false); render(t);
+  }
+  function stepTo(dir){
+    var i;
+    if (dir > 0){ for (i = 0; i < KEYS.length; i++) if (KEYS[i].t > curT + 0.01) return seek(KEYS[i].t); seek(KEYS[KEYS.length-1].t); }
+    else { for (i = KEYS.length - 1; i >= 0; i--) if (KEYS[i].t < curT - 0.01) return seek(KEYS[i].t); seek(0); }
+  }
+  playBtn.addEventListener('click', function(){ playing ? setPlaying(false) : play(); });
+  fig.querySelector('.prev').addEventListener('click', function(){ stepTo(-1); });
+  fig.querySelector('.next').addEventListener('click', function(){ stepTo(1); });
+  range.addEventListener('input', function(){ seek(range.value); });
+  fig.querySelector('.theme').addEventListener('click', function(){
+    var root = document.documentElement;
+    var cur = root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    if (e.key === 'ArrowRight'){ stepTo(1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft'){ stepTo(-1); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter'){ playing ? setPlaying(false) : play(); e.preventDefault(); }
+    else if (e.key === 'Home'){ seek(0); e.preventDefault(); }
+    else if (e.key === 'End'){ seek(DUR); e.preventDefault(); }
+  });
+
+  // ---------- layout + visibility ----------
+  function pick(w){ return w >= 750 ? 'wide' : 'narrow'; } // content width; wide 16px x 750/960 = 12.5px
+  build(pick((fig.clientWidth || window.innerWidth) - 32));
+  render(REST);
+  if ('ResizeObserver' in window){
+    new ResizeObserver(function(entries){
+      var n = pick(entries[0].contentRect.width);
+      if (n !== layoutName){ build(n); render(curT); }
+    }).observe(fig);
+  }
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var introDone = reduce;
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible && !introDone){ introDone = true; render(0); stopAt = REST; playing = true; playBtn.textContent = '❚❚ 暫停'; playBtn.setAttribute('aria-label','暫停'); }
+      arm();
+    }, {rootMargin:'120px'}).observe(fig);
+  } else { visible = true; }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:KEYS.map(function(k){ return k.t; })}; };
+})();
+</script>
+</body>
+</html>

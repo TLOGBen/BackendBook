@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redis 三次出事</title>
+<style>
+:root{
+  --paper:#ffffff; --paper-2:#f3f4f6; --ink:#2d3142; --ink-strong:#111111;
+  --muted:#4f5d75; --soft:#5a6580; --rule:rgba(45,49,66,.16); --rule-solid:#bfc0c0;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111; --hot-soft:#fef3c7;
+  --ok:#2f6f4f; --track:#e5e7eb; --fill:#7d8aa3;
+  --font:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,"Noto Sans Mono CJK TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1f2230; --paper-2:#2a2e3f; --ink:#f5f5f5; --ink-strong:#111111;
+    --muted:#c4c7cf; --soft:#a3abbd; --rule:rgba(245,245,245,.16); --rule-solid:rgba(191,192,192,.35);
+    --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-soft:#3a2b10;
+    --ok:#7fc8a0; --track:#353a4d; --fill:#8d97ad; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1f2230; --paper-2:#2a2e3f; --ink:#f5f5f5; --ink-strong:#111111;
+  --muted:#c4c7cf; --soft:#a3abbd; --rule:rgba(245,245,245,.16); --rule-solid:rgba(191,192,192,.35);
+  --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-soft:#3a2b10;
+  --ok:#7fc8a0; --track:#353a4d; --fill:#8d97ad; color-scheme:dark;
+}
+html,body{margin:0;background:var(--paper);color:var(--ink);}
+body{font-family:var(--font);font-size:14px;line-height:1.5;padding:12px 16px;-webkit-text-size-adjust:100%;}
+*{box-sizing:border-box;}
+
+.fig{margin:0;max-width:960px;margin-inline:auto;outline:none;}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--hot-stroke);border-radius:8px;}
+
+/* controls */
+.ctl{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;}
+.scenes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+@media (max-width:520px){.scenes{grid-template-columns:repeat(2,1fr);}}
+button{font:inherit;color:var(--ink);background:var(--paper-2);border:1px solid var(--rule);border-radius:6px;min-height:36px;padding:4px 8px;cursor:pointer;}
+button:hover{border-color:var(--muted);}
+button:focus-visible{outline:2px solid var(--hot-stroke);outline-offset:1px;}
+.scenes button{font-size:13px;line-height:1.3;}
+.scenes button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+.bar{display:flex;align-items:center;gap:8px;}
+.bar .ic{width:40px;flex:none;font-size:15px;padding:0;}
+.bar input[type=range]{flex:1;min-width:0;height:36px;accent-color:var(--hot-stroke);margin:0;}
+
+/* status row */
+.status{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px;min-height:32px;}
+.when{font-weight:600;font-size:14px;}
+.chip{font-family:var(--mono);font-size:12px;padding:2px 8px;border:1px solid var(--rule-solid);border-radius:4px;background:var(--paper-2);white-space:nowrap;}
+.badge{font-size:12px;font-weight:600;padding:2px 8px;border-radius:4px;background:var(--hot-fill);color:var(--hot-ink);border:1px solid var(--hot-stroke);}
+.badge[hidden]{display:none;}
+
+/* write lane */
+.lane{display:flex;align-items:center;gap:8px;margin-bottom:8px;height:32px;}
+.lane-label{font-size:12px;color:var(--soft);flex:none;white-space:nowrap;}
+.track{position:relative;flex:1;height:28px;border-bottom:1px dashed var(--rule-solid);overflow:hidden;}
+.track::after{content:"";position:absolute;right:0;bottom:-5px;border:5px solid transparent;border-left:8px solid var(--rule-solid);border-right:0;}
+.w{position:absolute;top:2px;left:calc(var(--x,0) * (100% + 112px) - 112px);width:104px;height:24px;font-family:var(--mono);font-size:12px;line-height:22px;text-align:center;border:1px solid var(--rule-solid);border-radius:4px;background:var(--paper);color:var(--muted);white-space:nowrap;}
+.w.rej{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink);}
+.lane.frozen .w{opacity:.35;}
+.lane[hidden]{display:none;}
+
+/* redis box */
+.redis{border:1.5px solid var(--rule-solid);border-radius:8px;padding:12px;background:var(--paper-2);transition:background .3s,border-color .3s;}
+.redis.hot{background:var(--hot-soft);border-color:var(--hot-stroke);}
+.rhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px;margin-bottom:8px;}
+.rname{font-weight:600;font-size:14px;}
+.rnote{font-size:12px;color:var(--soft);}
+.redis.hot .rnote,.rnote.hot{color:var(--hot-ink);font-weight:600;}
+.rnote.hot{background:var(--hot-fill);border:1px solid var(--hot-stroke);border-radius:4px;padding:0 8px;}
+
+/* gauge */
+.gauge{margin:4px 0 12px;}
+.gtrack{position:relative;height:16px;border-radius:4px;background:var(--track);overflow:visible;}
+.gfill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:4px;background:var(--fill);}
+.gfill.hot{background:var(--hot-fill);box-shadow:inset 0 0 0 1.5px var(--hot-stroke);}
+.mark{position:absolute;top:-4px;bottom:-4px;width:0;border-left:2px solid var(--ink);}
+.mark.cont{border-left-style:dashed;border-left-color:var(--muted);}
+.mark[hidden]{display:none;}
+.glabels{position:relative;height:20px;font-size:12px;color:var(--soft);}
+.glabels span{position:absolute;top:2px;white-space:nowrap;transform:translateX(-50%);}
+.glabels .l0{left:0;transform:none;}
+.glabels .lim{color:var(--ink);font-weight:600;transform:translateX(calc(-100% - 4px));}
+.glabels .cont{left:auto !important;right:0;transform:none;}
+.glabels span[hidden]{display:none;}
+
+/* cards */
+.groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;}
+.group{display:contents;}
+.ghead{display:none;}
+.card{position:relative;min-height:88px;padding:8px 12px;border:1.5px solid var(--rule-solid);border-radius:6px;background:var(--paper);transition:background .3s,border-color .3s,opacity .3s;}
+.card .t{font-weight:600;font-size:14px;line-height:1.3;}
+.card .k{font-family:var(--mono);font-size:12px;color:var(--soft);}
+.card .s{font-size:13px;line-height:1.4;margin-top:4px;color:var(--muted);}
+.card.hot,.card.gonehot{background:var(--hot-fill);border-color:var(--hot-stroke);}
+.card.hot .t,.card.hot .s,.card.hot .k,.card.gonehot .t,.card.gonehot .s,.card.gonehot .k{color:var(--hot-ink);}
+.card.warn{border-color:var(--hot-stroke);border-style:dashed;}
+.card.gonehot{border-style:dashed;}
+.card.gonehot .t::after,.card.goneok .t::after{content:"已被刪";margin-left:6px;font-size:12px;font-weight:600;padding:0 4px;border-radius:3px;border:1px solid currentColor;}
+.card.goneok{border-style:dashed;background:transparent;opacity:.75;}
+.card.dim{opacity:.4;}
+
+/* split (scene 4) */
+.stage.split .redis{background:transparent;border-color:transparent;padding:0;}
+.stage.split .gauge,.stage.split .rhead{display:none;}
+.stage.split .groups{grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px;}
+@media (max-width:560px){.stage.split .groups{grid-template-columns:minmax(0,1fr);}}
+.stage.split .group{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;align-content:start;border:1.5px solid var(--rule-solid);border-radius:8px;padding:12px;background:var(--paper-2);}
+.stage.split .ghead{display:block;grid-column:1/-1;}
+.ghead .gn{font-weight:600;font-size:14px;}
+.ghead .gc{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+
+/* symptoms + readout */
+.sym{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-top:12px;padding:8px 12px;border-top:1px solid var(--rule);font-size:13px;}
+.sym .lb{color:var(--soft);font-size:12px;padding-top:1px;white-space:nowrap;}
+.sym .v{min-height:20px;}
+.sym .v.none{color:var(--soft);}
+.sym .v.log{font-family:var(--mono);font-size:12px;word-break:break-word;}
+.sym .v.hot{background:var(--hot-fill);color:var(--hot-ink);border-left:3px solid var(--hot-stroke);padding:0 6px;}
+.readout{margin:8px 0 0;font-size:14px;line-height:1.6;min-height:48px;}
+.ev{font-family:var(--mono);}
+@media (prefers-reduced-motion: reduce){*{transition:none !important;}}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="redis-three-incidents" data-dur="38" data-rest="32.9" tabindex="0"
+  aria-label="同一台 Redis 混放菜單快取、session、背景工作佇列、冪等鍵和速率限制計數器，在 maxmemory 0、noeviction、allkeys-lru 三種設定下各出一次事，最後拆成兩台的動畫。">
+  <div class="ctl">
+    <div class="scenes" role="group" aria-label="選擇哪一次出事">
+      <button type="button" data-scene="0">① 沒設上限</button>
+      <button type="button" data-scene="1">② noeviction</button>
+      <button type="button" data-scene="2">③ allkeys-lru</button>
+      <button type="button" data-scene="3">④ 怎麼修</button>
+    </div>
+    <div class="bar">
+      <button type="button" class="ic" id="prev" aria-label="上一步">‹</button>
+      <button type="button" class="ic" id="play" aria-label="播放">▶</button>
+      <input type="range" id="scrub" min="0" max="3800" step="1" value="3290" aria-label="時間軸">
+      <button type="button" class="ic" id="next" aria-label="下一步">›</button>
+      <button type="button" class="ic" id="theme" aria-label="切換深淺色">◐</button>
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="status">
+      <span class="when" id="when"></span>
+      <span class="chip" id="cfg1"></span>
+      <span class="chip" id="cfg2"></span>
+      <span class="badge" id="badge" hidden></span>
+    </div>
+
+    <div class="lane" id="lane" aria-hidden="true">
+      <span class="lane-label">API 寫入 →</span>
+      <div class="track" id="track"></div>
+    </div>
+
+    <div class="redis" id="redis">
+      <div class="rhead">
+        <span class="rname">Redis（一個實例）</span>
+        <span class="rnote" id="rnote"></span>
+      </div>
+      <div class="gauge" aria-hidden="true">
+        <div class="gtrack">
+          <div class="gfill" id="gfill"></div>
+          <div class="mark" id="mlim" hidden></div>
+          <div class="mark cont" id="mcont"></div>
+        </div>
+        <div class="glabels">
+          <span class="l0">記憶體用量</span>
+          <span class="lim" id="llim" hidden>maxmemory 3GB</span>
+          <span class="cont" id="lcont">容器 4GB</span>
+        </div>
+      </div>
+      <div class="groups">
+        <div class="group" id="gA">
+          <div class="ghead"><div class="gn">快取專用這台</div><div class="gc"><span class="chip">maxmemory</span><span class="chip">allkeys-lru</span></div></div>
+          <div class="card" data-c="menu"><div class="t">菜單快取</div><div class="k">menu:*</div><div class="s"></div></div>
+        </div>
+        <div class="group" id="gB">
+          <div class="ghead"><div class="gn">不能丟的資料另一台</div><div class="gc"><span class="chip">noeviction</span><span class="chip">記憶體告警 70%</span></div></div>
+          <div class="card" data-c="session"><div class="t">登入狀態</div><div class="k">session:*</div><div class="s"></div></div>
+          <div class="card" data-c="queue"><div class="t">背景工作佇列</div><div class="k">list</div><div class="s"></div></div>
+          <div class="card" data-c="idem"><div class="t">冪等鍵</div><div class="k">這封信寄過了</div><div class="s"></div></div>
+          <div class="card" data-c="counter"><div class="t">速率限制計數器</div><div class="k">簡訊驗證碼</div><div class="s"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sym">
+      <span class="lb" id="lb1">使用者看到的</span><span class="v" id="sym1"></span>
+      <span class="lb" id="lb2">工程師看到的</span><span class="v" id="sym2"></span>
+    </div>
+  </div>
+  <figcaption class="readout" id="readout" aria-live="polite"></figcaption>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var GMAX = 4.5;            // 量表右端（GB），只用來排版
+  var CFG = [["maxmemory 0","noeviction"],["maxmemory 3gb","noeviction"],["maxmemory 3gb","allkeys-lru"],["拆成兩台",""]];
+  var NORMAL = "正常";
+  var SYM = [
+    {u:"突然被登出、訂單卡住", e:"只看到容器一直重啟", log:false},
+    {u:"菜單頁變成錯誤頁、登不進去", e:"OOM command not allowed when used memory > 'maxmemory'.", log:true},
+    {u:"一直被登出、沒收到確認信或收到兩封、驗證碼可以無限重寄", e:"日誌什麼錯誤都沒有，只有 evicted_keys 一直往上漲", log:false},
+    {u:"降級：快取寫入失敗就略過，直接回資料庫查到的菜單", e:"記憶體用量比例告警（70%）、evicted_keys 的增加速度", log:false, fix:true}
+  ];
+  function all(s){ return {menu:s, session:s, queue:s, idem:s, counter:s}; }
+  // 每一步：幕、長度、時間標籤、讀數、卡片狀態（[class, 文字]），出事徽章
+  var KEYS = [
+    {s:0,d:4,  when:"週年慶當天", read:"每筆菜單快取多塞促銷資訊，單筆變大好幾倍，用量一路往上長。maxmemory 0 不設限，Redis 不知道容器只有 4GB。",
+      cards:{menu:["hot","單筆變大好幾倍"],session:["",NORMAL],queue:["",NORMAL],idem:["",NORMAL],counter:["",NORMAL]}, note:"不設上限，一直長"},
+    {s:0,d:2.5,when:"當晚 19:00 尖峰", read:"用量衝過 4GB，容器被 OOM killer 整個砍掉重啟。",
+      cards:all(["dim","行程被砍掉"]), note:"被 OOM killer 砍掉", hotBox:true},
+    {s:0,d:3,  when:"重啟", read:"用量歸零，從 RDB 快照載回。最後一次快照之後寫入的 session 全部不見。",
+      cards:{menu:["","從 RDB 快照載回"],session:["hot","快照之後寫入的全部不見"],queue:["","從 RDB 快照載回"],idem:["","從 RDB 快照載回"],counter:["","從 RDB 快照載回"]}, note:"從 RDB 快照載回"},
+    {s:0,d:3.5,when:"接下來 20 分鐘", read:"沒多久又滿、又被砍，反覆好幾次：大量使用者被登出、訂單卡住。",
+      cards:{menu:["dim","反覆被砍、重啟"],session:["hot","一次又一次不見"],queue:["dim","反覆被砍、重啟"],idem:["dim","反覆被砍、重啟"],counter:["dim","反覆被砍、重啟"]}, note:"反覆被砍", hotBox:true, badge:"第一次出事", sym:0},
+    {s:1,d:3,  when:"事後", read:"團隊加上 maxmemory 3gb，策略還是 noeviction。Redis 不會再被砍。",
+      cards:all(["",NORMAL]), note:"不會再被砍"},
+    {s:1,d:3,  when:"2 週後的尖峰", read:"用量長到 3GB 上限，停在那裡。noeviction 的意思是：滿了什麼都不刪。",
+      cards:all(["",NORMAL]), note:"用量到上限"},
+    {s:1,d:4,  when:"2 週後的尖峰", read:"所有 SET 都被拒絕，讀取照常。get_menu 寫回快取那一行沒處理錯誤，菜單明明查到了，請求卻回 500。",
+      cards:{menu:["hot","SET 被拒 → 菜單頁回 500"],session:["hot","新 session 寫不進去 → 登入壞"],queue:["warn","寫入一樣被拒"],idem:["warn","寫入一樣被拒"],counter:["warn","寫入一樣被拒"]}, note:"拒絕寫入；GET 照常", noteHot:true, badge:"第二次出事", sym:1, reject:true},
+    {s:2,d:2.5,when:"當晚", read:"值班工程師把策略改成 allkeys-lru，OOM 錯誤馬上消失。",
+      cards:all(["",NORMAL]), note:"OOM 錯誤消失"},
+    {s:2,d:3.5,when:"隔天早上", read:"allkeys-lru 不分資料種類，一直刪最久沒被碰的 key。用量停在 3GB，evicted_keys 一直漲。",
+      cards:{menu:["goneok","最久沒被碰的被刪，再查資料庫就好"],session:["warn","不分種類，最久沒碰就刪"],queue:["warn","不分種類，最久沒碰就刪"],idem:["warn","不分種類，最久沒碰就刪"],counter:["warn","不分種類，最久沒碰就刪"]}, note:"evicted_keys ↑", ev:true},
+    {s:2,d:4,  when:"隔天早上", read:"被刪的不只快取：session、佇列、冪等鍵、計數器也一起被刪了，而且日誌裡什麼錯誤都沒有。",
+      cards:{menu:["goneok","被刪也沒關係"],session:["gonehot","半小時沒動作的被刪 → 一直被登出"],queue:["gonehot","整條 list 連排隊的工作一起消失 → 確認信沒寄出"],idem:["gonehot","被刪 → 補寄以為沒寄過 → 收到兩封"],counter:["gonehot","被刪等於歸零 → 簡訊 API 被一直打"]}, note:"evicted_keys ↑", ev:true, badge:"第三次出事", sym:2, stagger:true},
+    {s:3,d:5,  when:"怎麼修", read:"快取獨立一台，設 maxmemory 加 allkeys-lru，滿了只刪快取；session、佇列、計數器放另一台，用 noeviction，記憶體告警設在 70%。",
+      cards:{menu:["","滿了就刪，寫失敗就降級"],session:["","不會被驅逐"],queue:["","不會被驅逐"],idem:["","不會被驅逐"],counter:["","不會被驅逐"]}, note:"", split:true, sym:3}
+  ];
+  var t0 = 0;
+  KEYS.forEach(function(k){ k.t0 = t0; t0 += k.d; k.t1 = t0; });
+  var DUR = t0;               // 38
+  var REST = 32.9;            // 第三次出事，全部被刪的那一格
+  var SCENE_START = [0,1,2,3].map(function(s){ for (var i=0;i<KEYS.length;i++) if (KEYS[i].s===s) return KEYS[i].t0; });
+
+  var $ = function(id){ return document.getElementById(id); };
+  var fig = document.querySelector(".fig");
+  var stage = $("stage"), redis = $("redis"), gfill = $("gfill"), mlim = $("mlim"), mcont = $("mcont");
+  var llim = $("llim"), lcont = $("lcont"), rnote = $("rnote"), lane = $("lane"), track = $("track");
+  var scrub = $("scrub"), playBtn = $("play");
+  var cards = {}; Array.prototype.forEach.call(document.querySelectorAll(".card"), function(c){ cards[c.dataset.c] = c; });
+  var sceneBtns = document.querySelectorAll("[data-scene]");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var narrow = window.matchMedia("(max-width: 440px)");
+
+  // 寫入 chip
+  var CHIP_TXT = ["SET menu:…","SET session:…","LPUSH 佇列"];
+  var chips = [];
+  function buildChips(){
+    track.textContent = ""; chips = [];
+    var n = narrow.matches ? 2 : 3;
+    for (var i=0;i<n;i++){ var c = document.createElement("span"); c.className="w"; c.textContent = CHIP_TXT[i]; track.appendChild(c); chips.push({el:c, txt:CHIP_TXT[i], rej:false}); }
+  }
+  buildChips();
+
+  function clamp(x,a,b){ return x<a?a:(x>b?b:x); }
+  function ease(x){ x=clamp(x,0,1); return x*x*(3-2*x); }
+  function lerp(a,b,u){ return a+(b-a)*u; }
+  function keyAt(t){ for (var i=0;i<KEYS.length;i++) if (t < KEYS[i].t1) return i; return KEYS.length-1; }
+
+  // 記憶體用量（GB，示意）與是否被砍
+  function memAt(i,u){
+    switch(i){
+      case 0: return {v:lerp(1.6,3.95,ease(u))};
+      case 1: return u<0.35 ? {v:lerp(3.95,4.3,u/0.35)} : {v:lerp(4.3,0,ease((u-0.35)/0.15)), killed:true};
+      case 2: return {v:lerp(0,2.4,ease(u/0.6))};
+      case 3: { var c=(u*2)%1; if (c<0.4) return {v:lerp(2.4,4.3,c/0.4)}; if (c<0.55) return {v:lerp(4.3,0,(c-0.4)/0.15), killed:true}; if (c<0.65) return {v:0, killed:true}; return {v:lerp(0,2.4,ease((c-0.65)/0.35))}; }
+      case 4: return {v:2.0};
+      case 5: return {v:lerp(2.0,3.0,ease(u/0.7))};
+      case 6: return {v:3.0};
+      default:{ var saw = ((u*6)%1); return {v:3.0 + 0.05*(1-saw)}; } // 先超過一點、再刪回來
+    }
+  }
+
+  var lastKey = -1, lastStagger = -1;
+  function setText(el, s){ if (el.textContent !== s) el.textContent = s; }
+
+  function render(t){
+    t = clamp(t,0,DUR-0.001);
+    var i = keyAt(t), k = KEYS[i], u = (t-k.t0)/k.d, s = k.s;
+    var m = memAt(i,u);
+
+    // 每一步只換一次的部分
+    var stag = k.stagger ? Math.min(4, Math.floor(u*5)) : -1;
+    if (i !== lastKey || stag !== lastStagger){
+      setText($("when"), k.when);
+      setText($("cfg1"), CFG[s][0]); $("cfg2").hidden = !CFG[s][1]; setText($("cfg2"), CFG[s][1]);
+      var b = $("badge"); b.hidden = !k.badge; if (k.badge) setText(b, k.badge);
+      setText($("readout"), k.read);
+      setText(rnote, k.note || ""); rnote.classList.toggle("hot", !!k.noteHot);
+      stage.classList.toggle("split", !!k.split);
+      lane.hidden = !!k.split;
+      mlim.hidden = llim.hidden = s < 1;
+      mcont.hidden = lcont.hidden = s > 2;
+      var order = ["menu","session","queue","idem","counter"];
+      order.forEach(function(id, j){
+        var st = k.cards[id];
+        if (k.stagger && id !== "menu" && j > stag){ st = KEYS[i-1].cards[id]; }
+        cards[id].className = "card" + (st[0] ? " " + st[0] : "");
+        setText(cards[id].querySelector(".s"), st[1]);
+      });
+      // 症狀列
+      var sym = SYM[s], show = (k.sym === s);
+      $("lb1").textContent = sym.fix ? "快取寫入失敗" : "使用者看到的";
+      $("lb2").textContent = sym.fix ? "要監控的" : "工程師看到的";
+      var v1=$("sym1"), v2=$("sym2");
+      setText(v1, show ? sym.u : "還沒出事"); setText(v2, show ? sym.e : "還沒出事");
+      v1.className = "v" + (show ? (sym.fix ? "" : " hot") : " none");
+      v2.className = "v" + (show ? ((sym.log ? " log" : "") + (sym.fix ? "" : " hot")) : " none");
+      sceneBtns.forEach(function(btn){ btn.setAttribute("aria-pressed", String(+btn.dataset.scene === s)); });
+      lastKey = i; lastStagger = stag;
+    }
+
+    // 每幀都會動的部分
+    gfill.style.width = (clamp(m.v,0,GMAX)/GMAX*100).toFixed(2) + "%";
+    var over = (s===0 && m.v>=4.0) || (s>=1 && s<=2 && m.v>=2.99 && i!==7);
+    gfill.classList.toggle("hot", over);
+    redis.classList.toggle("hot", !!m.killed);
+    if (k.ev) rnote.style.opacity = (0.55 + 0.45*Math.abs(Math.sin(t*3))).toFixed(2); else rnote.style.opacity = "";
+    var frozen = !!m.killed;
+    lane.classList.toggle("frozen", frozen);
+    for (var c=0;c<chips.length;c++){
+      var ch = chips[c];
+      var x = frozen ? ch.x || 0 : ((t*0.3 + c/chips.length) % 1);
+      ch.x = x;
+      ch.el.style.setProperty("--x", x.toFixed(4));
+      var rej = !!k.reject && x > 0.72;
+      if (rej !== ch.rej){ ch.rej = rej; ch.el.classList.toggle("rej", rej); ch.el.textContent = rej ? "✕ OOM" : ch.txt; }
+    }
+  }
+
+  function placeMarks(){
+    mlim.style.left = (3/GMAX*100) + "%"; llim.style.left = (3/GMAX*100) + "%";
+    mcont.style.left = (4/GMAX*100) + "%"; lcont.style.left = (4/GMAX*100) + "%";
+  }
+  placeMarks();
+
+  // 時鐘與播放
+  var t = REST, playing = false, touched = false, raf = 0, last = 0, visible = true, stepTimer = 0;
+  function paint(){ render(t); scrub.value = String(Math.round(t*100)); }
+  function setPlaying(p){
+    playing = p;
+    playBtn.textContent = p ? "❚❚" : "▶";
+    playBtn.setAttribute("aria-label", p ? "暫停" : "播放");
+    cancelAnimationFrame(raf); raf = 0; clearTimeout(stepTimer); stepTimer = 0;
+    if (p) arm();
+  }
+  function arm(){
+    if (!playing || !visible) return;
+    if (reduce.matches){ stepTimer = setTimeout(stepOnce, 3000); return; }
+    last = 0; raf = requestAnimationFrame(frame);
+  }
+  function stepOnce(){
+    var i = keyAt(t);
+    if (i >= KEYS.length-1){ t = DUR-0.001; paint(); setPlaying(false); return; }
+    t = KEYS[i+1].t1 - 0.001; paint(); arm();
+  }
+  function frame(now){
+    if (!playing || !visible){ raf = 0; return; }
+    if (last) t += Math.min(0.1, (now-last)/1000);
+    last = now;
+    if (t >= DUR-0.001){ t = DUR-0.001; paint(); setPlaying(false); return; }
+    paint(); raf = requestAnimationFrame(frame);
+  }
+  playBtn.addEventListener("click", function(){
+    if (playing){ setPlaying(false); return; }
+    if (!touched || t >= DUR-0.01) t = reduce.matches ? KEYS[0].t1-0.001 : 0;
+    touched = true; paint(); setPlaying(true);
+  });
+  scrub.addEventListener("input", function(){ touched = true; setPlaying(false); t = (+scrub.value)/100; render(t); });
+  function gotoKey(i){ touched = true; setPlaying(false); i = clamp(i,0,KEYS.length-1); t = KEYS[i].t1 - 0.001; paint(); }
+  $("prev").addEventListener("click", function(){ gotoKey(keyAt(t)-1); });
+  $("next").addEventListener("click", function(){ gotoKey(keyAt(t)+1); });
+  sceneBtns.forEach(function(btn){ btn.addEventListener("click", function(){
+    touched = true; var s = +btn.dataset.scene; t = SCENE_START[s];
+    paint(); if (!reduce.matches) setPlaying(true); else { var last=0; for (var i=0;i<KEYS.length;i++) if (KEYS[i].s===s) last=i; t = KEYS[last].t1-0.001; paint(); setPlaying(false); }
+  }); });
+  fig.addEventListener("keydown", function(e){
+    if (e.target !== fig) return;
+    if (e.key === "ArrowRight"){ gotoKey(keyAt(t)+1); e.preventDefault(); }
+    else if (e.key === "ArrowLeft"){ gotoKey(keyAt(t)-1); e.preventDefault(); }
+    else if (e.key === " " || e.key === "Enter"){ playBtn.click(); e.preventDefault(); }
+  });
+  $("theme").addEventListener("click", function(){
+    var root = document.documentElement, cur = root.getAttribute("data-theme");
+    var dark = cur ? cur === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+  narrow.addEventListener && narrow.addEventListener("change", function(){ buildChips(); lastKey = -1; render(t); });
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible && playing && !raf && !stepTimer) arm();
+    }, {rootMargin:"120px"}).observe(fig);
+  }
+
+  window.DUR = DUR;
+  window.seek = function(x){ touched = true; setPlaying(false); t = clamp(+x||0, 0, DUR-0.001); paint(); };
+  requestAnimationFrame(function(){ paint(); });
+  paint();
+})();
+</script>
+</body>
+</html>

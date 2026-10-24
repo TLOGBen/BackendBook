@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>遺失更新與版本檢查</title>
+<style>
+:root{
+  --paper:#ffffff; --paper-2:#f4f5f7; --ink:#2d3142; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(45,49,66,.14); --rule-solid:#c4c7cc; --link:#2e5aa8; --link-tint:rgba(46,90,168,.08);
+  --ok:#2f6f4f; --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111; --chip:#eceef2;
+  --shadow:0 2px 8px rgba(45,49,66,.18);
+  --sans:'Noto Sans TC','PingFang TC','Microsoft JhengHei',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:ui-monospace,'SFMono-Regular',Consolas,'Cascadia Mono',Menlo,'Noto Sans TC','Microsoft JhengHei',monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --paper-2:#272b35; --ink:#eceef2; --muted:#c3c7d0; --soft:#a3abbb;
+    --rule:rgba(236,238,242,.14); --rule-solid:rgba(195,199,208,.32); --link:#8fb3ea; --link-tint:rgba(143,179,234,.12);
+    --ok:#86cfa6; --hot-fill:#4a3712; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --chip:#2e333e;
+    --shadow:0 2px 10px rgba(0,0,0,.5);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --paper-2:#272b35; --ink:#eceef2; --muted:#c3c7d0; --soft:#a3abbb;
+  --rule:rgba(236,238,242,.14); --rule-solid:rgba(195,199,208,.32); --link:#8fb3ea; --link-tint:rgba(143,179,234,.12);
+  --ok:#86cfa6; --hot-fill:#4a3712; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --chip:#2e333e;
+  --shadow:0 2px 10px rgba(0,0,0,.5);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-text-size-adjust:100%}
+.fig{container-type:inline-size;margin:0 auto;max-width:980px;padding:12px 16px 16px;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--link);border-radius:8px}
+.lu-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.lu-seg{display:inline-flex;border:1px solid var(--rule-solid);border-radius:8px;overflow:hidden}
+.lu-seg button{min-height:36px;padding:0 12px;border:0;background:transparent;color:var(--muted);font:500 14px/1 var(--sans);cursor:pointer}
+.lu-seg button+button{border-left:1px solid var(--rule-solid)}
+.lu-seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.lu-cond{flex:1 1 220px;font:12px/1.5 var(--mono);color:var(--muted);min-width:0}
+.lu-cond code{font:inherit;background:var(--chip);padding:2px 6px;border-radius:4px;color:var(--ink);white-space:nowrap}
+.lu-theme{min-width:36px;min-height:36px;border:1px solid var(--rule-solid);border-radius:8px;background:transparent;color:var(--muted);font:16px/1 var(--sans);cursor:pointer}
+.lu-stage{position:relative;display:grid;grid-template-columns:1fr 1fr 1fr;gap:48px;margin-top:16px}
+.lu-wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:visible}
+.lu-card{position:relative;z-index:1;min-width:0;min-height:160px;padding:12px;border:1.5px solid var(--rule-solid);border-radius:8px;background:var(--paper-2);display:flex;flex-direction:column;gap:6px}
+.lu-card.active{border-color:var(--link)}
+.lu-card.hot{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.lu-card.hot .lu-role,.lu-card.hot .lu-kv,.lu-card.hot .lu-kv b,.lu-card.hot .lu-status{color:var(--hot-ink)}
+.lu-who{font:600 15px/1.3 var(--sans)}
+.lu-role{font:12px/1.4 var(--sans);color:var(--soft)}
+.lu-kv{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font:13px/1.4 var(--sans);color:var(--muted)}
+.lu-kv b{font:600 20px/1.2 var(--mono);color:var(--ink);border-radius:4px;padding:0 4px;margin-right:-4px}
+.lu-kv[hidden]{display:none}
+.lu-tag{display:inline-block;margin-left:6px;padding:0 6px;border:1px dashed var(--soft);border-radius:4px;font:12px/1.5 var(--sans);color:var(--soft);vertical-align:2px}
+.lu-tag[hidden]{display:none}
+.lu-status{margin-top:auto;padding-top:6px;border-top:1px solid var(--rule);font:13px/1.5 var(--sans);color:var(--muted);min-height:3.2em}
+.lu-status.ok{color:var(--ok)}
+.lu-packet{position:absolute;left:0;top:0;z-index:2;max-width:200px;padding:4px 8px;border:1.5px solid var(--link);border-radius:8px;background:var(--paper);box-shadow:var(--shadow);font:12px/1.45 var(--sans);color:var(--ink);text-align:center;white-space:nowrap;pointer-events:none;opacity:0;will-change:transform,opacity}
+.lu-packet .k{font:600 12px/1.45 var(--mono);color:var(--link)}
+.lu-packet .v{font:12px/1.45 var(--mono)}
+.lu-packet.hot{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.lu-packet.hot .k{color:var(--hot-ink)}
+.lu-steps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
+.lu-step{min-height:44px;padding:6px 8px;border:1px solid var(--rule-solid);border-radius:8px;background:transparent;color:var(--muted);text-align:left;font:12px/1.4 var(--sans);cursor:pointer}
+.lu-step b{display:block;font:600 13px/1.4 var(--mono);color:var(--ink)}
+.lu-step.on{border-color:var(--link);background:var(--link-tint);color:var(--ink)}
+.lu-ctrl{display:flex;align-items:center;gap:12px;margin-top:12px}
+.lu-play{flex:none;min-height:36px;min-width:84px;padding:0 12px;border:1px solid var(--ink);border-radius:8px;background:var(--ink);color:var(--paper);font:500 14px/1 var(--sans);cursor:pointer}
+.lu-range{flex:1;min-width:0;height:36px;accent-color:var(--link);margin:0}
+.lu-clock{flex:none;font:12px/1 var(--mono);color:var(--soft);min-width:72px;text-align:right}
+.lu-read{margin:12px 0 0;padding:10px 12px;border-left:3px solid var(--rule-solid);background:var(--paper-2);border-radius:0 8px 8px 0;font:14px/1.6 var(--sans);color:var(--ink);min-height:4.4em}
+.lu-read.hot{border-left-color:var(--hot-stroke)}
+@container (max-width: 559px){
+  .lu-stage{grid-template-columns:1fr;gap:40px}
+  .lu-card{min-height:128px}
+  .lu-steps{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="lost-update-version" data-dur="16" data-rest="16" tabindex="0"
+  aria-label="動畫：阿美和小陳同時編輯商品 42。沒有版本檢查時，阿美存檔把小陳改好的 990 蓋回 1,290，兩次都是 UPDATE 1；有版本檢查時，阿美的 UPDATE 影響 0 列，被擋下來。">
+  <div class="lu-bar">
+    <div class="lu-seg" role="group" aria-label="切換儲存方式">
+      <button type="button" data-mode="none" aria-pressed="true">沒有版本檢查</button>
+      <button type="button" data-mode="ver" aria-pressed="false">有版本檢查</button>
+    </div>
+    <div class="lu-cond">儲存條件 <code id="lu-where">WHERE id = 42</code></div>
+    <button type="button" class="lu-theme" id="lu-theme" aria-label="切換深淺色">◐</button>
+  </div>
+
+  <div class="lu-stage" id="lu-stage">
+    <svg class="lu-wires" id="lu-wires" aria-hidden="true">
+      <defs>
+        <marker id="lu-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <line id="lu-line" x1="0" y1="0" x2="0" y2="0" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#lu-arrow)" opacity="0"/>
+    </svg>
+
+    <div class="lu-card" id="lu-a">
+      <div><div class="lu-who">阿美</div><div class="lu-role">行銷，改描述</div></div>
+      <div class="lu-kv">表單裡的價格 <span><span class="lu-tag" id="lu-a-stale" hidden>已過期</span><b id="lu-a-price">—</b></span></div>
+      <div class="lu-kv" id="lu-a-verrow" hidden>表單裡的 version <b id="lu-a-ver">—</b></div>
+      <div class="lu-status" id="lu-a-status">還沒打開編輯頁</div>
+    </div>
+
+    <div class="lu-card" id="lu-db">
+      <div><div class="lu-who">資料庫 products</div><div class="lu-role">商品 42 這一列</div></div>
+      <div class="lu-kv">price <b id="lu-db-price">1,290</b></div>
+      <div class="lu-kv" id="lu-db-verrow" hidden>version <b id="lu-db-ver">3</b></div>
+      <div class="lu-status" id="lu-db-status">等待請求</div>
+    </div>
+
+    <div class="lu-card" id="lu-b">
+      <div><div class="lu-who">小陳</div><div class="lu-role">定價，改價格</div></div>
+      <div class="lu-kv">表單裡的價格 <b id="lu-b-price">—</b></div>
+      <div class="lu-kv" id="lu-b-verrow" hidden>表單裡的 version <b id="lu-b-ver">—</b></div>
+      <div class="lu-status" id="lu-b-status">還沒打開編輯頁</div>
+    </div>
+
+    <div class="lu-packet" id="lu-packet" aria-hidden="true"><div class="k" id="lu-pk"></div><div class="v" id="lu-pv"></div><div class="v" id="lu-pw"></div></div>
+  </div>
+
+  <div class="lu-steps" id="lu-steps">
+    <button type="button" class="lu-step" id="lu-step-0" data-step="0"><b>T1 14:00</b>阿美打開編輯頁</button>
+    <button type="button" class="lu-step" id="lu-step-1" data-step="1"><b>T2 14:05</b>小陳打開編輯頁</button>
+    <button type="button" class="lu-step" id="lu-step-2" data-step="2"><b>T3 14:06</b>小陳存檔：990</button>
+    <button type="button" class="lu-step" id="lu-step-3" data-step="3"><b>T4 14:20</b>阿美存檔：文案</button>
+  </div>
+
+  <div class="lu-ctrl">
+    <button type="button" class="lu-play" id="lu-play" aria-label="播放">▶ 播放</button>
+    <input class="lu-range" id="lu-range" type="range" min="0" max="16" step="0.01" value="16" aria-label="時間軸">
+    <span class="lu-clock" id="lu-clock">T4 14:20</span>
+  </div>
+
+  <figcaption class="lu-read" id="lu-read"></figcaption>
+</figure>
+
+<script>
+(() => {
+  const DUR = 16, SEG = 4, REST = 16;
+  const F0 = .10, F1 = .40, R0 = .50, R1 = .80;
+  const fig = document.querySelector('.fig');
+  const $ = id => document.getElementById(id);
+  const el = {
+    stage: $('lu-stage'), wires: $('lu-wires'), line: $('lu-line'), packet: $('lu-packet'),
+    pk: $('lu-pk'), pv: $('lu-pv'), pw: $('lu-pw'),
+    a: $('lu-a'), db: $('lu-db'), b: $('lu-b'),
+    aPrice: $('lu-a-price'), aStale: $('lu-a-stale'), aVerRow: $('lu-a-verrow'), aVer: $('lu-a-ver'), aStatus: $('lu-a-status'),
+    dbPrice: $('lu-db-price'), dbVerRow: $('lu-db-verrow'), dbVer: $('lu-db-ver'), dbStatus: $('lu-db-status'),
+    bPrice: $('lu-b-price'), bVerRow: $('lu-b-verrow'), bVer: $('lu-b-ver'), bStatus: $('lu-b-status'),
+    where: $('lu-where'), play: $('lu-play'), range: $('lu-range'), clock: $('lu-clock'), read: $('lu-read'),
+    steps: [...document.querySelectorAll('.lu-step')], modes: [...document.querySelectorAll('[data-mode]')]
+  };
+  const TIMES = ['T1 14:00', 'T2 14:05', 'T3 14:06', 'T4 14:20'];
+  const ACTOR = ['a', 'b', 'b', 'a'];
+
+  let mode = 'none', t = REST, playing = false, visible = true, raf = 0, last = 0, geo = null;
+
+  // ---------- pure state from (t, mode) ----------
+  const at = (i, f) => t >= i * SEG + f * SEG - 1e-9;
+  function state() {
+    const V = mode === 'ver';
+    const s = {};
+    const i = Math.min(3, Math.floor(t / SEG));
+    s.i = i;
+    // 阿美
+    s.aPrice = at(0, R1) ? '1,290' : '—';
+    s.aVer = at(0, R1) ? '3' : '—';
+    s.aStale = at(2, F1);
+    if (!at(0, F0)) s.aStatus = ['還沒打開編輯頁', ''];
+    else if (!at(0, R1)) s.aStatus = ['打開編輯頁，讀取商品 42…', ''];
+    else if (!at(3, F0)) s.aStatus = ['寫文案中…', ''];
+    else if (!at(3, R1)) s.aStatus = ['寫完文案，按下儲存：表單上所有欄位整筆寫回', ''];
+    else s.aStatus = V ? ['這筆資料在你編輯期間被其他人修改過（UPDATE 0）', ''] : ['✓ 儲存成功（UPDATE 1）', 'ok'];
+    s.aHot = V && at(3, R1);
+    // 小陳
+    s.bPrice = at(1, R1) ? (at(2, 0) ? '990' : '1,290') : '—';
+    s.bVer = at(1, R1) ? '3' : '—';
+    if (!at(1, F0)) s.bStatus = ['還沒打開編輯頁', ''];
+    else if (!at(1, R1)) s.bStatus = ['打開編輯頁，讀取商品 42…', ''];
+    else if (!at(2, 0)) s.bStatus = ['表單載入完成', ''];
+    else if (!at(2, R1)) s.bStatus = ['把價格改成 990，按下儲存', ''];
+    else s.bStatus = ['✓ 儲存成功（UPDATE 1）', 'ok'];
+    // 資料庫
+    const overwritten = !V && at(3, F1);
+    s.dbPrice = !at(2, F1) ? '1,290' : (overwritten ? '1,290' : '990');
+    s.dbVer = at(2, F1) ? '4' : '3';
+    s.dbHot = overwritten;
+    if (at(3, F1)) s.dbStatus = V ? ['version 已經是 4，不是 3 → UPDATE 0，沒有寫入', ''] : ['UPDATE 1，沒有任何錯誤；990 被蓋回 1,290', ''];
+    else if (at(2, F1)) s.dbStatus = V ? ['version = 3 符合 → UPDATE 1，version 變成 4', ''] : ['UPDATE 1：price 變成 990', ''];
+    else if (at(1, F1)) s.dbStatus = ['SELECT：小陳讀到 1,290', ''];
+    else if (at(0, F1)) s.dbStatus = ['SELECT：阿美讀到 1,290', ''];
+    else s.dbStatus = ['等待請求', ''];
+    // 閃一下：值剛改變時
+    s.flashDb = Math.max(flash(2, F1), V ? 0 : flash(3, F1));
+    // 封包
+    const u = (t - i * SEG) / SEG;
+    s.packet = null;
+    const write = i >= 2;
+    if (u >= F0 && u <= F1) {
+      const p = (u - F0) / (F1 - F0);
+      let k, v, w = '', hot = false;
+      if (!write) { k = 'SELECT'; v = '讀商品 42'; }
+      else if (i === 2) { k = 'UPDATE'; v = '價格 990'; if (V) w = 'AND version = 3'; }
+      else { k = 'UPDATE'; v = '價格 1,290（舊值）＋新文案'; if (V) w = 'AND version = 3'; else hot = true; }
+      s.packet = { from: ACTOR[i], dir: 1, p, k, v, w, hot };
+    } else if (u >= R0 && u <= R1) {
+      const p = (u - R0) / (R1 - R0);
+      let k, v = '', w = '', hot = false;
+      if (!write) { k = '回傳'; v = '價格 1,290'; if (V) w = 'version 3'; }
+      else if (i === 2) { k = 'UPDATE 1'; v = '成功'; }
+      else if (V) { k = 'UPDATE 0'; v = '影響 0 列'; hot = true; }
+      else { k = 'UPDATE 1'; v = '成功，沒有錯誤'; }
+      s.packet = { from: ACTOR[i], dir: -1, p, k, v, w, hot };
+    }
+    // 讀數
+    const end = at(3, R1);
+    s.readHot = end;
+    if (end) s.read = V
+      ? '阿美的條件是 version = 3，但資料庫已經是 4，UPDATE 0，這次寫入被擋下來。系統告訴她「這筆資料在你編輯期間被其他人修改過」，並顯示最新內容讓她重新確認；小陳改的 990 保住了。'
+      : '兩次 UPDATE 都回 UPDATE 1，沒有任何錯誤，但小陳改的 990 被阿美表單裡 20 分鐘前讀到的 1,290 蓋掉：廣告寫 990，結帳卻是 1,290。這就是遺失更新（lost update）。';
+    else if (i === 0) s.read = 'T1 14:00　阿美打開編輯頁，表單裡的價格是 1,290，她開始寫文案。';
+    else if (i === 1) s.read = 'T2 14:05　小陳也打開同一個商品，表單裡的價格也是 1,290。';
+    else if (i === 2) s.read = V
+      ? 'T3 14:06　小陳把價格改成 990 並儲存。條件 version = 3 符合，UPDATE 1，version 變成 4；阿美表單裡還是 version 3。'
+      : 'T3 14:06　小陳把價格改成 990 並儲存，UPDATE 1。阿美表單裡的 1,290 已經過期，但她不知道。';
+    else s.read = V
+      ? 'T4 14:20　阿美寫完文案按儲存，帶著表單裡的 version 3 一起送出。'
+      : 'T4 14:20　阿美寫完文案按儲存，表單上所有欄位整筆寫回，包括 20 分鐘前讀到的價格 1,290。';
+    return s;
+  }
+  function flash(i, f) { const d = t - (i * SEG + f * SEG); return d >= 0 && d < .7 ? 1 - d / .7 : 0; }
+
+  // ---------- DOM writes only on change ----------
+  const cache = new Map();
+  function put(node, key, val, fn) { const k = node.id + ':' + key; if (cache.get(k) === val) return; cache.set(k, val); fn(val); }
+  const text = (n, v) => put(n, 'text', v, x => { n.textContent = x; });
+  const cls = (n, c, on) => put(n, 'c:' + c, !!on, x => n.classList.toggle(c, x));
+  const hide = (n, h) => put(n, 'hidden', !!h, x => { n.hidden = x; });
+
+  function measure() {
+    const sr = el.stage.getBoundingClientRect();
+    const r = n => { const b = n.getBoundingClientRect(); return { x: b.left - sr.left, y: b.top - sr.top, w: b.width, h: b.height }; };
+    const a = r(el.a), d = r(el.db), b = r(el.b);
+    const row = Math.abs(a.y - d.y) < 4;
+    const c = q => ({ x: q.x + q.w / 2, y: q.y + q.h / 2 });
+    geo = row
+      ? { row, a: { edge: { x: a.x + a.w, y: d.y + d.h / 2 }, dbEdge: { x: d.x, y: d.y + d.h / 2 }, c: c(a) },
+               b: { edge: { x: b.x, y: d.y + d.h / 2 }, dbEdge: { x: d.x + d.w, y: d.y + d.h / 2 }, c: c(b) }, db: c(d) }
+      : { row, a: { edge: { x: d.x + d.w / 2, y: a.y + a.h }, dbEdge: { x: d.x + d.w / 2, y: d.y }, c: c(a) },
+               b: { edge: { x: d.x + d.w / 2, y: b.y }, dbEdge: { x: d.x + d.w / 2, y: d.y + d.h }, c: c(b) }, db: c(d) };
+    el.wires.setAttribute('viewBox', `0 0 ${sr.width} ${sr.height}`);
+    cache.clear();
+    render();
+  }
+
+  const ease = p => p * p * (3 - 2 * p);
+  function render() {
+    const s = state();
+    const V = mode === 'ver';
+    text(el.aPrice, s.aPrice); hide(el.aStale, !s.aStale); text(el.aVer, s.aVer); hide(el.aVerRow, !V);
+    text(el.aStatus, s.aStatus[0]); cls(el.aStatus, 'ok', s.aStatus[1] === 'ok'); cls(el.a, 'hot', s.aHot);
+    text(el.bPrice, s.bPrice); text(el.bVer, s.bVer); hide(el.bVerRow, !V);
+    text(el.bStatus, s.bStatus[0]); cls(el.bStatus, 'ok', s.bStatus[1] === 'ok');
+    text(el.dbPrice, s.dbPrice); text(el.dbVer, s.dbVer); hide(el.dbVerRow, !V);
+    text(el.dbStatus, s.dbStatus[0]); cls(el.db, 'hot', s.dbHot);
+    const fl = Math.round(s.flashDb * 20) / 20;
+    put(el.dbPrice, 'flash', fl, x => { el.dbPrice.style.background = x > 0 ? `color-mix(in srgb, var(--hot-stroke) ${Math.round(x * 45)}%, transparent)` : ''; });
+    // 誰正在動作
+    const actorActive = at(s.i, F0) && !at(s.i, 1);
+    cls(el.a, 'active', actorActive && ACTOR[s.i] === 'a' && !s.aHot);
+    cls(el.b, 'active', actorActive && ACTOR[s.i] === 'b');
+    text(el.where, V ? 'WHERE id = 42 AND version = 讀到的版本' : 'WHERE id = 42');
+    // steps / clock / range
+    el.steps.forEach((b, k) => cls(b, 'on', k === s.i));
+    text(el.clock, TIMES[s.i]);
+    put(el.range, 'val', t.toFixed(2), x => { el.range.value = x; });
+    text(el.read, s.read); cls(el.read, 'hot', s.readHot);
+    // packet + wire
+    const P = s.packet;
+    if (P && geo) {
+      const g = geo[P.from];
+      const src = P.dir > 0 ? g.c : geo.db, dst = P.dir > 0 ? geo.db : g.c;
+      const e = ease(P.p);
+      const x = src.x + (dst.x - src.x) * e, y = src.y + (dst.y - src.y) * e;
+      const op = Math.min(1, P.p / .12, (1 - P.p) / .12);
+      el.packet.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
+      el.packet.style.opacity = op.toFixed(3);
+      text(el.pk, P.k); text(el.pv, P.v); text(el.pw, P.w); hide(el.pw, !P.w);
+      cls(el.packet, 'hot', P.hot);
+      const l0 = P.dir > 0 ? g.edge : g.dbEdge, l1 = P.dir > 0 ? g.dbEdge : g.edge;
+      el.line.setAttribute('x1', l0.x); el.line.setAttribute('y1', l0.y);
+      el.line.setAttribute('x2', l1.x); el.line.setAttribute('y2', l1.y);
+      el.line.setAttribute('opacity', (op * .9).toFixed(3));
+      el.line.style.color = P.hot ? 'var(--hot-stroke)' : 'var(--link)';
+    } else {
+      el.packet.style.opacity = '0';
+      el.line.setAttribute('opacity', '0');
+    }
+  }
+
+  // ---------- clock ----------
+  function updPlay() {
+    const lbl = playing ? '❚❚ 暫停' : (t >= DUR - 1e-3 ? '↺ 重播' : '▶ 播放');
+    text(el.play, lbl);
+    put(el.play, 'aria', lbl, x => el.play.setAttribute('aria-label', x.slice(2)));
+  }
+  function frame(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    t = Math.min(DUR, t + dt);
+    render();
+    if (t >= DUR) { playing = false; updPlay(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+  function arm() { if (playing && visible && !raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+  function play() { if (t >= DUR - 1e-3) t = 0; playing = true; updPlay(); arm(); }
+  function pause() { playing = false; if (raf) { cancelAnimationFrame(raf); raf = 0; } updPlay(); }
+  function seek(x) { pause(); t = Math.max(0, Math.min(DUR, +x || 0)); render(); updPlay(); }
+  const stepEnd = k => k * SEG + SEG * .98;
+
+  el.play.addEventListener('click', () => playing ? pause() : play());
+  el.range.addEventListener('input', () => seek(el.range.value));
+  el.steps.forEach((b, k) => b.addEventListener('click', () => seek(stepEnd(k))));
+  el.modes.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  function setMode(m) {
+    mode = m === 'ver' ? 'ver' : 'none';
+    el.modes.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    render();
+    requestAnimationFrame(measure); // 卡片多了 version 列，高度會變
+  }
+  $('lu-theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    const cur = root.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  });
+  fig.addEventListener('keydown', e => {
+    if (e.target !== fig) return;
+    const k = Math.min(3, Math.floor(t / SEG));
+    if (e.key === ' ' || e.key === 'k') { e.preventDefault(); playing ? pause() : play(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); seek(stepEnd(at(k, .97) ? Math.min(3, k + 1) : k)); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); seek(stepEnd(Math.max(0, k - 1))); }
+  });
+
+  new IntersectionObserver(es => { visible = es[0].isIntersecting; if (visible) arm(); }, { rootMargin: '120px' }).observe(fig);
+  new ResizeObserver(() => measure()).observe(el.stage);
+  let lastH = 0;
+  new ResizeObserver(() => {
+    const h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    if (h !== lastH && window.parent !== window) { lastH = h; window.parent.postMessage({ type: 'draw-figure-height', fig: 'lost-update-version', height: h }, '*'); }
+  }).observe(document.body);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.setMode = setMode;
+  window.timeline = () => ({ dur: DUR, rest: REST, t, mode });
+
+  t = REST;
+  measure();
+  updPlay();
+})();
+</script>
+</body>
+</html>

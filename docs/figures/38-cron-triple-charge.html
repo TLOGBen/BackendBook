@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三個排程器重複扣款</title>
+<style>
+:root{
+  --paper:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280;
+  --rule:rgba(31,41,55,.14); --rule-solid:#cbd5e1; --card:#f8fafc;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-text:#92400e;
+  --chip-bg:#f3f4f6; --chip-bd:#d1d5db;
+  --ctl-bg:#f3f4f6; --ctl-bd:#d1d5db; --focus:#2563eb;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --ink:#e5e7eb; --muted:#b6bcc6; --soft:#9aa3af;
+    --rule:rgba(229,231,235,.14); --rule-solid:#4b5563; --card:#252933;
+    --hot-fill:#78350f; --hot-stroke:#fbbf24; --hot-text:#fcd34d;
+    --chip-bg:#2a2e38; --chip-bd:#4b5563;
+    --ctl-bg:#2a2e38; --ctl-bd:#4b5563; --focus:#60a5fa;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --ink:#e5e7eb; --muted:#b6bcc6; --soft:#9aa3af;
+  --rule:rgba(229,231,235,.14); --rule-solid:#4b5563; --card:#252933;
+  --hot-fill:#78350f; --hot-stroke:#fbbf24; --hot-text:#fcd34d;
+  --chip-bg:#2a2e38; --chip-bd:#4b5563;
+  --ctl-bg:#2a2e38; --ctl-bd:#4b5563; --focus:#60a5fa;
+  color-scheme:dark;
+}
+html,body{margin:0;background:var(--paper);color:var(--ink);}
+body{
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:12px 16px;box-sizing:border-box;
+}
+*,*::before,*::after{box-sizing:border-box;}
+code{font-family:ui-monospace,"Cascadia Mono",Consolas,"Noto Sans TC","Microsoft JhengHei",monospace;font-size:12px;}
+.fig{margin:0;max-width:960px;outline:none;container-type:inline-size;}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--focus);border-radius:6px;}
+
+.stage{display:grid;grid-template-columns:1fr;gap:12px;}
+@container (min-width: 600px){
+  .stage{grid-template-columns:1.5fr 1fr;gap:16px;}
+}
+
+/* clock row */
+.clock{
+  display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;
+  padding:8px 12px;border:1px solid var(--rule-solid);border-radius:8px;
+  font-size:13px;color:var(--muted);margin:0 0 8px;min-height:40px;
+}
+.clock b{color:var(--ink);font-size:14px;}
+.clock.now{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--ink);}
+.clock.now b{color:var(--ink);}
+
+/* lanes */
+.lanes{border-top:1px solid var(--rule);}
+.lane{
+  display:grid;grid-template-columns:64px 1fr;gap:8px;
+  padding:8px 0;border-bottom:1px solid var(--rule);min-height:72px;
+  position:relative;
+}
+.lane::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:3px;border-radius:2px;background:transparent;}
+.lane.act::before{background:var(--hot-stroke);}
+.lane-lbl{font-size:14px;font-weight:700;line-height:1.3;padding-top:4px;}
+.lane-lbl small{display:block;font-size:12px;font-weight:400;color:var(--soft);}
+.chips{display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;}
+.chip{
+  font-size:13px;line-height:1.4;padding:4px 8px;border-radius:6px;
+  background:var(--chip-bg);border:1px solid var(--chip-bd);color:var(--ink);
+  visibility:hidden;
+}
+.chip.on{visibility:visible;}
+.chip.now{background:var(--hot-fill);border-color:var(--hot-stroke);border-width:1.5px;}
+.chip.zero{background:transparent;border-style:dashed;color:var(--muted);}
+.chip.zero.now{background:transparent;border-color:var(--hot-stroke);color:var(--ink);}
+.chip .pay{font-weight:700;}
+
+/* member card */
+.member{
+  border:1px solid var(--rule-solid);border-radius:8px;padding:12px;background:var(--card);
+  align-self:start;
+}
+.m-head{font-size:14px;font-weight:700;margin:0 0 8px;}
+.m-head span{display:block;font-size:12px;font-weight:400;color:var(--soft);margin-top:2px;}
+.m-sec{margin:0 0 8px;}
+.m-lbl{font-size:12px;color:var(--soft);margin:0 0 4px;}
+.bill{list-style:none;margin:0;padding:0;}
+.bill li{
+  display:flex;justify-content:space-between;gap:8px;font-size:13px;
+  padding:4px 8px;border-radius:6px;margin:0 0 4px;border:1px solid var(--chip-bd);background:var(--paper);
+  visibility:hidden;font-variant-numeric:tabular-nums;
+}
+.bill li.on{visibility:visible;}
+.bill li.now{background:var(--hot-fill);border-color:var(--hot-stroke);}
+.bill li b{font-weight:700;}
+.bill-empty{font-size:12px;color:var(--soft);margin:-2px 0 4px;}
+.mail{display:flex;flex-wrap:wrap;gap:6px;min-height:28px;}
+.mail span{
+  font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--chip-bd);background:var(--paper);
+  visibility:hidden;
+}
+.mail span.on{visibility:visible;}
+.mail span.now{background:var(--hot-fill);border-color:var(--hot-stroke);}
+.exp{font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--chip-bd);background:var(--paper);display:inline-block;}
+.exp.now{background:var(--hot-fill);border-color:var(--hot-stroke);}
+.tally{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;}
+.t{border-radius:8px;padding:8px;border:1px solid var(--chip-bd);background:var(--paper);text-align:center;}
+.t b{display:block;font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums;}
+.t span{font-size:12px;color:var(--muted);}
+.t.hot{border-color:var(--hot-stroke);border-width:1.5px;}
+.t.hot b{color:var(--hot-text);}
+
+/* caption + controls */
+.caption{font-size:14px;line-height:1.55;min-height:48px;margin:12px 0 8px;}
+.caption em{font-style:normal;color:var(--hot-text);font-weight:700;}
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.ctl button{
+  flex:none;height:40px;min-width:40px;border-radius:8px;border:1px solid var(--ctl-bd);
+  background:var(--ctl-bg);color:var(--ink);cursor:pointer;display:grid;place-items:center;padding:0 8px;
+  font:inherit;font-size:13px;
+}
+.ctl button:focus-visible,.ctl input:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}
+.ctl svg{width:18px;height:18px;fill:currentColor;}
+.steps{display:flex;gap:4px;}
+.steps button{min-width:40px;height:32px;padding:0 6px;font-variant-numeric:tabular-nums;}
+.steps button[aria-current="step"]{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--ink);font-weight:700;}
+.ctl input[type=range]{flex:1 1 120px;min-width:100px;height:32px;accent-color:var(--hot-stroke);margin:0;}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted);margin:8px 0 0;}
+.legend span{display:inline-flex;align-items:center;gap:6px;}
+.sw{width:12px;height:12px;border-radius:2px;display:inline-block;background:var(--hot-fill);border:1.5px solid var(--hot-stroke);}
+.sw.zero{background:transparent;border:1.5px dashed var(--muted);}
+@media (prefers-reduced-motion: reduce){ .chip,.bill li,.mail span{transition:none !important;} }
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="cron-triple-charge" data-dur="9.6" data-rest="9.6" tabindex="0"
+  aria-label="三個 Pod 各自執行同一個排程的經過：T1 UTC 02:00（台灣 10:00）三個 Pod 的排程器同時觸發 renew_subscriptions；T2 三個都查到今天到期、包含會員 #1001 的同一批名單；T3、T4、T5 三個 Pod 依序各扣 #1001 299 元並寄續約信；T6 只有 Pod 1 的 UPDATE 把到期日加 30 天，Pod 2、Pod 3 改到 0 筆。到期日只延長一次，錢卻扣了 3 次。">
+  <div class="stage">
+    <div class="left">
+      <div class="clock" id="clock"><b>⏰ UTC 02:00（台灣 10:00）</b><span><code>hour=2</code> 沒寫時區；3 個 Pod 都有自己的 <code>scheduler.start()</code></span></div>
+      <div class="lanes" id="lanes"></div>
+    </div>
+    <aside class="member" aria-label="會員 #1001 看到的結果">
+      <div class="m-head">會員 #1001<span>今天到期・月費 299 元</span></div>
+      <div class="m-sec">
+        <div class="m-lbl">信用卡帳單</div>
+        <div class="bill-empty" id="billEmpty">還沒有扣款</div>
+        <ol class="bill" id="bill"></ol>
+      </div>
+      <div class="m-sec">
+        <div class="m-lbl">信箱</div>
+        <div class="mail" id="mail"></div>
+      </div>
+      <div class="m-sec">
+        <div class="m-lbl">到期日</div>
+        <span class="exp" id="exp">今天</span>
+      </div>
+      <div class="tally">
+        <div class="t hot"><b id="nCharge">0</b><span>被扣了幾次</span></div>
+        <div class="t"><b id="nExt">0</b><span>到期日延長幾次</span></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="caption" id="cap" aria-live="polite"></div>
+
+  <div class="ctl">
+    <button type="button" id="play" aria-label="播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="playIcon" d="M7 5v14l12-7z"/></svg></button>
+    <div class="steps" id="steps" role="group" aria-label="跳到某一步"></div>
+    <input type="range" id="scrub" min="0" max="9.6" step="0.01" value="9.6" aria-label="時間軸">
+    <button type="button" id="theme" aria-label="切換深淺色">◐</button>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw"></i>這一步正在發生的事</span>
+    <span><i class="sw zero"></i>有執行，但沒改到任何資料</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var STEP = 1.6, APPEAR = 0.4, DUR = 9.6, REST = 9.6;
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // lane events: [step, html, kind]
+  var PODS = [1,2,3].map(function(k){
+    var ev = [
+      [1, '⏰ 觸發 <code>renew_subscriptions</code>', ''],
+      [2, '查到今天到期的會員，含 #1001', ''],
+      [2 + k, '扣 #1001 <span class="pay">299 元</span>・寄續約信', 'charge']
+    ];
+    if (k === 1) ev.push([6, '<code>UPDATE</code> 到期日 +30 天，改到這批', '']);
+    else ev.push([6, '<code>UPDATE</code> 改到 0 筆：到期日已經不是今天', 'zero']);
+    return ev;
+  });
+
+  var CAP = [
+    '',
+    'T1｜UTC 02:00（台灣 10:00）：3 個 Pod 各有一個排程器，<em>同一時間都觸發</em> <code>renew_subscriptions</code>。',
+    'T2｜3 個 Pod 都去查「今天到期」的會員，<em>查到同一批</em>，都包含 #1001。',
+    'T3｜Pod 1 扣 #1001 299 元、寄續約信。到期日還沒改，因為 <code>UPDATE</code> 要等全部做完才跑。',
+    'T4｜Pod 2 手上是同一批名單，<em>又扣了一次</em> 299 元。',
+    'T5｜Pod 3 也扣了。#1001 已經被扣 3 次，日誌卻沒有任何錯誤，因為每一次扣款都「成功」了。',
+    'T6｜Pod 1 的 <code>UPDATE</code> 把到期日加 30 天；Pod 2、Pod 3 改到 0 筆。<em>到期日只延長了一次，錢卻扣了 3 次。</em>'
+  ];
+
+  var lanesEl = document.getElementById('lanes');
+  var laneEls = [], chipEls = [];
+  PODS.forEach(function(ev, i){
+    var lane = document.createElement('div');
+    lane.className = 'lane';
+    lane.innerHTML = '<div class="lane-lbl">Pod ' + (i+1) + '<small>排程器</small></div><div class="chips"></div>';
+    var box = lane.querySelector('.chips');
+    ev.forEach(function(e){
+      var c = document.createElement('span');
+      c.className = 'chip' + (e[2] === 'zero' ? ' zero' : '');
+      c.innerHTML = e[1];
+      box.appendChild(c);
+      chipEls.push({el: c, step: e[0], lane: i});
+    });
+    lanesEl.appendChild(lane);
+    laneEls.push(lane);
+  });
+
+  var bill = document.getElementById('bill'), mail = document.getElementById('mail');
+  var billEls = [], mailEls = [];
+  for (var j = 0; j < 3; j++){
+    var li = document.createElement('li');
+    li.innerHTML = '<span>第 ' + (j+1) + ' 筆・自動續約扣款</span><b>299 元</b>';
+    bill.appendChild(li); billEls.push(li);
+    var m = document.createElement('span');
+    m.textContent = '✉ 續約成功';
+    mail.appendChild(m); mailEls.push(m);
+  }
+  var billEmpty = document.getElementById('billEmpty');
+  var expEl = document.getElementById('exp');
+  var nCharge = document.getElementById('nCharge'), nExt = document.getElementById('nExt');
+  var clock = document.getElementById('clock');
+  var cap = document.getElementById('cap');
+  var scrub = document.getElementById('scrub');
+  var playBtn = document.getElementById('play'), playIcon = document.getElementById('playIcon');
+  var stepsEl = document.getElementById('steps');
+  var stepBtns = [];
+  for (var s = 1; s <= 6; s++){
+    (function(s){
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = 'T' + s;
+      b.setAttribute('aria-label', '跳到 T' + s);
+      b.addEventListener('click', function(){ pause(); seek(s * STEP); });
+      stepsEl.appendChild(b); stepBtns.push(b);
+    })(s);
+  }
+
+  function stepAt(t){ return t <= 0 ? 1 : Math.min(6, Math.floor((t - 1e-6) / STEP) + 1); }
+  function show(el, step, cur, p){
+    var on = step <= cur;
+    el.classList.toggle('on', on);
+    el.classList.toggle('now', step === cur);
+    if (on && step === cur && p < 1){
+      el.style.opacity = String(p);
+      el.style.transform = 'translateY(' + ((1 - p) * 6).toFixed(2) + 'px)';
+    } else { el.style.opacity = ''; el.style.transform = ''; }
+  }
+
+  var T = REST, lastStep = -1;
+  function render(t){
+    var cur = stepAt(t);
+    var p = reduce ? 1 : Math.max(0, Math.min(1, (t - (cur - 1) * STEP) / APPEAR));
+    if (t <= 0) p = 1;
+    chipEls.forEach(function(c){ show(c.el, c.step, cur, p); });
+    laneEls.forEach(function(l, i){
+      l.classList.toggle('act', chipEls.some(function(c){ return c.lane === i && c.step === cur; }));
+    });
+    var charges = 0;
+    for (var k = 0; k < 3; k++){
+      show(billEls[k], 3 + k, cur, p);
+      show(mailEls[k], 3 + k, cur, p);
+      if (cur >= 3 + k) charges++;
+    }
+    billEmpty.style.display = charges ? 'none' : '';
+    nCharge.textContent = charges;
+    nExt.textContent = cur >= 6 ? 1 : 0;
+    expEl.textContent = cur >= 6 ? '今天 + 30 天（只改到一次）' : '今天';
+    expEl.classList.toggle('now', cur === 6);
+    clock.classList.toggle('now', cur === 1);
+    if (cur !== lastStep){
+      cap.innerHTML = CAP[cur];
+      stepBtns.forEach(function(b, i){
+        if (i + 1 === cur) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+      });
+      lastStep = cur;
+    }
+    scrub.value = String(t);
+  }
+
+  var playing = false, raf = 0, last = 0, visible = true;
+  function setIcon(){
+    playIcon.setAttribute('d', playing ? 'M6 5h4v14H6zM14 5h4v14h-4z' : 'M7 5v14l12-7z');
+    playBtn.setAttribute('aria-label', playing ? '暫停' : '播放');
+  }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    T = Math.min(DUR, T + dt);
+    render(T);
+    if (T >= DUR){ playing = false; setIcon(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (!raf && playing && visible){ last = performance.now(); raf = requestAnimationFrame(frame); } }
+  function play(){ if (T >= DUR) T = 0; playing = true; setIcon(); render(T); arm(); }
+  function pause(){ playing = false; setIcon(); if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function seek(t){ pause(); T = Math.max(0, Math.min(DUR, +t || 0)); render(T); }
+
+  playBtn.addEventListener('click', function(){ playing ? pause() : play(); });
+  scrub.addEventListener('input', function(){ seek(parseFloat(scrub.value)); });
+  document.getElementById('theme').addEventListener('click', function(){
+    var r = document.documentElement, curT = r.getAttribute('data-theme');
+    var dark = curT ? curT === 'dark' : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    r.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+  document.querySelector('.fig').addEventListener('keydown', function(e){
+    if (e.target !== e.currentTarget) return;
+    var cur = stepAt(T);
+    if (e.key === 'ArrowRight'){ e.preventDefault(); seek(Math.min(6, cur + 1) * STEP); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(Math.max(1, cur - 1) * STEP); }
+    else if (e.key === ' '){ e.preventDefault(); playing ? pause() : play(); }
+  });
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) arm(); else if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    }, {rootMargin: '120px'}).observe(document.querySelector('.fig'));
+  }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur: DUR, rest: REST, steps: 6, step: STEP}; };
+  render(T); setIcon();
+})();
+</script>
+</body>
+</html>

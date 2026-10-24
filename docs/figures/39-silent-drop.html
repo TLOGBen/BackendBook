@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>事件被安靜丟掉</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --paper: #f8fafc;
+  --ink: #1e293b;
+  --muted: #475569;
+  --soft: #64748b;
+  --line: #94a3b8;
+  --rule: #cbd5e1;
+  --chip: #e2e8f0;
+  --hot-fill: #fde68a;
+  --hot-line: #b45309;
+  --hot-ink: #111111;
+  --hot-text: #92400e;
+  --ok: #15803d;
+  --ok-fill: #dcfce7;
+  --focus: #2563eb;
+  --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Heiti TC", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, "Noto Sans TC", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e2129;
+    --paper: #272b36;
+    --ink: #e5e7eb;
+    --muted: #cbd5e1;
+    --soft: #9aa5b8;
+    --line: #6b7689;
+    --rule: #3a4050;
+    --chip: #363c4b;
+    --hot-fill: #6b4209;
+    --hot-line: #f59e0b;
+    --hot-ink: #fef3c7;
+    --hot-text: #fbbf24;
+    --ok: #4ade80;
+    --ok-fill: #14532d;
+    --focus: #60a5fa;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e2129;
+  --paper: #272b36;
+  --ink: #e5e7eb;
+  --muted: #cbd5e1;
+  --soft: #9aa5b8;
+  --line: #6b7689;
+  --rule: #3a4050;
+  --chip: #363c4b;
+  --hot-fill: #6b4209;
+  --hot-line: #f59e0b;
+  --hot-ink: #fef3c7;
+  --hot-text: #fbbf24;
+  --ok: #4ade80;
+  --ok-fill: #14532d;
+  --focus: #60a5fa;
+  color-scheme: dark;
+}
+html, body { margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); }
+
+.fig { margin: 0; padding: 8px 16px 12px; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+.fig:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.stage { width: 100%; }
+.stage svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+.stage svg.narrow { max-width: 480px; }
+
+/* svg parts */
+.box { fill: var(--paper); stroke: var(--line); stroke-width: 1.5; }
+.box.on { stroke: var(--ink); }
+.box.hot { fill: var(--hot-fill); stroke: var(--hot-line); stroke-width: 2.5; }
+.box.ghost { fill: none; stroke: var(--line); stroke-dasharray: 5 4; }
+.box.card { fill: var(--bg); stroke: var(--ink); stroke-width: 1.5; }
+.box.note { fill: none; stroke: var(--line); stroke-dasharray: 3 3; }
+.box.read { fill: var(--paper); stroke: var(--rule); }
+.t { fill: var(--ink); font-family: var(--sans); }
+.t.b { font-weight: 600; }
+.t.s { fill: var(--muted); }
+.t.m { font-family: var(--mono); }
+.t.ok { fill: var(--ok); font-weight: 600; }
+.t.hot { fill: var(--hot-text); font-weight: 700; }
+.t.onhot { fill: var(--hot-ink); }
+.t.big { font-weight: 700; }
+.t.dim { fill: var(--soft); }
+.hl { fill: var(--hot-fill); stroke: var(--hot-line); stroke-width: 1.5; }
+.wire { fill: none; stroke: var(--line); stroke-width: 2; }
+.wire.ack { stroke-dasharray: 6 5; stroke: var(--ok); }
+.arrowhead { fill: var(--line); }
+.arrowhead.ack { fill: var(--ok); }
+.mask { fill: var(--bg); }
+.chip rect { fill: var(--chip); stroke: var(--ink); stroke-width: 1.2; }
+.chip text { fill: var(--ink); font-family: var(--mono); font-weight: 600; }
+.chip.ack rect { fill: var(--ok-fill); stroke: var(--ok); }
+.chip.ack text { fill: var(--ok); }
+.dot { fill: var(--ok); }
+.fade { transition: none; }
+
+/* controls */
+.ctrl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 8px; }
+.ctrl button { font: 600 14px/1 var(--sans); color: var(--ink); background: var(--paper); border: 1.5px solid var(--line); border-radius: 6px; min-height: 36px; padding: 0 12px; cursor: pointer; }
+.ctrl button:hover { border-color: var(--ink); }
+.ctrl button:focus-visible, .ctrl input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ctrl .play { min-width: 84px; }
+.ctrl .steps { display: flex; gap: 6px; flex-wrap: wrap; }
+.ctrl .steps button { min-width: 40px; padding: 0 8px; font-family: var(--mono); }
+.ctrl .steps button[aria-current="step"] { background: var(--hot-fill); border-color: var(--hot-line); color: var(--hot-ink); }
+.ctrl .scrub { flex: 1 1 160px; min-width: 120px; height: 36px; accent-color: var(--hot-line); margin: 0; }
+.ctrl .theme { font-size: 13px; min-width: 0; padding: 0 10px; color: var(--muted); }
+.cap { margin: 8px 0 0; font-size: 15px; line-height: 1.6; color: var(--ink); min-height: 3.2em; }
+.cap b { font-family: var(--mono); font-weight: 700; }
+.cap code { font-family: var(--mono); font-size: 0.95em; background: var(--chip); padding: 0 4px; border-radius: 4px; }
+@media (max-width: 420px) {
+  .cap { font-size: 14px; }
+  .ctrl .steps button { min-width: 36px; padding: 0 6px; }
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="silent-drop" data-dur="14" data-rest="7.9" tabindex="0"
+  aria-label="動畫：訂單服務把 user_id 改名成 customer_id 後，會員服務讀不到會員 ID 就直接 return，照常 ack，broker 標成已完成，監控全綠，會員 501 的點數一直停在 1200，沒有加上應得的 70 點。">
+  <div class="stage" id="sd-stage"></div>
+  <div class="ctrl">
+    <button type="button" class="play" id="sd-play" aria-label="播放">▶ 播放</button>
+    <input class="scrub" id="sd-scrub" type="range" min="0" max="14" step="0.02" value="7.9" aria-label="時間軸">
+    <div class="steps" id="sd-steps" role="group" aria-label="跳到步驟"></div>
+    <button type="button" class="theme" id="sd-theme" aria-label="切換深淺色">深／淺</button>
+  </div>
+  <figcaption class="cap" id="sd-cap" aria-live="polite"></figcaption>
+</figure>
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var DUR = 14, REST = 7.9;
+  var STEP_START = [0, 2, 4, 6, 8, 10];
+  var STEP_END = [1.9, 3.9, 5.9, 7.9, 9.9, 14];
+  var CAPS = [
+    "<b>T1</b>　訂單 8812 成立，訂單服務發出 <code>OrderPlaced</code>。週二重構之後，會員 ID 的欄位叫 <code>customer_id</code>，不再是 <code>user_id</code>。",
+    "<b>T2</b>　broker（Redis Streams）各送一份給三個訂閱者。庫存服務不讀這個欄位、通知服務用的是 email 欄位，都沒事。",
+    "<b>T3</b>　會員服務用 <code>.get(\"user_id\")</code> 讀會員 ID，可是事件裡只有 <code>customer_id</code>，拿到 <code>None</code>。",
+    "<b>T4</b>　走進 <code>if not user_id: return</code>：沒有加點數，也沒有印任何錯誤。會員 501 的點數停在 1200，應該是 1270。",
+    "<b>T5</b>　會員服務照常 ack，broker 把事件標成已完成。從外面看，這筆處理得很順利，監控一片綠。",
+    "<b>T6</b>　週三、週四，每一張新訂單都重複 T1 到 T5，點數一直沒變；直到週五客服湧進抱怨，才有人開始查。"
+  ];
+
+  /* ---------- layouts (4 px grid) ---------- */
+  var WIDE = {
+    name: "wide", w: 960, h: 540, fs: 17, fh: 18, fbig: 30, mono: 10.2,
+    day: [24, 16, 264, 40],
+    order: [24, 180, 160, 96],
+    note: [24, 292, 256, 60],
+    card: [296, 40, 200, 112],
+    broker: [296, 172, 200, 112],
+    inv: [608, 24, 320, 64],
+    notif: [608, 108, 320, 64],
+    member: [608, 192, 320, 244],
+    stepA: [624, 232, 288, 52],
+    stepB: [624, 308, 288, 60],
+    stepC: [624, 388, 288, 40],
+    read: [24, 456, 904, 64],
+    chip: [128, 28], ackChip: [60, 28],
+    P: {
+      ob: [[184, 228], [296, 228]],
+      bi: [[496, 200], [544, 200], [544, 56], [608, 56]],
+      bn: [[496, 228], [560, 228], [560, 140], [608, 140]],
+      bm: [[496, 256], [576, 256], [576, 216], [608, 216]],
+      ack: [[608, 240], [588, 240], [588, 268], [496, 268]],
+      ab: [[640, 284], [640, 308]]
+    },
+    abLabel: [652, 302]
+  };
+  var NARROW = {
+    name: "narrow", w: 360, h: 784, fs: 15, fh: 16, fbig: 24, mono: 9,
+    day: [16, 8, 240, 32],
+    order: [16, 48, 328, 56],
+    note: [224, 128, 120, 96],
+    card: [16, 128, 176, 96],
+    broker: [16, 248, 328, 64],
+    inv: [16, 360, 140, 60],
+    notif: [204, 360, 140, 60],
+    member: [16, 440, 328, 232],
+    stepA: [28, 484, 304, 48],
+    stepB: [28, 556, 304, 56],
+    stepC: [28, 628, 304, 36],
+    read: [16, 688, 328, 88],
+    chip: [112, 24], ackChip: [52, 24],
+    P: {
+      ob: [[208, 104], [208, 248]],
+      bi: [[86, 312], [86, 360]],
+      bn: [[274, 312], [274, 360]],
+      bm: [[172, 312], [172, 440]],
+      ack: [[188, 440], [188, 312]],
+      ab: [[44, 532], [44, 556]]
+    },
+    abLabel: [56, 549]
+  };
+
+  /* ---------- helpers ---------- */
+  function el(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function text(parent, x, y, str, cls, size, anchor) {
+    var n = el("text", { x: x, y: y, "class": "t " + (cls || ""), "font-size": size }, parent);
+    if (anchor) n.setAttribute("text-anchor", anchor);
+    n.textContent = str;
+    return n;
+  }
+  function rect(parent, r, cls, rx) {
+    return el("rect", { x: r[0], y: r[1], width: r[2], height: r[3], rx: rx == null ? 8 : rx, "class": "box " + (cls || "") }, parent);
+  }
+  function elbow(pts) {
+    var r = 8, d = "M" + pts[0][0] + "," + pts[0][1];
+    for (var i = 1; i < pts.length - 1; i++) {
+      var p = pts[i], a = pts[i - 1], b = pts[i + 1];
+      var dx1 = Math.sign(p[0] - a[0]), dy1 = Math.sign(p[1] - a[1]);
+      var dx2 = Math.sign(b[0] - p[0]), dy2 = Math.sign(b[1] - p[1]);
+      d += " L" + (p[0] - dx1 * r) + "," + (p[1] - dy1 * r);
+      d += " Q" + p[0] + "," + p[1] + " " + (p[0] + dx2 * r) + "," + (p[1] + dy2 * r);
+    }
+    var last = pts[pts.length - 1];
+    return d + " L" + last[0] + "," + last[1];
+  }
+  function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
+  function prog(t, a, b) { return clamp((t - a) / (b - a), 0, 1); }
+  function ease(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+
+  /* ---------- build ---------- */
+  var stage = document.getElementById("sd-stage");
+  var G = null; // handles for the current build
+
+  function build(L) {
+    stage.textContent = "";
+    var s = L.fs, sh = L.fh;
+    var svg = el("svg", { viewBox: "0 0 " + L.w + " " + L.h, role: "img", "aria-labelledby": "silent-drop-title silent-drop-desc", "class": L.name });
+    var title = el("title", { id: "silent-drop-title" }, svg);
+    title.textContent = "事件被安靜丟掉：欄位改名後點數一直沒加";
+    var desc = el("desc", { id: "silent-drop-desc" }, svg);
+    desc.textContent = "訂單服務發出的 OrderPlaced 把 user_id 改名成 customer_id，會員服務讀 user_id 拿到 None 後直接 return 並照常 ack，broker 標成已完成，會員 501 的點數停在 1200。";
+    var defs = el("defs", {}, svg);
+    [["sd-arrow", "arrowhead"], ["sd-arrow-ack", "arrowhead ack"]].forEach(function (m) {
+      var mk = el("marker", { id: m[0], viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 8, markerHeight: 8, orient: "auto-start-reverse", markerUnits: "userSpaceOnUse" }, defs);
+      el("path", { d: "M0,0 L10,5 L0,10 z", "class": m[1] }, mk);
+    });
+    var h = {};
+
+    /* wires first */
+    var wires = el("g", {}, svg);
+    h.paths = {};
+    ["ob", "bi", "bn", "bm"].forEach(function (k) {
+      h.paths[k] = el("path", { d: elbow(L.P[k]), "class": "wire", "marker-end": "url(#sd-arrow)" }, wires);
+    });
+    h.paths.ack = el("path", { d: elbow(L.P.ack), "class": "wire ack", "marker-end": "url(#sd-arrow-ack)" }, wires);
+    h.ackWire = h.paths.ack;
+    el("path", { d: elbow(L.P.ab), "class": "wire", "marker-end": "url(#sd-arrow)" }, wires);
+    h.len = {};
+    for (var k in h.paths) h.len[k] = h.paths[k].getTotalLength();
+
+    /* day tag */
+    var dayG = el("g", {}, svg);
+    h.dayBox = rect(dayG, L.day, "read", 6);
+    h.dayText = text(dayG, L.day[0] + 12, L.day[1] + L.day[3] / 2 + s * 0.36, "週二・訂單 8812", "b", s);
+
+    /* order service */
+    var o = L.order;
+    rect(svg, o, "");
+    if (L.name === "wide") {
+      text(svg, o[0] + 16, o[1] + 40, "訂單服務", "b", sh);
+      text(svg, o[0] + 16, o[1] + 68, "發布者", "s", s);
+    } else {
+      text(svg, o[0] + 16, o[1] + 35, "訂單服務", "b", sh);
+      text(svg, o[0] + o[2] - 16, o[1] + 35, "發布者", "s", s, "end");
+    }
+
+    /* rename note */
+    var n = L.note;
+    rect(svg, n, "note", 6);
+    if (L.name === "wide") {
+      text(svg, n[0] + 12, n[1] + 24, "週二重構：欄位改名", "b", s);
+      text(svg, n[0] + 12, n[1] + 48, "user_id → customer_id", "m", s);
+    } else {
+      text(svg, n[0] + 10, n[1] + 22, "週二重構改名", "b", s);
+      text(svg, n[0] + 10, n[1] + 44, "user_id", "m s", s);
+      text(svg, n[0] + 10, n[1] + 66, "↓ 改成", "s", s);
+      text(svg, n[0] + 10, n[1] + 88, "customer_id", "m", s);
+    }
+
+    /* event card */
+    var c = L.card, lh = L.name === "wide" ? 22 : 20, top = L.name === "wide" ? 26 : 22;
+    h.card = el("g", {}, svg);
+    rect(h.card, c, "card", 6);
+    text(h.card, c[0] + 10, c[1] + top, "OrderPlaced", "m b", s);
+    text(h.card, c[0] + 10, c[1] + top + lh, "order_id: 8812", "m", s);
+    el("rect", { x: c[0] + 4, y: c[1] + top + lh * 2 - s + 1, width: c[2] - 8, height: lh, rx: 3, "class": "hl" }, h.card);
+    text(h.card, c[0] + 10, c[1] + top + lh * 2, "customer_id: 501", "m onhot b", s);
+    text(h.card, c[0] + 10, c[1] + top + lh * 3, "total_amount: 700", "m", s);
+    if (L.name === "wide") text(h.card, c[0] + c[2] - 8, c[1] + top + lh * 4 - 2, "", "s", s, "end");
+
+    /* broker */
+    var b = L.broker;
+    h.brokerBox = rect(svg, b, "");
+    if (L.name === "wide") {
+      text(svg, b[0] + 16, b[1] + 32, "broker", "b m", sh);
+      text(svg, b[0] + 16, b[1] + 58, "Redis Streams", "m s", s);
+      h.brokerStatus = text(svg, b[0] + 16, b[1] + 92, "", "ok", s);
+    } else {
+      text(svg, b[0] + 16, b[1] + 28, "broker", "b m", sh);
+      text(svg, b[0] + 16, b[1] + 50, "Redis Streams", "m s", s);
+      h.brokerStatus = text(svg, b[0] + b[2] - 16, b[1] + 40, "", "ok", s, "end");
+    }
+
+    /* inventory / notification */
+    function sub(r, name, note, okText) {
+      rect(svg, r, "");
+      var st;
+      if (L.name === "wide") {
+        text(svg, r[0] + 16, r[1] + 27, name, "b", sh);
+        text(svg, r[0] + 16, r[1] + 51, note, "s", s);
+        st = text(svg, r[0] + r[2] - 16, r[1] + 40, okText, "ok", s, "end");
+      } else {
+        text(svg, r[0] + 12, r[1] + 26, name, "b", sh);
+        st = text(svg, r[0] + 12, r[1] + 49, okText, "ok", s);
+      }
+      return st;
+    }
+    h.invOk = sub(L.inv, "庫存服務", "不讀會員 ID 欄位", "扣庫存 ✓");
+    h.notifOk = sub(L.notif, "通知服務", "用 email 欄位", "寄確認信 ✓");
+
+    /* member service */
+    var m = L.member;
+    h.memberBox = rect(svg, m, "");
+    text(svg, m[0] + 16, m[1] + (L.name === "wide" ? 28 : 28), "會員服務（點數消費者）", "b", sh);
+    var A = L.stepA, B = L.stepB, C = L.stepC;
+    h.aBox = rect(svg, A, "", 6);
+    h.aCode = text(svg, A[0] + 12, A[1] + A[3] / 2 + s * 0.36, '.get("user_id")', "m", s);
+    h.aRes = text(svg, A[0] + A[2] - 12, A[1] + A[3] / 2 + s * 0.36, "拿到 None", "hot", s, "end");
+    var ab = L.abLabel;
+    el("rect", { x: ab[0] - 4, y: ab[1] - s, width: s * 3 + 8, height: s + 6, rx: 3, "class": "mask" }, svg);
+    text(svg, ab[0], ab[1], "沒有值", "s", s);
+    h.bBox = rect(svg, B, "", 6);
+    h.bCode = text(svg, B[0] + 12, B[1] + (L.name === "wide" ? 25 : 24), "if not user_id: return", "m b", s);
+    h.bNote = text(svg, B[0] + 12, B[1] + (L.name === "wide" ? 49 : 45), "沒加點數，也沒印錯誤", "", s);
+    h.cBox = rect(svg, C, "ghost", 6);
+    h.cText = text(svg, C[0] + 12, C[1] + C[3] / 2 + s * 0.36, "有值才會：加 70 點", "s", s);
+
+    /* readout */
+    var R = L.read;
+    rect(svg, R, "read", 8);
+    if (L.name === "wide") {
+      var ry = R[1] + 40;
+      text(svg, R[0] + 16, ry, "會員 501 點數", "b", s);
+      h.points = text(svg, R[0] + 136, ry + 2, "1200", "big", L.fbig);
+      h.should = text(svg, R[0] + 220, ry, "應該是 1270", "hot", s);
+      var sx = [476, 627, 795];
+      var labels = ["錯誤日誌：沒有", "卡住的訊息：沒有", "監控：一片綠"];
+      h.lights = [];
+      labels.forEach(function (lb, i) {
+        h.lights.push(el("circle", { cx: sx[i] + 6, cy: ry - s * 0.34, r: 6, "class": "dot" }, svg));
+        text(svg, sx[i] + 18, ry, lb, "", s);
+      });
+    } else {
+      var y1 = R[1] + 30;
+      text(svg, R[0] + 12, y1, "會員 501 點數", "b", s);
+      h.points = text(svg, R[0] + 116, y1 + 2, "1200", "big", L.fbig);
+      h.should = text(svg, R[0] + 186, y1, "應該是 1270", "hot", s);
+      var pos = [[R[0] + 12, R[1] + 56], [R[0] + 160, R[1] + 56], [R[0] + 12, R[1] + 78]];
+      var labs = ["錯誤日誌：沒有", "卡住的訊息：沒有", "監控：一片綠"];
+      h.lights = [];
+      labs.forEach(function (lb, i) {
+        h.lights.push(el("circle", { cx: pos[i][0] + 5, cy: pos[i][1] - s * 0.34, r: 5, "class": "dot" }, svg));
+        text(svg, pos[i][0] + 15, pos[i][1], lb, "", s);
+      });
+    }
+
+    /* moving chips (drawn last) */
+    function chip(label, size, cls) {
+      var g = el("g", { "class": "chip " + (cls || "") }, svg);
+      el("rect", { x: -size[0] / 2, y: -size[1] / 2, width: size[0], height: size[1], rx: 5 }, g);
+      var tt = el("text", { x: 0, y: s * 0.36, "text-anchor": "middle", "font-size": s }, g);
+      tt.textContent = label;
+      g.style.display = "none";
+      return g;
+    }
+    h.chips = { ob: chip("OrderPlaced", L.chip), bi: chip("OrderPlaced", L.chip), bn: chip("OrderPlaced", L.chip), bm: chip("OrderPlaced", L.chip), ack: chip("ack", L.ackChip, "ack") };
+
+    stage.appendChild(svg);
+    h.L = L;
+    G = h;
+  }
+
+  /* ---------- draw frame t ---------- */
+  function place(key, p) {
+    var g = G.chips[key];
+    if (p <= 0 || p >= 1) { g.style.display = "none"; return; }
+    var pt = G.paths[key].getPointAtLength(G.len[key] * ease(p));
+    g.style.display = "";
+    g.setAttribute("transform", "translate(" + pt.x.toFixed(1) + "," + pt.y.toFixed(1) + ")");
+  }
+  function setCls(n, base, on, cls) { n.setAttribute("class", base + (on ? " " + cls : "")); }
+  function stepOf(t) { for (var i = STEP_START.length - 1; i >= 0; i--) if (t >= STEP_START[i]) return i; return 0; }
+
+  function D(t) {
+    if (!G) return;
+    // T1: event to broker
+    G.card.style.opacity = (0.15 + 0.85 * prog(t, 0.2, 1.4)).toFixed(3);
+    var ob = prog(t, 0.3, 1.5), fan = prog(t, 2.2, 3.4), ack = prog(t, 8.2, 9.3);
+    // T6 replays (週三、週四)
+    [10.4, 12.0].forEach(function (s0) {
+      if (t >= s0 && t < s0 + 1.5) {
+        ob = prog(t, s0, s0 + 0.4); fan = prog(t, s0 + 0.45, s0 + 0.85); ack = prog(t, s0 + 0.95, s0 + 1.35);
+      }
+    });
+    place("ob", ob);
+    ["bi", "bn", "bm"].forEach(function (k) { place(k, fan); });
+    place("ack", ack);
+
+    var day = t < 10.4 ? "週二・訂單 8812" : t < 12.0 ? "週三・每張新訂單" : t < 13.4 ? "週四・每張新訂單" : "週五：客服湧進抱怨，才開始查";
+    G.dayText.textContent = day;
+    var friday = t >= 13.4;
+    G.dayBox.setAttribute("class", friday ? "box hot" : "box read");
+    setCls(G.dayText, "t b", friday, "onhot");
+
+    G.brokerStatus.textContent = t >= 9.3 ? "已完成 ✓" : t >= 1.5 ? "收下事件" : "";
+    setCls(G.brokerStatus, "t", true, t >= 9.3 ? "ok" : "s");
+    G.invOk.style.opacity = t >= 3.4 ? 1 : 0;
+    G.notifOk.style.opacity = t >= 3.4 ? 1 : 0;
+    setCls(G.memberBox, "box", t >= 3.4, "on");
+
+    // T3: read user_id -> None
+    var aOn = t >= 4.2, aHot = t >= 4.8;
+    setCls(G.aBox, "box", aOn, aHot ? "hot" : "on");
+    setCls(G.aCode, "t m", aHot, "onhot");
+    G.aRes.style.opacity = aHot ? 1 : 0;
+    setCls(G.aRes, "t", true, aHot ? "onhot b" : "hot");
+    // T4: return
+    var bHot = t >= 6.2;
+    setCls(G.bBox, "box", bHot, "hot");
+    setCls(G.bCode, "t m b", bHot, "onhot");
+    setCls(G.bNote, "t", true, bHot ? "onhot" : "dim");
+    G.cBox.style.opacity = bHot ? 0.55 : 1;
+    G.cText.style.opacity = bHot ? 0.55 : 1;
+    G.cText.textContent = bHot ? "有值才會：加 70 點（沒走到）" : "有值才會：加 70 點";
+    G.should.style.opacity = t >= 6.6 ? 1 : 0;
+    // ack wire visible from T5
+    G.ackWire.style.opacity = t >= 8.0 ? 1 : 0.0;
+    // monitoring lights stay green; pulse at ack
+    var pulse = (t >= 9.3 && t < 9.9) ? 1 + 0.35 * Math.sin(prog(t, 9.3, 9.9) * Math.PI) : 1;
+    G.lights.forEach(function (c) { c.setAttribute("r", ((G.L.name === "wide" ? 6 : 5) * pulse).toFixed(2)); });
+
+    // caption + step chips
+    var si = stepOf(t);
+    if (si !== lastStep) {
+      cap.innerHTML = CAPS[si];
+      stepBtns.forEach(function (bt, i) { if (i === si) bt.setAttribute("aria-current", "step"); else bt.removeAttribute("aria-current"); });
+      lastStep = si;
+    }
+    scrub.value = t.toFixed(2);
+  }
+
+  /* ---------- controls ---------- */
+  var cap = document.getElementById("sd-cap");
+  var scrub = document.getElementById("sd-scrub");
+  var playBtn = document.getElementById("sd-play");
+  var stepsBox = document.getElementById("sd-steps");
+  var stepBtns = [];
+  var lastStep = -1;
+  var T = REST, playing = false, visible = true, raf = 0, last = 0, rmAcc = 0;
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  ["T1", "T2", "T3", "T4", "T5", "T6"].forEach(function (lb, i) {
+    var bt = document.createElement("button");
+    bt.type = "button"; bt.textContent = lb; bt.setAttribute("aria-label", "跳到 " + lb);
+    bt.addEventListener("click", function () { pause(); render(STEP_END[i]); });
+    stepsBox.appendChild(bt); stepBtns.push(bt);
+  });
+
+  function render(t) { T = clamp(t, 0, DUR); D(T); }
+  function setPlayLabel() {
+    playBtn.textContent = playing ? "❚❚ 暫停" : (T >= DUR ? "↺ 重播" : "▶ 播放");
+    playBtn.setAttribute("aria-label", playing ? "暫停" : (T >= DUR ? "重播" : "播放"));
+  }
+  function frame(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (reduce) {
+      rmAcc += dt;
+      if (rmAcc >= 1.6) {
+        rmAcc = 0;
+        var si = stepOf(T), cur = STEP_END[si];
+        var next = T < cur - 0.01 ? cur : (si < 5 ? STEP_END[si + 1] : DUR);
+        render(next);
+      }
+    } else {
+      render(T + dt);
+    }
+    if (T >= DUR) { playing = false; setPlayLabel(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+  function arm() { if (playing && visible && !raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+  function play() { if (T >= DUR - 0.01) render(0); playing = true; rmAcc = 0; setPlayLabel(); arm(); }
+  function pause() { playing = false; if (raf) { cancelAnimationFrame(raf); raf = 0; } setPlayLabel(); }
+
+  playBtn.addEventListener("click", function () { playing ? pause() : play(); });
+  scrub.addEventListener("input", function () { pause(); render(parseFloat(scrub.value)); setPlayLabel(); });
+  document.getElementById("sd-theme").addEventListener("click", function () {
+    var root = document.documentElement;
+    var cur = root.getAttribute("data-theme") || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    root.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+  });
+  var figEl = document.querySelector(".fig");
+  figEl.addEventListener("keydown", function (e) {
+    if (e.target !== figEl) return;
+    if (e.key === " ") { e.preventDefault(); playing ? pause() : play(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); pause(); var si = stepOf(T); render(STEP_END[Math.min(5, T < STEP_END[si] - 0.01 ? si : si + 1)]); setPlayLabel(); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); pause(); var sj = stepOf(T); render(STEP_END[Math.max(0, sj - 1)]); setPlayLabel(); }
+  });
+
+  /* ---------- layout switch + host height ---------- */
+  var current = null, lastH = 0;
+  function choose(width) {
+    var L = width >= 680 ? WIDE : NARROW;
+    if (L !== current) { current = L; build(L); lastStep = -1; D(T); }
+  }
+  function postHeight() {
+    var hgt = Math.ceil(figEl.offsetHeight);
+    if (hgt !== lastH && window.parent && window.parent !== window) {
+      lastH = hgt;
+      try { window.parent.postMessage({ type: "figure-height", figure: "silent-drop", height: hgt }, "*"); } catch (e) {}
+    }
+  }
+  var inner = figEl.clientWidth - 32;
+  choose(inner);
+  if ("ResizeObserver" in window) {
+    new ResizeObserver(function (entries) {
+      var w = entries[0].contentRect.width;
+      choose(w);
+      requestAnimationFrame(postHeight);
+    }).observe(stage);
+  }
+  window.addEventListener("load", postHeight);
+
+  /* ---------- visibility: run only on screen; one autoplay unless reduced motion ---------- */
+  var autoplayed = false;
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(function (es) {
+      visible = es[0].isIntersecting;
+      if (visible && !autoplayed && !reduce) { autoplayed = true; render(0); play(); }
+      else if (visible) arm();
+    }, { rootMargin: "120px", threshold: 0.35 }).observe(figEl);
+  }
+
+  /* ---------- public API ---------- */
+  window.DUR = DUR;
+  window.seek = function (t) { autoplayed = true; pause(); render(+t || 0); setPlayLabel(); };
+  render(REST);
+  setPlayLabel();
+})();
+</script>
+</body>
+</html>

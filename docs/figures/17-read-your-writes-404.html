@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>剛寫完讀副本 404</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#5b6472;
+  --line:#9aa3b0; --rule:#d5dae1; --node:#f6f8fa; --node-stroke:#8b96a5;
+  --card:#c3ccd8; --card-stroke:#8b96a5;
+  --write:#1d4ed8; --read:#475569; --ok:#15803d;
+  --amber-fill:#fde68a; --amber-stroke:#b45309; --amber-ink:#78350f;
+  --btn:#eef1f5; --btn-ink:#1f2937; --btn-on:#1f2937; --btn-on-ink:#ffffff;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2029; --ink:#e5e7eb; --muted:#c3cad5; --soft:#a5adba;
+    --line:#6b7482; --rule:#3a3f4b; --node:#262a35; --node-stroke:#6b7482;
+    --card:#4b5463; --card-stroke:#8b96a5;
+    --write:#8fb0ff; --read:#b4c0d0; --ok:#5bd68a;
+    --amber-fill:#4a3510; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+    --btn:#2c313d; --btn-ink:#e5e7eb; --btn-on:#e5e7eb; --btn-on-ink:#1e2029;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2029; --ink:#e5e7eb; --muted:#c3cad5; --soft:#a5adba;
+  --line:#6b7482; --rule:#3a3f4b; --node:#262a35; --node-stroke:#6b7482;
+  --card:#4b5463; --card-stroke:#8b96a5;
+  --write:#8fb0ff; --read:#b4c0d0; --ok:#5bd68a;
+  --amber-fill:#4a3510; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+  --btn:#2c313d; --btn-ink:#e5e7eb; --btn-on:#e5e7eb; --btn-on-ink:#1e2029;
+  color-scheme: dark;
+}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,sans-serif;
+  -webkit-text-size-adjust:100%;
+}
+.fig{margin:0;padding:8px 16px 12px;box-sizing:border-box;width:100%;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--write);border-radius:8px}
+.stage{width:100%}
+.stage svg{display:block;width:100%;height:auto;margin:0 auto}
+.stage.narrow svg{max-width:440px}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,"SFMono-Regular",Menlo,monospace}
+
+/* SVG classes */
+.edge{fill:none;stroke:var(--line);stroke-width:2;stroke-linejoin:round}
+.edge.on-write{stroke:var(--write);stroke-width:3}
+.edge.on-read{stroke:var(--read);stroke-width:3}
+.edge.on-ok{stroke:var(--ok);stroke-width:3}
+.edge.on-miss{stroke:var(--amber-stroke);stroke-width:3}
+.mask{fill:var(--bg)}
+.elabel{fill:var(--soft);font-size:15px}
+.box{fill:var(--node);stroke:var(--node-stroke);stroke-width:1.5}
+.box.hot{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5}
+.ttl{fill:var(--ink);font-size:18px;font-weight:700}
+.sub{fill:var(--soft);font-size:15px}
+.rule-t{fill:var(--muted);font-size:15px}
+.div{stroke:var(--rule);stroke-width:1.5}
+.status{fill:var(--ink);font-size:15px;font-weight:700}
+.status.bad{fill:var(--amber-stroke)}
+.box.hot ~ .status, .hot-ink{fill:var(--amber-ink)}
+.count{fill:var(--ink);font-size:26px;font-weight:700}
+.pos-l{fill:var(--soft);font-size:15px}
+.pos-v{fill:var(--ink);font-size:15px;font-weight:700}
+.on-hot .ttl,.on-hot .sub,.on-hot .count,.on-hot .pos-l,.on-hot .pos-v{fill:var(--amber-ink)}
+.card{fill:var(--card);stroke:var(--card-stroke);stroke-width:1}
+.card-line{stroke:var(--bg);stroke-width:3;stroke-linecap:round;opacity:.85}
+.queue{fill:none;stroke:var(--node-stroke);stroke-width:1.5;stroke-dasharray:5 4}
+.q-l{fill:var(--soft);font-size:15px}
+.blk{fill:var(--bg);stroke:var(--write);stroke-width:1.5;stroke-dasharray:3 3}
+.blk.in{fill:var(--card);stroke:var(--card-stroke);stroke-dasharray:none}
+.tag{fill:var(--amber-stroke)}
+.tag-t{fill:#ffffff;font-size:15px;font-weight:700}
+:root[data-theme="dark"] .tag-t{fill:#1e2029}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .tag-t{fill:#1e2029}}
+.pkt{stroke:var(--bg);stroke-width:2.5}
+.pkt.write{fill:var(--write)} .pkt.read{fill:var(--read)} .pkt.ok{fill:var(--ok)} .pkt.miss{fill:var(--amber-stroke)}
+
+/* readout */
+.readout{display:flex;gap:8px;align-items:flex-start;margin:10px 0 0;font-size:15px;line-height:1.55;min-height:3.2em}
+.readout .t{flex:none;font-weight:700;background:var(--btn-on);color:var(--btn-on-ink);border-radius:6px;padding:0 8px;font-size:14px;line-height:1.75}
+.readout .t.hot{background:var(--amber-fill);color:var(--amber-ink);box-shadow:inset 0 0 0 1.5px var(--amber-stroke)}
+.readout .clock{font-weight:700;margin-right:6px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:8px 0 0;font-size:13px;color:var(--soft)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.legend .hotkey{display:inline-block;width:16px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;background:var(--amber-fill);box-shadow:inset 0 0 0 1.5px var(--amber-stroke)}
+.controls{display:flex;align-items:center;gap:8px;margin-top:10px}
+.controls button,.steps button{
+  min-height:36px;min-width:36px;border:0;border-radius:8px;background:var(--btn);color:var(--btn-ink);
+  font:inherit;font-size:14px;font-weight:700;cursor:pointer;padding:0 10px;
+}
+.controls button:focus-visible,.steps button:focus-visible,.controls input:focus-visible{outline:2px solid var(--write);outline-offset:2px}
+#play{min-width:72px}
+.controls input[type=range]{flex:1;min-width:0;height:36px;margin:0;accent-color:var(--amber-stroke)}
+.steps{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.steps button{flex:1 1 0;min-width:34px;padding:0 4px}
+.steps button[aria-current="step"]{background:var(--btn-on);color:var(--btn-on-ink)}
+.steps button.hot{box-shadow:inset 0 0 0 2px var(--amber-stroke)}
+.steps button.hot[aria-current="step"]{background:var(--amber-fill);color:var(--amber-ink)}
+@media (max-width:520px){.readout{min-height:4.7em}}
+</style>
+</head>
+<body>
+<figure class="fig" id="ryw" data-fig="read-your-writes-404" data-dur="14" data-rest="8" tabindex="0"
+  aria-label="動畫：使用者建立專案，INSERT 寫進主庫；緊接著專案頁的 SELECT 照規則打到副本，副本還沒重播到這筆 INSERT，回 404。使用者重按兩次，主庫變成 3 筆、副本還是 0 筆，等副本追上後列表出現 3 個一模一樣的專案。">
+  <div class="stage" id="stage">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ryw-title ryw-desc">
+      <title id="ryw-title">剛寫完馬上讀副本，讀不到</title>
+      <desc id="ryw-desc">四個角色：使用者、API 伺服器、主庫、副本。寫入走主庫、SELECT 走副本。主庫和副本各自顯示 projects 表的筆數，中間是等待副本重播的變更。</desc>
+      <g id="root"></g>
+    </svg>
+  </div>
+  <figcaption class="readout" aria-live="polite"><span class="t" id="rtag">T4</span><span><span class="clock mono" id="rclock"></span><span id="rtext"></span></span></figcaption>
+  <div class="legend" aria-hidden="true">
+    <span><i style="background:var(--write)"></i>寫入（走主庫）</span>
+    <span><i style="background:var(--read)"></i>讀取（走副本）</span>
+    <span><i style="background:var(--ok)"></i>成功回應</span>
+    <span><i style="background:var(--amber-stroke)"></i>查無資料／404</span>
+    <span><span class="hotkey"></span>事情發生在這裡</span>
+  </div>
+  <div class="controls">
+    <button id="play" type="button" aria-label="播放">▶ 播放</button>
+    <input id="scrub" type="range" min="0" max="14" step="0.01" value="8" aria-label="時間軸，拖曳看每一刻">
+    <button id="theme" type="button" aria-label="切換深淺色">◐</button>
+  </div>
+  <div class="steps" id="steps" role="group" aria-label="跳到某一格"></div>
+</figure>
+<script>
+(function(){
+  'use strict';
+  var NS = 'http://www.w3.org/2000/svg';
+  var fig = document.getElementById('ryw');
+  var DUR = Number(fig.dataset.dur), REST = Number(fig.dataset.rest), STEP = 2;
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- facts from the article (T1–T7) ---------- */
+  var STEPS = [
+    {tag:'T1', clock:'10:02:31.100', text:'使用者按「建立專案」，API 伺服器把 INSERT 送到主庫。'},
+    {tag:'T2', clock:'10:02:31.120', text:'主庫提交成功，API 拿到新 id。主庫 1 筆，副本還是 0 筆。'},
+    {tag:'T3', clock:'', text:'使用者看到建立成功，自動導到專案頁。'},
+    {tag:'T4', clock:'10:02:31.150', text:'專案頁的 SELECT 照規則打到副本，副本只重播到 10:02:31.080，回 404。資料已經寫進主庫，副本還沒追上。', hot:true},
+    {tag:'T5', clock:'', text:'使用者以為沒建成功，再按一次：又一次 INSERT，專案頁又打到副本，又是 404。主庫 2 筆，副本還在追。', hot:true},
+    {tag:'T6', clock:'', text:'又看到 404，按了第 3 次：再一次 INSERT。主庫 3 筆，副本還在追。', hot:true},
+    {tag:'T7', clock:'稍後', text:'打開專案列表，SELECT 打到已經追上的副本：3 筆，名字一模一樣。'}
+  ];
+  // packets: [edge, dir(+1 forward / -1 back), t0, t1, kind]
+  var PK = [
+    ['ua',1,0.1,0.8,'write'],['ap',1,1.0,1.8,'write'],
+    ['ap',-1,2.6,3.6,'ok'],
+    ['ua',-1,4.1,4.9,'ok'],['ua',1,5.1,5.9,'read'],
+    ['ar',1,6.0,6.7,'read'],['ar',-1,6.9,7.4,'miss'],['ua',-1,7.5,7.95,'miss']
+  ];
+  [8,10].forEach(function(b){
+    PK.push(['ua',1,b+0.05,b+0.35,'write'],['ap',1,b+0.4,b+0.72,'write'],
+            ['ar',1,b+1.0,b+1.3,'read'],['ar',-1,b+1.35,b+1.6,'miss'],['ua',-1,b+1.65,b+1.95,'miss']);
+  });
+  PK.push(['ua',1,13.0,13.3,'read'],['ar',1,13.3,13.55,'read'],['ar',-1,13.6,13.8,'ok'],['ua',-1,13.8,13.98,'ok']);
+  var COMMIT = [2.4, 8.72, 10.72];          // primary row i appears
+  var DRAIN = [12.2, 12.5, 12.8], DRAIN_D = 0.3; // replica replays row i
+  var CAUGHT = 13.1;
+  var HOT0 = 6.7, HOT1 = CAUGHT;             // replica highlighted
+  var USER = [
+    [0,['按「建立專案」']],
+    [4.9,['看到建立成功','導到專案頁']],
+    [7.95,['看到 404'],1],
+    [8.0,['以為沒建成功','再按一次']],
+    [9.95,['又看到 404'],1],
+    [10.0,['按了第 3 次']],
+    [11.95,['又看到 404'],1],
+    [13.0,['打開專案列表']],
+    [13.98,['3 個一模一樣','的專案'],1]
+  ];
+  var API = [
+    [0,['—']],
+    [0.8,['把 INSERT','送到主庫']],
+    [3.6,['主庫提交成功','拿到新 id']],
+    [6.0,['專案頁 SELECT','打到副本']],
+    [7.4,['副本查無資料','回 404'],1],
+    [8.35,['又一次 INSERT','送到主庫']],
+    [9.0,['專案頁又','打到副本']],
+    [9.6,['又回 404'],1],
+    [10.35,['再一次 INSERT','送到主庫']],
+    [11.0,['專案頁又','打到副本']],
+    [11.6,['又回 404'],1],
+    [13.3,['SELECT 打到','已追上的副本']],
+    [13.8,['回傳 3 筆']]
+  ];
+  function latest(list, t){ var r = list[0]; for (var i=1;i<list.length;i++){ if (list[i][0] < t) r = list[i]; } return r; }
+
+  /* ---------- layouts ---------- */
+  var LAYOUTS = {
+    wide: { vb:[720,432],
+      user:{x:8,y:148,w:136,h:112, ty:30, s1:66, s2:90},
+      api:{x:216,y:132,w:176,h:144},
+      pri:{x:528,y:8,w:184,h:176}, rep:{x:528,y:248,w:184,h:176},
+      queue:{x:528,y:192,w:184,h:48, label:'等待重播', bx:84},
+      edges:{ ua:[[144,204],[216,204]], ap:[[392,172],[460,172],[460,96],[528,96]], ar:[[392,236],[460,236],[460,336],[528,336]] },
+      labels:[{t:'寫入',x:452,y:140,a:'end'},{t:'SELECT',x:452,y:296,a:'end',mono:1}]
+    },
+    narrow: { vb:[360,616],
+      user:{x:96,y:8,w:168,h:88, ty:28, s1:56, s2:78},
+      api:{x:88,y:144,w:184,h:144},
+      pri:{x:8,y:368,w:164,h:176}, rep:{x:188,y:368,w:164,h:176},
+      queue:{x:8,y:556,w:344,h:52, label:'主庫 → 副本　等待重播', bx:236},
+      edges:{ ua:[[180,96],[180,144]], ap:[[132,288],[132,328],[90,328],[90,368]], ar:[[228,288],[228,328],[270,328],[270,368]] },
+      labels:[{t:'寫入',x:82,y:354,a:'end'},{t:'SELECT',x:278,y:354,a:'start',mono:1}]
+    }
+  };
+
+  /* ---------- svg helpers ---------- */
+  function el(tag, attrs, parent, text){
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function polyLen(p){ var L=0; for (var i=1;i<p.length;i++) L += Math.hypot(p[i][0]-p[i-1][0], p[i][1]-p[i-1][1]); return L; }
+  function pointAt(p, f){
+    var L = polyLen(p)*f;
+    for (var i=1;i<p.length;i++){
+      var d = Math.hypot(p[i][0]-p[i-1][0], p[i][1]-p[i-1][1]);
+      if (L <= d || i === p.length-1){ var u = d ? Math.min(1, L/d) : 0; return [p[i-1][0]+(p[i][0]-p[i-1][0])*u, p[i-1][1]+(p[i][1]-p[i-1][1])*u]; }
+      L -= d;
+    }
+    return p[p.length-1];
+  }
+  function ease(u){ u = Math.max(0, Math.min(1, u)); return u<.5 ? 2*u*u : 1-Math.pow(-2*u+2,2)/2; }
+  function setText(n, s){ if (n.__t !== s){ n.textContent = s; n.__t = s; } }
+  function setCls(n, s){ if (n.__c !== s){ n.setAttribute('class', s); n.__c = s; } }
+  function setAttr(n, k, v){ var key='__'+k; if (n[key] !== v){ n.setAttribute(k, v); n[key] = v; } }
+
+  var R = null, layoutName = '';
+  var root = document.getElementById('root'), svg = document.getElementById('svg'), stage = document.getElementById('stage');
+
+  function cardRects(b){
+    var cw = (b.w - 24 - 16)/3, out = [];
+    for (var i=0;i<3;i++) out.push({x:b.x+12+i*(cw+8), y:b.y+82, w:cw, h:26});
+    return out;
+  }
+  function queueRects(q){
+    var out = [];
+    for (var i=0;i<3;i++) out.push({x:q.x+q.bx+i*32, y:q.y+(q.h-24)/2, w:24, h:24});
+    return out;
+  }
+
+  function build(name){
+    layoutName = name;
+    var L = LAYOUTS[name];
+    stage.className = 'stage ' + name;
+    svg.setAttribute('viewBox', '0 0 ' + L.vb[0] + ' ' + L.vb[1]);
+    while (root.firstChild) root.removeChild(root.firstChild);
+    R = {L:L, edges:{}, pk:[]};
+    var gE = el('g', {}, root);
+    ['ua','ap','ar'].forEach(function(k){
+      var p = L.edges[k];
+      R.edges[k] = el('polyline', {points:p.map(function(q){return q.join(',');}).join(' '), 'class':'edge'}, gE);
+    });
+    L.labels.forEach(function(lb){
+      var w = lb.mono ? lb.t.length*9.2 + 8 : lb.t.length*15 + 8;
+      var x0 = lb.a === 'end' ? lb.x - w + 4 : lb.x - 4;
+      el('rect', {x:x0, y:lb.y-16, width:w, height:22, rx:3, 'class':'mask'}, gE);
+      el('text', {x:lb.x, y:lb.y, 'text-anchor':lb.a, 'class':'elabel' + (lb.mono?' mono':'')}, gE, lb.t);
+    });
+
+    // user
+    var u = L.user, gU = el('g', {}, root);
+    R.userBox = el('rect', {x:u.x,y:u.y,width:u.w,height:u.h,rx:8,'class':'box'}, gU);
+    el('text', {x:u.x+u.w/2, y:u.y+u.ty, 'text-anchor':'middle', 'class':'ttl'}, gU, '使用者');
+    R.u1 = el('text', {x:u.x+u.w/2, y:u.y+u.s1, 'text-anchor':'middle', 'class':'status'}, gU, '');
+    R.u2 = el('text', {x:u.x+u.w/2, y:u.y+u.s2, 'text-anchor':'middle', 'class':'status'}, gU, '');
+
+    // api
+    var a = L.api, gA = el('g', {}, root), cx = a.x + a.w/2;
+    el('rect', {x:a.x,y:a.y,width:a.w,height:a.h,rx:8,'class':'box'}, gA);
+    el('text', {x:cx, y:a.y+28, 'text-anchor':'middle', 'class':'ttl'}, gA, 'API 伺服器');
+    var r1 = el('text', {x:cx, y:a.y+54, 'text-anchor':'middle', 'class':'rule-t'}, gA);
+    el('tspan', {'class':'mono'}, r1, 'SELECT'); el('tspan', {}, r1, ' → 副本');
+    el('text', {x:cx, y:a.y+76, 'text-anchor':'middle', 'class':'rule-t'}, gA, '寫入 → 主庫');
+    el('line', {x1:a.x+12, x2:a.x+a.w-12, y1:a.y+90, y2:a.y+90, 'class':'div'}, gA);
+    R.a1 = el('text', {x:cx, y:a.y+114, 'text-anchor':'middle', 'class':'status'}, gA, '');
+    R.a2 = el('text', {x:cx, y:a.y+134, 'text-anchor':'middle', 'class':'status'}, gA, '');
+
+    // databases
+    function db(b, title, posLabel){
+      var g = el('g', {}, root), o = {g:g};
+      o.box = el('rect', {x:b.x,y:b.y,width:b.w,height:b.h,rx:8,'class':'box'}, g);
+      el('text', {x:b.x+12, y:b.y+28, 'class':'ttl'}, g, title);
+      var st = el('text', {x:b.x+b.w-12, y:b.y+28, 'text-anchor':'end', 'class':'sub'}, g);
+      el('tspan', {'class':'mono'}, st, 'projects'); el('tspan', {}, st, ' 表');
+      o.count = el('text', {x:b.x+12, y:b.y+66, 'class':'count'}, g, '0 筆');
+      o.tagG = el('g', {}, g);
+      el('rect', {x:b.x+b.w-12-68, y:b.y+46, width:68, height:26, rx:13, 'class':'tag'}, o.tagG);
+      el('text', {x:b.x+b.w-12-34, y:b.y+64, 'text-anchor':'middle', 'class':'tag-t'}, o.tagG, '還在追');
+      o.slots = cardRects(b);
+      o.slots.forEach(function(s){ el('rect', {x:s.x,y:s.y,width:s.w,height:s.h,rx:4,'class':'queue'}, g); });
+      o.posL = el('text', {x:b.x+12, y:b.y+136, 'class':'pos-l'}, g, posLabel);
+      o.posV = el('text', {x:b.x+12, y:b.y+160, 'class':'pos-v'}, g, '—');
+      return o;
+    }
+    R.pri = db(L.pri, '主庫', '最新提交');
+    R.rep = db(L.rep, '副本', '重播到');
+    R.pri.cards = R.pri.slots.map(function(s){
+      var c = el('g', {opacity:0}, R.pri.g);
+      el('rect', {x:s.x,y:s.y,width:s.w,height:s.h,rx:4,'class':'card'}, c);
+      el('line', {x1:s.x+7, x2:s.x+s.w-9, y1:s.y+s.h/2, y2:s.y+s.h/2, 'class':'card-line'}, c);
+      return c;
+    });
+
+    // queue strip
+    var q = L.queue, gQ = el('g', {}, root);
+    el('rect', {x:q.x,y:q.y,width:q.w,height:q.h,rx:8,'class':'queue'}, gQ);
+    var ql = el('text', {x:q.x+12, y:q.y+q.h/2+5, 'class':'q-l'}, gQ, q.label);
+    R.qslots = queueRects(q);
+    R.blocks = R.qslots.map(function(){
+      var b = el('rect', {x:0,y:0,width:24,height:24,rx:4,'class':'blk',opacity:0}, root);
+      return b;
+    });
+    // packets on top
+    var gP = el('g', {}, root);
+    R.dot = el('circle', {cx:0, cy:0, r:8, 'class':'pkt write', opacity:0}, gP);
+  }
+
+  /* ---------- render(t) — pure function of t ---------- */
+  var shown = -1;
+  function stepAt(t){ if (t <= 0) return 0; return Math.min(STEPS.length-1, Math.floor((t-1e-9)/STEP)); }
+  function draw(t){
+    if (!R) return;
+    var L = R.L;
+    // active packet
+    var act = null;
+    for (var i=0;i<PK.length;i++){ if (t >= PK[i][2] && t < PK[i][3]){ act = PK[i]; break; } }
+    ['ua','ap','ar'].forEach(function(k){ setCls(R.edges[k], 'edge' + (act && act[0]===k ? ' on-' + act[4] : '')); });
+    if (act){
+      var path = L.edges[act[0]].slice(); if (act[1] < 0) path.reverse();
+      var f = ease((t - act[2])/(act[3]-act[2]));
+      var p = pointAt(path, f);
+      setAttr(R.dot, 'cx', p[0].toFixed(1)); setAttr(R.dot, 'cy', p[1].toFixed(1));
+      setCls(R.dot, 'pkt ' + act[4]); setAttr(R.dot, 'opacity', '1');
+    } else setAttr(R.dot, 'opacity', '0');
+
+    // statuses
+    var us = latest(USER, t), as = latest(API, t);
+    setText(R.u1, us[1][0]); setText(R.u2, us[1][1] || '');
+    setCls(R.u1, 'status' + (us[2] ? ' bad' : '')); setCls(R.u2, 'status' + (us[2] ? ' bad' : ''));
+    setText(R.a1, as[1][0]); setText(R.a2, as[1][1] || '');
+    setCls(R.a1, 'status' + (as[2] ? ' bad' : '')); setCls(R.a2, 'status' + (as[2] ? ' bad' : ''));
+
+    // primary
+    var pc = 0; COMMIT.forEach(function(c){ if (t >= c) pc++; });
+    setText(R.pri.count, pc + ' 筆');
+    R.pri.cards.forEach(function(c, i){ setAttr(c, 'opacity', String(Math.max(0, Math.min(1, (t - COMMIT[i])/0.3)).toFixed(2))); });
+    setText(R.pri.posV, pc === 0 ? '—' : pc === 1 ? '10:02:31.120' : '第 ' + pc + ' 筆 INSERT');
+    setCls(R.pri.posV, 'pos-v' + (pc > 1 ? '' : ' mono'));
+    R.pri.tagG.setAttribute('display', 'none');
+
+    // queue → replica blocks
+    var rc = 0;
+    R.blocks.forEach(function(b, i){
+      if (t < COMMIT[i]){ setAttr(b, 'opacity', '0'); return; }
+      var qs = R.qslots[i], cs = R.rep.slots[i], u = ease((t - DRAIN[i]) / DRAIN_D);
+      if (t >= DRAIN[i] + DRAIN_D) rc++;
+      var x = qs.x + (cs.x - qs.x)*u, y = qs.y + (cs.y - qs.y)*u, w = qs.w + (cs.w - qs.w)*u, h = qs.h + (cs.h - qs.h)*u;
+      setAttr(b, 'x', x.toFixed(1)); setAttr(b, 'y', y.toFixed(1)); setAttr(b, 'width', w.toFixed(1)); setAttr(b, 'height', h.toFixed(1));
+      setAttr(b, 'opacity', String(Math.min(1, (t - COMMIT[i])/0.3).toFixed(2)));
+      setCls(b, 'blk' + (u >= 1 ? ' in' : ''));
+    });
+    setText(R.rep.count, rc + ' 筆');
+    var hot = t >= HOT0 && t < HOT1;
+    setCls(R.rep.box, 'box' + (hot ? ' hot' : ''));
+    setCls(R.rep.g, hot ? 'on-hot' : '');
+    setText(R.rep.posV, t >= CAUGHT ? '已追上' : t >= HOT0 ? '10:02:31.080' : '—');
+    setCls(R.rep.posV, 'pos-v' + (t >= HOT0 && t < CAUGHT ? ' mono' : ''));
+    R.rep.tagG.setAttribute('display', (t > 8 && t < CAUGHT) ? 'inline' : 'none');
+
+    // readout + chips
+    var s = stepAt(t);
+    if (s !== shown){
+      shown = s;
+      var S = STEPS[s];
+      rtag.textContent = S.tag; rtag.className = 't' + (S.hot ? ' hot' : '');
+      rclock.textContent = S.clock; rtext.textContent = S.text;
+      chips.forEach(function(c, i){ if (i === s) c.setAttribute('aria-current', 'step'); else c.removeAttribute('aria-current'); });
+    }
+  }
+
+  /* ---------- controller ---------- */
+  var rtag = document.getElementById('rtag'), rclock = document.getElementById('rclock'), rtext = document.getElementById('rtext');
+  var playBtn = document.getElementById('play'), scrub = document.getElementById('scrub');
+  var stepsBox = document.getElementById('steps');
+  var chips = STEPS.map(function(S, i){
+    var b = document.createElement('button'); b.type = 'button'; b.textContent = S.tag;
+    b.setAttribute('aria-label', '跳到 ' + S.tag); if (S.hot) b.className = 'hot';
+    b.addEventListener('click', function(){ seek((i+1)*STEP); });
+    stepsBox.appendChild(b); return b;
+  });
+  var t = REST, playing = false, visible = false, raf = 0, last = 0, acc = 0, autoplayed = false;
+
+  function paint(){ draw(t); scrub.value = String(t); }
+  function seek(x){ t = Math.max(0, Math.min(DUR, Number(x) || 0)); setPlaying(false); paint(); }
+  function setPlaying(p){
+    playing = p;
+    playBtn.textContent = p ? '❚❚ 暫停' : '▶ 播放';
+    playBtn.setAttribute('aria-label', p ? '暫停' : '播放');
+    arm();
+  }
+  function arm(){ if (playing && visible && !raf){ last = 0; raf = requestAnimationFrame(tick); } }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last)/1000) : 0; last = now;
+    if (reduce){
+      acc += dt;
+      if (acc >= 1.6){ acc = 0; t = Math.min(DUR, (stepAt(t + 0.01) + 1) * STEP); }
+    } else t = Math.min(DUR, t + dt);
+    paint();
+    if (t >= DUR){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  playBtn.addEventListener('click', function(){
+    if (playing){ setPlaying(false); return; }
+    if (t >= DUR) t = 0;
+    acc = 0; setPlaying(true);
+  });
+  scrub.addEventListener('input', function(){ seek(scrub.value); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target === scrub) return;
+    var s = stepAt(t), E = (s+1)*STEP, atEnd = Math.abs(t - E) < 1e-6;
+    if (e.key === 'ArrowRight'){ e.preventDefault(); seek(Math.min(DUR, atEnd ? E + STEP : E)); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(Math.max(STEP, atEnd ? E - STEP : s*STEP)); }
+    else if ((e.key === ' ' || e.key === 'Enter') && e.target === fig){ e.preventDefault(); playBtn.click(); }
+  });
+  document.getElementById('theme').addEventListener('click', function(){
+    var cur = document.documentElement.getAttribute('data-theme');
+    if (!cur) cur = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+
+  // layout by container width (read once per resize)
+  function pick(w){ return w >= 600 ? 'wide' : 'narrow'; }
+  function relayout(w){ var n = pick(w); if (n !== layoutName){ build(n); shown = -1; paint(); } }
+  relayout(stage.clientWidth || window.innerWidth);
+  if (window.ResizeObserver){
+    new ResizeObserver(function(entries){ relayout(entries[0].contentRect.width); }).observe(stage);
+  } else window.addEventListener('resize', function(){ relayout(stage.clientWidth); });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible && !reduce && !autoplayed){ autoplayed = true; t = 0; paint(); setPlaying(true); }
+      arm();
+    }, {rootMargin:'120px'}).observe(fig);
+  } else { visible = true; }
+
+  window.DUR = DUR;
+  window.seek = function(x){ seek(x); };
+  window.timeline = function(){ return {dur:DUR, rest:REST}; };
+  paint();
+})();
+</script>
+</body>
+</html>

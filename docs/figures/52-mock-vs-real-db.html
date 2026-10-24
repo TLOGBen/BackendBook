@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock 與真資料庫</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f5f6f8;
+    --ink: #1f2430;
+    --muted: #4f5d75;
+    --soft: #5f6878;
+    --rule: rgba(31, 36, 48, 0.14);
+    --rule-strong: rgba(31, 36, 48, 0.32);
+    --ticket-fill: #e3e9f4;
+    --ticket-stroke: #4f5d75;
+    --hot-fill: #fde68a;
+    --hot-stroke: #b45309;
+    --hot-ink: #78350f;
+    --ok: #1d6f43;
+    --ok-fill: #dcf1e4;
+    --btn: #2e5aa8;
+    --btn-ink: #ffffff;
+    --font: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans TC", "Microsoft JhengHei", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1e2129;
+      --panel: #272b36;
+      --ink: #e8eaf0;
+      --muted: #b4bccb;
+      --soft: #a3abbc;
+      --rule: rgba(232, 234, 240, 0.14);
+      --rule-strong: rgba(232, 234, 240, 0.34);
+      --ticket-fill: #343b4c;
+      --ticket-stroke: #a3abbc;
+      --hot-fill: #4a3410;
+      --hot-stroke: #f59e0b;
+      --hot-ink: #fde68a;
+      --ok: #7fd6a4;
+      --ok-fill: #173a29;
+      --btn: #7aa5ea;
+      --btn-ink: #10141c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1e2129;
+    --panel: #272b36;
+    --ink: #e8eaf0;
+    --muted: #b4bccb;
+    --soft: #a3abbc;
+    --rule: rgba(232, 234, 240, 0.14);
+    --rule-strong: rgba(232, 234, 240, 0.34);
+    --ticket-fill: #343b4c;
+    --ticket-stroke: #a3abbc;
+    --hot-fill: #4a3410;
+    --hot-stroke: #f59e0b;
+    --hot-ink: #fde68a;
+    --ok: #7fd6a4;
+    --ok-fill: #173a29;
+    --btn: #7aa5ea;
+    --btn-ink: #10141c;
+    color-scheme: dark;
+  }
+
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 13px/1.5 var(--font);
+    padding: 8px 16px 12px;
+    -webkit-text-size-adjust: 100%;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+
+  .fig { margin: 0; max-width: 960px; margin-inline: auto; outline: none; }
+  .fig:focus-visible { outline: 2px solid var(--btn); outline-offset: 4px; border-radius: 6px; }
+
+  button { font: inherit; color: inherit; }
+
+  /* top row: mode switch + theme */
+  .top { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
+  .mode { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 8px; overflow: hidden; }
+  .mode button {
+    min-height: 36px; padding: 6px 12px; border: 0; background: transparent; cursor: pointer;
+    font-size: 13px; font-weight: 600; color: var(--muted);
+  }
+  .mode button + button { border-left: 1px solid var(--rule-strong); }
+  .mode button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .mode button:focus-visible, .ctrl button:focus-visible, .steps button:focus-visible, .theme:focus-visible, .scrub:focus-visible {
+    outline: 2px solid var(--btn); outline-offset: 2px;
+  }
+  .theme {
+    min-height: 36px; min-width: 36px; border: 1px solid var(--rule-strong); border-radius: 8px;
+    background: transparent; cursor: pointer; font-size: 12px; color: var(--muted); padding: 0 10px;
+  }
+
+  /* step rail */
+  .steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+  .steps button {
+    width: 100%; min-height: 40px; padding: 4px 2px; cursor: pointer;
+    border: 1px solid var(--rule); border-radius: 6px; background: var(--panel);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+    color: var(--soft);
+  }
+  .steps .n { font-weight: 700; font-size: 13px; line-height: 1.2; }
+  .steps .l { font-family: var(--mono); font-size: 12px; line-height: 1.2; white-space: nowrap; }
+  .steps button.done { color: var(--ink); border-color: var(--rule-strong); }
+  .steps button.cur { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  .now { margin: 12px 0 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; min-height: 24px; }
+  .now .k { font-weight: 700; font-size: 15px; }
+  .now .t { font-size: 15px; font-weight: 600; }
+  .now code { font-family: var(--mono); font-size: 14px; }
+
+  /* lanes */
+  .lanes { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .lane { border: 1px solid var(--rule); border-radius: 10px; padding: 12px; background: var(--panel); min-width: 0; }
+  .lane-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .lane-name { font-size: 15px; font-weight: 700; }
+  .lane-tag { font-size: 12px; color: var(--soft); }
+
+  .stage { position: relative; height: 148px; margin-top: 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--rule); overflow: hidden; }
+
+  /* mock stage */
+  .void {
+    position: absolute; left: 12px; right: 12px; top: 12px; bottom: 12px;
+    border: 1.5px dashed var(--rule-strong); border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px;
+    color: var(--soft); font-size: 12px; text-align: center; padding: 8px;
+  }
+  .void .big { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .void code { font-family: var(--mono); font-size: 12px; }
+  .bubble {
+    position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+    padding: 4px 10px; border-radius: 999px; border: 1px solid var(--ticket-stroke);
+    background: var(--ticket-fill); color: var(--ink); font-size: 12px; white-space: nowrap;
+    max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis;
+  }
+  .bubble code { font-family: var(--mono); font-size: 12px; }
+
+  /* db stage: three zones */
+  .zones { position: absolute; inset: 0; display: grid; grid-template-columns: 34fr 28fr 38fr; }
+  .zone { position: relative; border-right: 1px solid var(--rule); display: flex; flex-direction: column; align-items: center; padding: 8px 2px 8px; }
+  .zone:last-child { border-right: 0; }
+  .zl { font-family: var(--mono); font-size: 12px; color: var(--soft); line-height: 1.2; text-align: center; }
+  .zf { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--muted); line-height: 1.25; }
+  .zf b { font-size: 16px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .zf.hot { color: var(--hot-ink); }
+  .zf.hot b { color: var(--hot-ink); }
+  .count-box { display: inline-block; padding: 0 6px; border-radius: 6px; border: 1.5px solid transparent; }
+  .count-box.hot { background: var(--hot-fill); border-color: var(--hot-stroke); }
+  .count-box.ok { background: var(--ok-fill); border-color: var(--ok); }
+  .pile { position: absolute; top: 32px; left: 50%; width: 44px; height: 28px; margin-left: -22px; }
+  .pile i { position: absolute; width: 44px; height: 28px; border-radius: 5px; border: 1.5px solid var(--ticket-stroke); background: var(--ticket-fill); }
+  .pile i:nth-child(1) { left: -4px; top: 6px; }
+  .pile i:nth-child(2) { left: -2px; top: 3px; }
+  .pile i:nth-child(3) { left: 0; top: 0; }
+
+  .ticket {
+    position: absolute; top: 32px; width: 44px; height: 28px; margin-left: -22px;
+    border-radius: 5px; border: 1.5px solid var(--ticket-stroke); background: var(--ticket-fill);
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    color: var(--ink); will-change: left, opacity;
+  }
+  .ticket.hot { background: var(--hot-fill); border-color: var(--hot-stroke); color: var(--hot-ink); border-width: 2px; }
+  .block {
+    position: absolute; top: 66px; transform: translateX(-50%); text-align: center;
+    font-size: 12px; font-weight: 700; color: var(--hot-ink); background: var(--bg);
+    border: 1.5px solid var(--hot-stroke); border-radius: 6px; padding: 1px 5px; white-space: nowrap; line-height: 1.25;
+  }
+  .lost {
+    position: absolute; top: 66px; width: 28%; left: 34%; text-align: center;
+    font-size: 12px; font-weight: 700; color: var(--hot-ink); line-height: 1.25; padding: 0 4px;
+  }
+  .lost span { background: var(--hot-fill); border: 1.5px solid var(--hot-stroke); border-radius: 4px; padding: 0 4px; display: inline-block; }
+
+  .act { margin-top: 10px; font-size: 13px; display: grid; }
+  .act > span { grid-area: 1 / 1; visibility: hidden; }
+  .act > span.on { visibility: visible; }
+  .act code { font-family: var(--mono); font-size: 12.5px; }
+
+  .checks { margin-top: 6px; display: grid; gap: 6px; }
+  .chk {
+    display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 8px;
+    border-radius: 6px; border: 1px dashed var(--rule-strong); color: var(--soft); font-size: 12px; background: var(--bg);
+  }
+  .chk .k { flex: 0 0 auto; font-weight: 600; }
+  .chk code { font-family: var(--mono); font-size: 12px; }
+  .chk.ok { border: 1.5px solid var(--ok); background: var(--ok-fill); color: var(--ok); }
+  .chk.hot { border: 2px solid var(--hot-stroke); background: var(--hot-fill); color: var(--hot-ink); }
+  .chk.na { border-style: solid; color: var(--muted); }
+  .chk .k, .chk .v { color: inherit; }
+
+  .readout { margin-top: 12px; font-size: 13px; color: var(--muted); display: flex; gap: 6px 14px; flex-wrap: wrap; justify-content: center; text-align: center; }
+  .readout b { font-size: 16px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .readout .hot b, .readout .hot { color: var(--hot-ink); }
+  .readout .hot { background: var(--hot-fill); border: 1.5px solid var(--hot-stroke); border-radius: 6px; padding: 0 6px; }
+
+  /* controls */
+  .ctrl { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
+  .ctrl button {
+    min-height: 36px; min-width: 40px; padding: 0 10px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--rule-strong); background: transparent; font-size: 13px; font-weight: 600;
+  }
+  .ctrl button.play { white-space: nowrap; background: var(--btn); color: var(--btn-ink); border-color: var(--btn); min-width: 72px; }
+  .scrub { flex: 1 1 auto; min-width: 60px; height: 36px; margin: 0; accent-color: var(--btn); cursor: pointer; }
+  .pos { font-size: 12px; color: var(--soft); white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; }
+
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  @media (max-width: 559px) {
+    .lanes { grid-template-columns: 1fr; gap: 10px; }
+    .steps .l { display: none; }
+    .steps button { min-height: 36px; }
+  }
+  @media (max-width: 359px) {
+    .mode button { padding: 6px 8px; font-size: 12px; }
+    .ctrl { gap: 6px; }
+    .ctrl button { min-width: 36px; padding: 0 8px; }
+    .ctrl button.play { min-width: 60px; }
+  }
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="mock-vs-real-db" data-dur="12" data-rest="11.5" tabindex="0"
+  aria-label="同一位會員領兩次券的測試，左邊用 MagicMock 假的 repo、右邊連真的 PostgreSQL，逐步對照。mock 沒有剩幾張券的狀態，只照設定回答；真的資料庫第二次扣掉的券沒有還回去，最後 remaining 是 98，測試失敗。可用左右方向鍵切換步驟、空白鍵播放或暫停。">
+
+  <div class="top">
+    <div class="mode" role="group" aria-label="切換程式寫法">
+      <button type="button" data-mode="broken" aria-pressed="true">出事的寫法</button>
+      <button type="button" data-mode="fixed" aria-pressed="false">修好的寫法</button>
+    </div>
+    <button type="button" class="theme" id="theme" aria-label="切換深色或淺色">深／淺</button>
+  </div>
+
+  <ol class="steps" id="steps">
+    <li><button type="button" data-s="1" aria-label="第 1 步：第一次 take_one()"><span class="n">1</span><span class="l">take_one</span></button></li>
+    <li><button type="button" data-s="2" aria-label="第 2 步：第一次 add_claim()"><span class="n">2</span><span class="l">add_claim</span></button></li>
+    <li><button type="button" data-s="3" aria-label="第 3 步：第二次 take_one()"><span class="n">3</span><span class="l">take_one</span></button></li>
+    <li><button type="button" data-s="4" aria-label="第 4 步：第二次 add_claim()"><span class="n">4</span><span class="l">add_claim</span></button></li>
+    <li><button type="button" data-s="5" aria-label="第 5 步：檢查回傳值"><span class="n">5</span><span class="l">回傳值</span></button></li>
+    <li><button type="button" data-s="6" aria-label="第 6 步：檢查剩幾張"><span class="n">6</span><span class="l">剩幾張</span></button></li>
+  </ol>
+
+  <div class="now"><span class="k" id="nowK">第 6 步</span><span class="t" id="nowT">檢查剩幾張</span></div>
+
+  <div class="lanes">
+    <section class="lane" aria-label="MagicMock 假的 repo">
+      <div class="lane-head"><span class="lane-name">MagicMock 假的 repo</span><span class="lane-tag">單元測試</span></div>
+      <div class="stage">
+        <div class="void">
+          <span class="big">沒有狀態</span>
+          <span>沒有 <code>remaining</code>、沒有 <code>coupon_claims</code></span>
+          <span>只會照測試事先設定的答案回答</span>
+        </div>
+        <div class="bubble" id="mBubble">沒有張數可以查</div>
+      </div>
+      <div class="act" id="mAct"></div>
+      <div class="checks">
+        <div class="chk" id="mRet"><span class="k">回傳值</span><span class="v">還沒檢查</span></div>
+        <div class="chk" id="mRem"><span class="k">剩幾張</span><span class="v">還沒檢查</span></div>
+      </div>
+    </section>
+
+    <section class="lane" aria-label="真的 PostgreSQL">
+      <div class="lane-head"><span class="lane-name">真的 PostgreSQL</span><span class="lane-tag">整合測試</span></div>
+      <div class="stage" id="dbStage">
+        <div class="zones">
+          <div class="zone">
+            <span class="zl">campaigns</span>
+            <div class="pile" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="zf"><span class="count-box" id="remBox">remaining<br><b id="rem">100</b></span></div>
+          </div>
+          <div class="zone">
+            <span class="zl">已扣出</span>
+            <div class="zf" id="outF">&nbsp;</div>
+          </div>
+          <div class="zone">
+            <span class="zl">coupon_claims</span>
+            <div class="zf">A 的筆數<br><b id="cc">0</b></div>
+          </div>
+        </div>
+        <div class="block" id="block" style="left:81%">唯一約束<br>✕ 擋下</div>
+        <div class="ticket" id="tk1" aria-hidden="true">券</div>
+        <div class="ticket" id="tk2" aria-hidden="true">券</div>
+        <div class="lost" id="lost"><span>扣掉的券<br>沒還</span></div>
+      </div>
+      <div class="act" id="dAct"></div>
+      <div class="checks">
+        <div class="chk" id="dRet"><span class="k">回傳值</span><span class="v">還沒檢查</span></div>
+        <div class="chk" id="dRem"><span class="k">剩幾張</span><span class="v">還沒檢查</span></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="readout" id="readout">
+    <span>會員 A 的領取紀錄 <b id="roC">1</b> 筆</span>
+    <span id="roLWrap">remaining 少了 <b id="roL">2</b> 張</span>
+  </div>
+
+  <div class="ctrl">
+    <button type="button" class="play" id="play" aria-label="播放">▶ 播放</button>
+    <button type="button" id="prev" aria-label="上一步">◀</button>
+    <button type="button" id="next" aria-label="下一步">▶</button>
+    <input class="scrub" id="scrub" type="range" min="0" max="12" step="0.05" value="11.5" aria-label="時間軸，拖動看每一步">
+    <span class="pos" id="pos">6／6</span>
+  </div>
+  <div class="sr" id="live" aria-live="polite"></div>
+</figure>
+
+<script>
+(() => {
+  const fig = document.getElementById('fig');
+  const DUR = Number(fig.dataset.dur);
+  const REST = Number(fig.dataset.rest);
+  const $ = (id) => document.getElementById(id);
+
+  const STEP_TITLE = [
+    '第一次 <code>take_one()</code>',
+    '第一次 <code>add_claim()</code>',
+    '第二次 <code>take_one()</code>',
+    '第二次 <code>add_claim()</code>',
+    '檢查回傳值',
+    '檢查剩幾張'
+  ];
+  const MOCK_BUBBLE = [
+    '照設定回 <code>True</code>',
+    '什麼都不做',
+    '照設定回 <code>True</code>',
+    '照設定丟 <code>DuplicateClaim</code>',
+    '回傳 <code>already_claimed</code>',
+    '沒有張數可以查'
+  ];
+  const MOCK_ACT = [
+    '<code>take_one()</code> 不會扣任何東西，只照設定回 <code>True</code>。',
+    '<code>add_claim()</code> 什麼都不做，也沒有地方記下「A 領過了」。',
+    '再問一次，還是照設定回 <code>True</code>。',
+    '照設定丟 <code>DuplicateClaim</code>，假裝資料庫擋下了重複。',
+    '函式回傳 <code>already_claimed</code>，跟預期一樣，通過。',
+    'mock 沒有張數可以查，所以看不出有券不見了。'
+  ];
+  const DB_ACT = {
+    broken: [
+      '<code>UPDATE</code> 扣 1 張：<code>remaining</code> 100 → 99，馬上提交。',
+      '<code>INSERT</code> 成功，<code>coupon_claims</code> 多 1 筆。',
+      '又扣 1 張：<code>remaining</code> 99 → 98，馬上提交。',
+      '唯一約束擋下，丟 <code>UniqueViolation</code>，轉成 <code>DuplicateClaim</code>。剛剛扣掉的券沒有還回去。',
+      '函式回傳 <code>already_claimed</code>，這一項通過。',
+      '查 <code>remaining</code> 是 98，期待 99：<code>assert 98 == 99</code>，測試失敗。'
+    ],
+    fixed: [
+      '在交易裡扣 1 張：<code>remaining</code> 100 → 99。',
+      '<code>INSERT</code> 成功，<code>coupon_claims</code> 多 1 筆，整筆提交。',
+      '在交易裡又扣 1 張：99 → 98，還沒提交。',
+      '唯一約束擋下 → 整筆回滾，扣掉的那張跟著退回：98 → 99。',
+      '函式回傳 <code>already_claimed</code>，這一項通過。',
+      '查 <code>remaining</code> 是 99，跟期待一樣，測試通過。'
+    ]
+  };
+
+  let mode = 'broken';
+  let t = REST;
+  let playing = false;
+  let visible = true;
+  let raf = 0;
+  let last = 0;
+  let lastStep = -1;
+  let lastKey = '';
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const ease = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+  const prog = (a, d) => ease(clamp((t - a) / d));
+  const lerp = (a, b, p) => a + (b - a) * p;
+  const stepOf = (tt) => Math.min(6, Math.floor(tt / 2) + 1);
+  const X = [17, 48, 81];
+
+  const el = {
+    nowK: $('nowK'), nowT: $('nowT'), mBubble: $('mBubble'), mAct: $('mAct'), dAct: $('dAct'),
+    rem: $('rem'), remBox: $('remBox'), cc: $('cc'), block: $('block'), tk1: $('tk1'), tk2: $('tk2'),
+    lost: $('lost'), mRet: $('mRet'), mRem: $('mRem'), dRet: $('dRet'), dRem: $('dRem'),
+    roC: $('roC'), roL: $('roL'), roLWrap: $('roLWrap'), scrub: $('scrub'), pos: $('pos'),
+    play: $('play'), live: $('live'), outF: $('outF')
+  };
+  const stepBtns = [...document.querySelectorAll('#steps button')];
+  // every caption variant sits in one grid cell, so the figure keeps one height across steps and modes
+  const mSpans = MOCK_ACT.map((h) => { const sp = document.createElement('span'); sp.innerHTML = h; el.mAct.appendChild(sp); return sp; });
+  const dSpans = [];
+  ['broken', 'fixed'].forEach((m) => DB_ACT[m].forEach((h, i) => { const sp = document.createElement('span'); sp.innerHTML = h; sp.dataset.m = m; sp.dataset.i = i; el.dAct.appendChild(sp); dSpans.push(sp); }));
+  const modeBtns = [...document.querySelectorAll('.mode button')];
+
+  function setChk(node, cls, v) {
+    const key = cls + '|' + v;
+    if (node.dataset.k === key) return;
+    node.dataset.k = key;
+    node.className = 'chk' + (cls ? ' ' + cls : '');
+    node.querySelector('.v').innerHTML = v;
+  }
+
+  function draw() {
+    const s = stepOf(t);
+    const fixed = mode === 'fixed';
+
+    // tickets
+    const p1a = prog(0, 0.9), p1b = prog(2, 0.9);
+    const x1 = p1b > 0 ? lerp(X[1], X[2], p1b) : lerp(X[0], X[1], p1a);
+    el.tk1.style.left = x1.toFixed(2) + '%';
+    el.tk1.style.opacity = clamp(t / 0.12).toFixed(3);
+
+    const p2a = prog(4, 0.9);
+    let x2 = lerp(X[0], X[1], p2a);
+    let o2 = clamp((t - 4) / 0.12);
+    if (fixed) {
+      const p2b = prog(6.2, 0.9);
+      if (p2b > 0) { x2 = lerp(X[1], X[0], p2b); o2 = 1 - clamp((t - 6.95) / 0.15); }
+    }
+    el.tk2.style.left = x2.toFixed(2) + '%';
+    el.tk2.style.opacity = o2.toFixed(3);
+    const lost = !fixed && t >= 6.4;
+    el.tk2.classList.toggle('hot', lost);
+    el.lost.style.opacity = lost ? clamp((t - 6.4) / 0.3).toFixed(3) : '0';
+    el.block.style.opacity = t >= 6.1 ? clamp((t - 6.1) / 0.25).toFixed(3) : '0';
+
+    // numbers
+    let rem = 100;
+    if (t >= 0.45) rem = 99;
+    if (t >= 4.45) rem = 98;
+    if (fixed && t >= 6.65) rem = 99;
+    const cc = t >= 2.9 ? 1 : 0;
+    if (el.rem.textContent !== String(rem)) el.rem.textContent = rem;
+    if (el.cc.textContent !== String(cc)) el.cc.textContent = cc;
+    const outCount = (t >= 0.45 && t < 2.9 ? 1 : 0) + (t >= 4.45 && (!fixed || t < 6.65) ? 1 : 0);
+    const outTxt = outCount ? (fixed && t >= 4.45 && t < 6.65 ? '交易中，未提交' : '已提交') : ' ';
+    if (el.outF.textContent !== outTxt) el.outF.textContent = outTxt;
+
+    const atEnd = t >= 10.3;
+    el.remBox.className = 'count-box' + (atEnd ? (fixed ? ' ok' : ' hot') : '');
+
+    // checks
+    if (t >= 8.3) {
+      setChk(el.mRet, 'ok', '<code>already_claimed</code> ✓ 通過');
+      setChk(el.dRet, 'ok', '<code>already_claimed</code> ✓ 通過');
+    } else {
+      setChk(el.mRet, '', '還沒檢查');
+      setChk(el.dRet, '', '還沒檢查');
+    }
+    if (atEnd) {
+      setChk(el.mRem, 'na', '沒有張數可以查');
+      setChk(el.dRem, fixed ? 'ok' : 'hot', fixed ? '99 ✓ 通過' : '98，期待 99 ✕ 失敗');
+    } else {
+      setChk(el.mRem, '', '還沒檢查');
+      setChk(el.dRem, '', '還沒檢查');
+    }
+
+    // readout
+    const lostN = 100 - rem;
+    if (el.roC.textContent !== String(cc)) el.roC.textContent = cc;
+    if (el.roL.textContent !== String(lostN)) el.roL.textContent = lostN;
+    el.roLWrap.classList.toggle('hot', lostN > cc);
+
+    // per-step text
+    const key = mode + s;
+    if (key !== lastKey) {
+      lastKey = key;
+      el.nowK.textContent = '第 ' + s + ' 步';
+      el.nowT.innerHTML = STEP_TITLE[s - 1];
+      el.mBubble.innerHTML = MOCK_BUBBLE[s - 1];
+      mSpans.forEach((sp, i) => sp.classList.toggle('on', i === s - 1));
+      dSpans.forEach((sp) => sp.classList.toggle('on', sp.dataset.m === mode && Number(sp.dataset.i) === s - 1));
+      el.pos.textContent = s + '／6';
+      stepBtns.forEach((b, i) => {
+        b.classList.toggle('cur', i === s - 1);
+        b.classList.toggle('done', i < s - 1);
+        if (i === s - 1) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+      });
+      const plain = (h) => h.replace(/<[^>]+>/g, '');
+      el.scrub.setAttribute('aria-valuetext', '第 ' + s + ' 步：' + plain(STEP_TITLE[s - 1]));
+    }
+    el.mBubble.style.opacity = (0.35 + 0.65 * clamp((t - (s - 1) * 2) / 0.3)).toFixed(3);
+    const sv = String(Math.round(t * 20) / 20);
+    if (el.scrub.value !== sv) el.scrub.value = sv;
+  }
+
+  function announce() {
+    const s = stepOf(t);
+    const plain = (h) => h.replace(/<[^>]+>/g, '');
+    el.live.textContent = '第 ' + s + ' 步，' + plain(STEP_TITLE[s - 1]) + '。mock：' + plain(MOCK_ACT[s - 1]) + ' PostgreSQL：' + plain(DB_ACT[mode][s - 1]);
+  }
+
+  function setPlayUI() {
+    el.play.textContent = playing ? '❚❚ 暫停' : '▶ 播放';
+    el.play.setAttribute('aria-label', playing ? '暫停' : '播放');
+  }
+
+  function loop(now) {
+    raf = 0;
+    if (!playing || !visible) return;
+    const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    t = Math.min(DUR, t + dt);
+    draw();
+    if (t >= DUR) { playing = false; setPlayUI(); return; }
+    raf = requestAnimationFrame(loop);
+  }
+  function arm() { if (!raf && playing && visible) { last = 0; raf = requestAnimationFrame(loop); } }
+
+  function play(from) {
+    if (typeof from === 'number') t = from;
+    else if (t >= DUR - 0.01) t = 0;
+    playing = true; setPlayUI(); draw(); arm();
+  }
+  function pause() { playing = false; setPlayUI(); if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+  function seek(tt) { pause(); t = clamp(Number(tt) || 0, 0, DUR); draw(); }
+  function gotoStep(s) {
+    s = Math.max(1, Math.min(6, s));
+    seek((s - 1) * 2 + 1.5);
+    announce();
+  }
+
+  window.seek = seek;
+  window.DUR = DUR;
+  window.timeline = () => ({ dur: DUR, rest: REST, t, mode });
+
+  el.play.addEventListener('click', () => { autoplayed = true; playing ? pause() : play(); });
+  $('prev').addEventListener('click', () => { autoplayed = true; gotoStep(stepOf(t) - (t - (stepOf(t) - 1) * 2 > 1.5 ? 0 : 1)); });
+  $('next').addEventListener('click', () => { autoplayed = true; gotoStep(stepOf(t) + (t - (stepOf(t) - 1) * 2 < 1.5 ? 0 : 1)); });
+  el.scrub.addEventListener('input', () => { autoplayed = true; seek(el.scrub.value); });
+  el.scrub.addEventListener('change', announce);
+  stepBtns.forEach((b) => b.addEventListener('click', () => { autoplayed = true; gotoStep(Number(b.dataset.s)); }));
+  modeBtns.forEach((b) => b.addEventListener('click', () => {
+    autoplayed = true;
+    mode = b.dataset.mode;
+    modeBtns.forEach((m) => m.setAttribute('aria-pressed', String(m === b)));
+    lastKey = '';
+    if (reduce.matches) { seek(REST); announce(); }
+    else play(6);
+  }));
+  $('theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    const cur = root.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  });
+  fig.addEventListener('keydown', (e) => {
+    if (e.target.matches('input')) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); $('next').click(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); $('prev').click(); }
+    else if (e.key === 'Home') { e.preventDefault(); autoplayed = true; seek(0); announce(); }
+    else if (e.key === 'End') { e.preventDefault(); autoplayed = true; seek(REST); announce(); }
+    else if (e.key === ' ' && !e.target.closest('button')) { e.preventDefault(); el.play.click(); }
+  });
+
+  // first view: play once from the start unless reduced motion; otherwise rest frame
+  let autoplayed = false;
+  const io = new IntersectionObserver((entries) => {
+    visible = entries.some((en) => en.isIntersecting);
+    if (visible && !autoplayed && !reduce.matches) { autoplayed = true; play(0); }
+    else if (visible) arm();
+  }, { rootMargin: '120px' });
+  io.observe(fig);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+  reduce.addEventListener('change', (e) => { if (e.matches) seek(REST); });
+
+  draw();
+  setPlayUI();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>購物車順序死鎖</title>
+<style>
+:root{
+  --bg:#ffffff; --card:#f8fafc; --ink:#1f2937; --muted:#4b5563; --rule:#cbd5e1; --mask:#ffffff;
+  --x:#1d4ed8; --x-tint:#eff6ff; --y:#7c3aed; --y-tint:#f5f3ff;
+  --hot-fill:#fde68a; --hot-line:#b45309; --hot-ink:#78350f; --hot-glow:rgba(180,83,9,.28);
+  --track:#e5e7eb; --btn:#f1f5f9; --btn-ink:#1f2937; --focus:#2563eb;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --card:#262a35; --ink:#e5e7eb; --muted:#a3abb9; --rule:#4b5263; --mask:#1e2129;
+    --x:#8fb4ff; --x-tint:#1f2a44; --y:#c4b5fd; --y-tint:#2c2545;
+    --hot-fill:#5a440f; --hot-line:#fbbf24; --hot-ink:#fde68a; --hot-glow:rgba(251,191,36,.30);
+    --track:#3a3f4c; --btn:#2d3240; --btn-ink:#e5e7eb; --focus:#8fb4ff;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --card:#262a35; --ink:#e5e7eb; --muted:#a3abb9; --rule:#4b5263; --mask:#1e2129;
+  --x:#8fb4ff; --x-tint:#1f2a44; --y:#c4b5fd; --y-tint:#2c2545;
+  --hot-fill:#5a440f; --hot-line:#fbbf24; --hot-ink:#fde68a; --hot-glow:rgba(251,191,36,.30);
+  --track:#3a3f4c; --btn:#2d3240; --btn-ink:#e5e7eb; --focus:#8fb4ff;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;}
+.fig{container:fig / inline-size;margin:0;padding:12px 16px 16px;box-sizing:border-box;max-width:960px;margin-inline:auto}
+.fig:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.stage svg{display:block;width:100%;height:auto}
+.stage-n{display:none;max-width:420px;margin-inline:auto}
+@container fig (max-width: 699px){
+  .stage-w{display:none}
+  .stage-n{display:block}
+}
+/* SVG classes */
+.t{fill:var(--ink)} .tm{fill:var(--muted)}
+.mono{font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Noto Sans Mono","Noto Sans TC",monospace}
+.b{font-weight:600}
+.card{fill:var(--card);stroke:var(--rule);stroke-width:1.5}
+.card.cx{stroke:var(--x);fill:var(--x-tint)}
+.card.cy{stroke:var(--y);fill:var(--y-tint)}
+.card.hot{fill:var(--hot-fill);stroke:var(--hot-line);stroke-width:2.5}
+.row{fill:var(--card);stroke:var(--rule);stroke-width:1.5}
+.row.hx{stroke:var(--x);stroke-width:2.5}
+.row.hy{stroke:var(--y);stroke-width:2.5}
+.lk{fill:none;stroke:var(--muted);stroke-width:2}
+.lk.hx{stroke:var(--x)} .lk.hy{stroke:var(--y)}
+.lkb{fill:var(--muted)} .lkb.hx{fill:var(--x)} .lkb.hy{fill:var(--y)}
+.ar{fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.ar.x{stroke:var(--x)} .ar.y{stroke:var(--y)}
+.ar.wait{stroke-dasharray:6 5}
+.mkx{fill:var(--x)} .mky{fill:var(--y)}
+.lab{font-size:13px;font-weight:500}
+.lab.x{fill:var(--x)} .lab.y{fill:var(--y)}
+.mask{fill:var(--mask)}
+.loop{fill:none;stroke:var(--hot-glow);stroke-width:14}
+.chip{fill:var(--hot-fill);stroke:var(--hot-line);stroke-width:2}
+.chipt{fill:var(--hot-ink);font-weight:600}
+.strip{fill:var(--card);stroke:var(--rule);stroke-width:1.5}
+.strip.hot{fill:var(--hot-fill);stroke:var(--hot-line);stroke-width:2}
+.trk{fill:var(--track)}
+.bar{fill:var(--x)} .bar.hot{fill:var(--hot-line)}
+.hot-ink{fill:var(--hot-ink)}
+/* controls */
+.ctrl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.btn{min-height:36px;min-width:36px;padding:0 12px;border-radius:8px;border:1px solid var(--rule);
+  background:var(--btn);color:var(--btn-ink);font:inherit;font-size:14px;cursor:pointer}
+.btn:focus-visible,.chipb:focus-visible,.rng:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.btn.play{font-weight:600}
+.rng{flex:1 1 140px;min-width:120px;height:32px;accent-color:var(--x)}
+.keys{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chipb{min-height:32px;padding:0 10px;border-radius:16px;border:1px solid var(--rule);background:transparent;
+  color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+.chipb[aria-current="step"]{background:var(--hot-fill);border-color:var(--hot-line);color:var(--hot-ink);font-weight:600}
+.readout{margin-top:10px;font-size:15px;line-height:1.6;min-height:3.2em}
+.readout .when{display:inline-block;font-weight:700;margin-right:6px}
+.readout code,.legend code{font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;font-size:.92em}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:6px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend svg{width:28px;height:10px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="deadlock-cart-order" data-dur="16.5" data-rest="8.4" tabindex="0"
+  aria-label="動畫：訂單 X 先鎖 101 再要 205，訂單 Y 先鎖 205 再要 101，兩邊互等繞成一個圈；PostgreSQL 等滿 deadlock_timeout 1 秒後中止 X，X 回 500，Y 完成並 COMMIT。">
+  <div class="stage stage-w" id="stage-w"></div>
+  <div class="stage stage-n" id="stage-n"></div>
+  <div class="ctrl" role="group" aria-label="播放控制">
+    <button class="btn play" id="play" type="button" aria-label="播放">▶ 播放</button>
+    <button class="btn" id="prev" type="button" aria-label="上一步">◀</button>
+    <button class="btn" id="next" type="button" aria-label="下一步">▶|</button>
+    <input class="rng" id="rng" type="range" min="0" max="16.5" step="0.05" value="8.4" aria-label="時間軸">
+    <button class="btn" id="theme" type="button" aria-label="切換深淺色">◐</button>
+  </div>
+  <div class="keys" id="keys" role="group" aria-label="跳到時間點"></div>
+  <div class="readout" id="readout" aria-live="polite"></div>
+  <div class="legend">
+    <span><svg viewBox="0 0 28 10" aria-hidden="true"><line x1="2" y1="5" x2="26" y2="5" stroke="currentColor" stroke-width="2.5"/></svg>實線：列鎖在誰手上</span>
+    <span><svg viewBox="0 0 28 10" aria-hidden="true"><line x1="2" y1="5" x2="26" y2="5" stroke="currentColor" stroke-width="2.5" stroke-dasharray="6 5"/></svg>虛線：在等哪一列</span>
+    <span>加鎖順序＝購物車順序（<code>for item in cart:</code>）</span>
+  </div>
+</figure>
+<script>
+(function(){
+  "use strict";
+  var DUR = 16.5, REST = 8.4;
+  var KEYS = [
+    {t:0.4,  k:"開始"}, {t:1.8, k:"T1"}, {t:3.8, k:"T2"}, {t:5.8, k:"T3"},
+    {t:8.4,  k:"T4"},   {t:10.6, k:"等 1 秒"}, {t:13.2, k:"T5"}, {t:16.3, k:"T6"}
+  ];
+  var SEG = [
+    {a:0,    w:"開始", s:"兩張訂單同時送出。X 的購物車是 101 → 205，Y 是 205 → 101，各自照購物車順序一列一列 <code>UPDATE</code>。"},
+    {a:1.0,  w:"T1", s:"訂單 X 先扣 101：<code>UPDATE</code> 成功，拿到 101 的列鎖。要到 <code>COMMIT</code> 才會放開。"},
+    {a:3.0,  w:"T2", s:"訂單 Y 的順序相反，先扣 205：<code>UPDATE</code> 成功，拿到 205 的列鎖。"},
+    {a:5.0,  w:"T3", s:"X 接著要扣 205，但 205 被 Y 鎖著，X 開始等。"},
+    {a:7.0,  w:"T4（T3 之後幾毫秒）", s:"Y 要扣 101，被 X 鎖著，也開始等。X 等 Y、Y 等 X，繞成一個圈，誰都不會先結束。"},
+    {a:9.0,  w:"等待中", s:"兩邊都卡住。PostgreSQL 不會馬上檢查，要等滿 <code>deadlock_timeout</code>（預設 1 秒）。使用者這時看到的是轉圈圈。"},
+    {a:12.2, w:"T5（T3 之後 1 秒）", s:"PostgreSQL 檢查發現圈，中止 X。X 整個回滾，放掉 101 的鎖。被中止的是哪一個並不保證。"},
+    {a:14.0, w:"T6", s:"X 的下單 API 回 500（<code>ERROR:  deadlock detected</code>）。Y 拿到 101 的列鎖，<code>UPDATE</code> 完成後 <code>COMMIT</code>，兩把鎖都放開。"}
+  ];
+
+  /* two layouts on a 4 px grid: wide 760×424, narrow 320×560 */
+  var L = {
+    w:{vb:"0 0 760 424", f:13, fb:14, ft:16,
+       X:{x:20,y:152,w:200,h:120,ly:[26,50,80,104]}, Y:{x:540,y:152,w:200,h:120,ly:[26,50,80,104]},
+       R1:{x:308,y:60,w:144,h:96}, R2:{x:308,y:260,w:144,h:96},
+       loop:{x:120,y:108,w:520,h:200},
+       p:{h101X:"M308 108 H128 Q120 108 120 116 V150", wX205:"M120 272 V300 Q120 308 128 308 H306",
+          h205Y:"M452 308 H632 Q640 308 640 300 V274", wY101:"M640 152 V116 Q640 108 632 108 H454",
+          h101Y:"M452 108 H632 Q640 108 640 116 V150"},
+       lab:{h101X:[214,96,"middle","在 X 手上"], wX205:[214,296,"middle","X 在等"],
+            h205Y:[546,296,"middle","在 Y 手上"], wY101:[546,96,"middle","Y 在等"], h101Y:[546,96,"middle","在 Y 手上"]},
+       chip:{x:260,y:192,w:240,h:32,lines:["X 等 Y、Y 等 X：繞成一個圈"]},
+       S:{x:140,y:368,w:480,h:48, st:[156,388], tag:[604,388,"end"], bar:[156,398,448,8]}},
+    n:{vb:"0 0 320 560", f:14, fb:14, ft:16,
+       X:{x:76,y:16,w:168,h:104,ly:[24,47,73,95]}, Y:{x:76,y:368,w:168,h:104,ly:[24,47,73,95]},
+       R1:{x:4,y:196,w:120,h:96}, R2:{x:196,y:196,w:120,h:96},
+       loop:{x:64,y:68,w:192,h:352},
+       p:{h101X:"M64 196 V76 Q64 68 72 68 H74", wX205:"M244 68 H248 Q256 68 256 76 V194",
+          h205Y:"M256 292 V412 Q256 420 248 420 H246", wY101:"M76 420 H72 Q64 420 64 412 V294",
+          h101Y:"M64 292 V412 Q64 420 72 420 H74"},
+       lab:{h101X:[74,152,"start","在 X 手上"], wX205:[246,152,"end","X 在等"],
+            h205Y:[246,340,"end","在 Y 手上"], wY101:[74,340,"start","Y 在等"], h101Y:[74,340,"start","在 Y 手上"]},
+       chip:{x:128,y:216,w:64,h:56,lines:["繞成","一個圈"]},
+       S:{x:4,y:496,w:312,h:56, st:[16,518], tag:[16,548,"start"], bar:[16,527,288,8]}}
+  };
+
+  function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
+  function build(id){
+    var g = L[id], o = [];
+    var P = id+"-";
+    o.push('<svg viewBox="'+g.vb+'" role="img" aria-labelledby="'+P+'title '+P+'desc">');
+    o.push('<title id="'+P+'title">購物車順序造成的死鎖</title>');
+    o.push('<desc id="'+P+'desc">訂單 X 與訂單 Y 用相反順序鎖 inventory 的 101 與 205 兩列，互相等待形成一個圈，PostgreSQL 等滿 1 秒後中止 X。</desc>');
+    o.push('<defs>'+
+      '<marker id="'+P+'mx" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mkx" d="M0 0 L10 5 L0 10 z"/></marker>'+
+      '<marker id="'+P+'my" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mky" d="M0 0 L10 5 L0 10 z"/></marker>'+
+      '</defs>');
+    var lp = g.loop;
+    o.push('<rect id="'+P+'loop" class="loop" x="'+lp.x+'" y="'+lp.y+'" width="'+lp.w+'" height="'+lp.h+'" rx="8" opacity="0"/>');
+    // connectors + labels
+    var ar = [["h101X","x",""],["wX205","x"," wait"],["h205Y","y",""],["wY101","y"," wait"],["h101Y","y",""]];
+    ar.forEach(function(a){
+      o.push('<path id="'+P+a[0]+'" class="ar '+a[1]+a[2]+'" d="'+g.p[a[0]]+'" marker-end="url(#'+P+'m'+a[1]+')" opacity="0"/>');
+    });
+    ar.forEach(function(a){
+      var lb = g.lab[a[0]], n = lb[3], wd = 0;
+      for (var i=0;i<n.length;i++) wd += /[　-￿]/.test(n[i]) ? 13 : 8;
+      var x0 = lb[2]==="middle" ? lb[0]-wd/2-4 : lb[2]==="end" ? lb[0]-wd-4 : lb[0]-4;
+      o.push('<g id="'+P+'L'+a[0]+'" opacity="0"><rect class="mask" x="'+x0+'" y="'+(lb[1]-14)+'" width="'+(wd+8)+'" height="18" rx="3"/>'+
+        '<text class="lab '+a[1]+'" x="'+lb[0]+'" y="'+lb[1]+'" text-anchor="'+lb[2]+'">'+esc(n)+'</text></g>');
+    });
+    // rows
+    [["R1","101 氣炸鍋"],["R2","205 咖啡機"]].forEach(function(r){
+      var b = g[r[0]];
+      o.push('<rect id="'+P+r[0]+'" class="row" x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx="8"/>');
+      o.push('<text class="tm mono" x="'+(b.x+12)+'" y="'+(b.y+24)+'" font-size="'+g.f+'">inventory</text>');
+      o.push('<text class="t b" x="'+(b.x+12)+'" y="'+(b.y+50)+'" font-size="'+g.ft+'">'+r[1]+'</text>');
+      var lx = b.x+12, ly = b.y+66;
+      o.push('<path id="'+P+r[0]+'s" class="lk" d="M'+(lx+2)+' '+(ly+5)+' V'+(ly+2)+' a4 4 0 0 1 8 0 V'+(ly+5)+'"/>');
+      o.push('<rect id="'+P+r[0]+'b" class="lkb" x="'+lx+'" y="'+(ly+5)+'" width="12" height="10" rx="2"/>');
+      o.push('<text id="'+P+r[0]+'t" class="t" x="'+(b.x+30)+'" y="'+(b.y+80)+'" font-size="'+g.fb+'">列鎖：沒有人</text>');
+    });
+    // order cards
+    [["X","訂單 X","購物車：101 → 205","cx"],["Y","訂單 Y","購物車：205 → 101","cy"]].forEach(function(c){
+      var b = g[c[0]], y = b.ly;
+      o.push('<rect id="'+P+c[0]+'" class="card '+c[3]+'" x="'+b.x+'" y="'+b.y+'" width="'+b.w+'" height="'+b.h+'" rx="8"/>');
+      o.push('<text class="t b" x="'+(b.x+12)+'" y="'+(b.y+y[0])+'" font-size="'+g.ft+'">'+c[1]+'</text>');
+      o.push('<text class="tm" x="'+(b.x+12)+'" y="'+(b.y+y[1])+'" font-size="'+g.fb+'">'+c[2]+'</text>');
+      o.push('<text id="'+P+c[0]+'st" class="t b" x="'+(b.x+12)+'" y="'+(b.y+y[2])+'" font-size="'+g.fb+'"></text>');
+      o.push('<text id="'+P+c[0]+'sq" class="tm mono" x="'+(b.x+12)+'" y="'+(b.y+y[3])+'" font-size="'+g.f+'"></text>');
+    });
+    // cycle chip
+    var ch = g.chip;
+    o.push('<g id="'+P+'chip" opacity="0"><rect class="chip" x="'+ch.x+'" y="'+ch.y+'" width="'+ch.w+'" height="'+ch.h+'" rx="6"/>');
+    ch.lines.forEach(function(t,i){
+      var cy = ch.y + ch.h/2 + 5 + (i - (ch.lines.length-1)/2)*20;
+      o.push('<text class="chipt" x="'+(ch.x+ch.w/2)+'" y="'+cy+'" text-anchor="middle" font-size="14">'+esc(t)+'</text>');
+    });
+    o.push('</g>');
+    // detector strip
+    var S = g.S, br = S.bar;
+    o.push('<rect id="'+P+'S" class="strip" x="'+S.x+'" y="'+S.y+'" width="'+S.w+'" height="'+S.h+'" rx="8"/>');
+    o.push('<text id="'+P+'Sst" class="t" x="'+S.st[0]+'" y="'+S.st[1]+'" font-size="'+g.fb+'"></text>');
+    o.push('<text class="tm mono" x="'+S.tag[0]+'" y="'+S.tag[1]+'" text-anchor="'+S.tag[2]+'" font-size="'+g.f+'">deadlock_timeout = 1 秒</text>');
+    o.push('<rect class="trk" x="'+br[0]+'" y="'+br[1]+'" width="'+br[2]+'" height="'+br[3]+'" rx="4"/>');
+    o.push('<rect id="'+P+'bar" class="bar" x="'+br[0]+'" y="'+br[1]+'" width="0" height="'+br[3]+'" rx="4"/>');
+    o.push('</svg>');
+    return o.join("");
+  }
+  document.getElementById("stage-w").innerHTML = build("w");
+  document.getElementById("stage-n").innerHTML = build("n");
+
+  /* cache node refs per layout */
+  var NODES = {};
+  ["w","n"].forEach(function(id){
+    var q = function(s){return document.getElementById(id+"-"+s);};
+    NODES[id] = {
+      loop:q("loop"), chip:q("chip"), X:q("X"), Y:q("Y"), Xst:q("Xst"), Xsq:q("Xsq"), Yst:q("Yst"), Ysq:q("Ysq"),
+      R1:q("R1"), R1s:q("R1s"), R1b:q("R1b"), R1t:q("R1t"), R2:q("R2"), R2s:q("R2s"), R2b:q("R2b"), R2t:q("R2t"),
+      S:q("S"), Sst:q("Sst"), bar:q("bar"), barW:L[id].S.bar[2],
+      ar:{}, lab:{}
+    };
+    ["h101X","wX205","h205Y","wY101","h101Y"].forEach(function(k){NODES[id].ar[k]=q(k); NODES[id].lab[k]=q("L"+k);});
+  });
+
+  function clamp(v){return v<0?0:v>1?1:v;}
+  function ease(v){v=clamp(v);return v*v*(3-2*v);}
+  /* visibility envelope: fade in over [a,a+d], out over [b,b+d] */
+  function env(t,a,b,d){d=d||0.5;var i=ease((t-a)/d);if(b==null)return i;return i*(1-ease((t-b)/d));}
+  function holder(t,which){
+    if (which===1){ if(t<1.0)return ""; if(t<12.4)return "x"; if(t<14.0)return ""; if(t<15.4)return "y"; return ""; }
+    if(t<3.0)return ""; if(t<15.4)return "y"; return "";
+  }
+  function setTxt(el,s){ if(el.textContent!==s) el.textContent=s; }
+  function setCls(el,c){ if(el.getAttribute("class")!==c) el.setAttribute("class",c); }
+  function setOp(el,v){ var s=v.toFixed(3); if(el.getAttribute("opacity")!==s) el.setAttribute("opacity",s); }
+
+  function state(t){
+    var s = {};
+    s.ar = {
+      h101X: env(t,1.0,12.2), wX205: env(t,5.0,12.2), h205Y: env(t,3.0,15.4),
+      wY101: env(t,7.0,14.0,0.4), h101Y: env(t,14.0,15.4)
+    };
+    s.loop = env(t,7.6,12.2,0.6);
+    s.h1 = holder(t,1); s.h2 = holder(t,2);
+    s.xHot = t>=12.2;
+    if (t<1.0){s.Xst="準備扣 101"; s.Xsq="BEGIN";}
+    else if (t<5.0){s.Xst="持有 101 的列鎖"; s.Xsq="UPDATE 101 ✓";}
+    else if (t<12.2){s.Xst="等 205（被 Y 鎖著）"; s.Xsq="UPDATE 205 …";}
+    else if (t<14.0){s.Xst="被中止，整個回滾"; s.Xsq="ROLLBACK";}
+    else {s.Xst="下單 API 回 500"; s.Xsq="deadlock detected";}
+    if (t<3.0){s.Yst="準備扣 205"; s.Ysq="BEGIN";}
+    else if (t<7.0){s.Yst="持有 205 的列鎖"; s.Ysq="UPDATE 205 ✓";}
+    else if (t<12.4){s.Yst="等 101（被 X 鎖著）"; s.Ysq="UPDATE 101 …";}
+    else if (t<14.0){s.Yst="等 101（鎖剛被放開）"; s.Ysq="UPDATE 101 …";}
+    else if (t<15.4){s.Yst="拿到 101 的列鎖"; s.Ysq="UPDATE 101 ✓";}
+    else {s.Yst="COMMIT 完成"; s.Ysq="COMMIT";}
+    /* detector: X waits from T3; T4 is a few ms later; T5 is T3 + 1 s */
+    var f = 0;
+    if (t>=5.0 && t<9.0) f = 0.02;
+    else if (t>=9.0) f = 0.02 + 0.98*clamp((t-9.0)/3.0);
+    s.bar = (t>=5.0 && t<12.2) || (t>=12.2 && t<14.0) ? f : 0;
+    s.barHot = t>=12.0 && t<14.0;
+    if (t<5.0) s.St = "還沒有人在等鎖";
+    else if (t<9.0) s.St = "X 已等幾毫秒，未滿 1 秒不檢查";
+    else if (t<12.0) s.St = "X 已等 "+(f).toFixed(1)+" 秒，未滿 1 秒不檢查";
+    else if (t<12.2) s.St = "滿 1 秒：檢查等待圖，發現圈";
+    else if (t<14.0) s.St = "中止 X（被中止的是哪一個不保證）";
+    else s.St = "圈解開了，沒有人在等鎖";
+    return s;
+  }
+
+  function paint(t){
+    var s = state(t);
+    ["w","n"].forEach(function(id){
+      var N = NODES[id];
+      for (var k in N.ar){ setOp(N.ar[k], s.ar[k]); setOp(N.lab[k], s.ar[k]); }
+      setOp(N.loop, s.loop); setOp(N.chip, s.loop);
+      setCls(N.X, s.xHot ? "card hot" : "card cx");
+      setTxt(N.Xst, s.Xst); setTxt(N.Xsq, s.Xsq); setTxt(N.Yst, s.Yst); setTxt(N.Ysq, s.Ysq);
+      setCls(N.Xst, s.xHot ? "hot-ink b" : "t b"); setCls(N.Xsq, s.xHot ? "hot-ink mono" : "tm mono");
+      [[N.R1,N.R1s,N.R1b,N.R1t,s.h1],[N.R2,N.R2s,N.R2b,N.R2t,s.h2]].forEach(function(r){
+        var h = r[4], hc = h ? " h"+h : "";
+        setCls(r[0],"row"+hc); setCls(r[1],"lk"+hc); setCls(r[2],"lkb"+hc);
+        setTxt(r[3], "列鎖："+(h==="x"?"X":h==="y"?"Y":"沒有人"));
+      });
+      setCls(N.S, s.barHot ? "strip hot" : "strip");
+      setTxt(N.Sst, s.St); setCls(N.Sst, s.barHot ? "hot-ink b" : "t");
+      var bw = (N.barW*s.bar).toFixed(1);
+      if (N.bar.getAttribute("width")!==bw) N.bar.setAttribute("width", bw);
+      setCls(N.bar, s.barHot ? "bar hot" : "bar");
+    });
+    // readout + key chips
+    var seg = SEG[0];
+    for (var i=0;i<SEG.length;i++) if (t>=SEG[i].a) seg = SEG[i];
+    if (readout._seg !== seg){ readout._seg = seg; readout.innerHTML = '<span class="when">'+seg.w+'</span>'+seg.s; }
+    var cur = 0;
+    for (var j=0;j<KEYS.length;j++) if (t>=KEYS[j].t-0.25) cur = j;
+    keyBtns.forEach(function(b,j){ if (j===cur) b.setAttribute("aria-current","step"); else b.removeAttribute("aria-current"); });
+    var rv = t.toFixed(2);
+    if (rng.value !== rv && document.activeElement !== rng) rng.value = rv;
+  }
+
+  /* controls */
+  var fig = document.querySelector(".fig");
+  var readout = document.getElementById("readout");
+  var rng = document.getElementById("rng");
+  var playBtn = document.getElementById("play");
+  var keysBox = document.getElementById("keys");
+  var keyBtns = KEYS.map(function(k){
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "chipb"; b.textContent = k.k;
+    b.addEventListener("click", function(){ seek(k.t); });
+    keysBox.appendChild(b); return b;
+  });
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var T = REST, playing = false, visible = true, raf = 0, last = 0, rmTimer = 0;
+
+  function setPlaying(p){
+    playing = p;
+    playBtn.textContent = p ? "❚❚ 暫停" : "▶ 播放";
+    playBtn.setAttribute("aria-label", p ? "暫停" : "播放");
+    if (!p){ if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(rmTimer); rmTimer = 0; }
+    else arm();
+  }
+  function arm(){
+    if (!playing || !visible) return;
+    if (reduce){
+      if (rmTimer) return;
+      rmTimer = setTimeout(function stepper(){
+        rmTimer = 0;
+        var n = nextKey(T);
+        if (n == null){ setPlaying(false); return; }
+        T = n; paint(T);
+        if (playing && visible) rmTimer = setTimeout(stepper, 2200);
+      }, 600);
+      return;
+    }
+    if (raf) return;
+    last = 0;
+    raf = requestAnimationFrame(tick);
+  }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    if (last) T = Math.min(DUR, T + Math.min(0.05,(now-last)/1000));
+    last = now;
+    paint(T);
+    if (T >= DUR){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function nextKey(t){ for (var i=0;i<KEYS.length;i++) if (KEYS[i].t > t+0.01) return KEYS[i].t; return null; }
+  function prevKey(t){ for (var i=KEYS.length-1;i>=0;i--) if (KEYS[i].t < t-0.01) return KEYS[i].t; return KEYS[0].t; }
+  function seek(t){ setPlaying(false); T = Math.max(0, Math.min(DUR, +t)); paint(T); return T; }
+
+  playBtn.addEventListener("click", function(){
+    if (playing){ setPlaying(false); return; }
+    if (T >= DUR - 0.05) T = 0;
+    setPlaying(true);
+  });
+  document.getElementById("prev").addEventListener("click", function(){ seek(prevKey(T)); });
+  document.getElementById("next").addEventListener("click", function(){ var n = nextKey(T); seek(n==null?DUR:n); });
+  rng.addEventListener("input", function(){ seek(parseFloat(rng.value)); });
+  fig.addEventListener("keydown", function(e){
+    if (e.target !== fig) return;
+    if (e.key === "ArrowRight"){ var n = nextKey(T); seek(n==null?DUR:n); e.preventDefault(); }
+    else if (e.key === "ArrowLeft"){ seek(prevKey(T)); e.preventDefault(); }
+    else if (e.key === " " || e.key === "Enter"){ playBtn.click(); e.preventDefault(); }
+  });
+  document.getElementById("theme").addEventListener("click", function(){
+    var r = document.documentElement;
+    var dark = getComputedStyle(r).colorScheme.indexOf("dark") >= 0;
+    r.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) arm(); else { if (raf) cancelAnimationFrame(raf); raf = 0; clearTimeout(rmTimer); rmTimer = 0; }
+    }, {rootMargin:"120px"}).observe(fig);
+  }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:KEYS.map(function(k){return k.t;})}; };
+  paint(T);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Webhook 重送蓋回狀態</title>
+<style>
+:root{
+  --paper:#f5f5f5; --paper-2:#e9e9ec; --card:#ffffff; --ink:#2d3142; --ink-strong:#111111;
+  --muted:#4f5d75; --soft:#5a6580; --rule:rgba(45,49,66,.16); --rule-solid:#a9adb8;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1f2230; --paper-2:#2d3142; --card:#272b3a; --ink:#f5f5f5; --ink-strong:#ffffff;
+    --muted:#bfc0c0; --soft:#a3acc0; --rule:rgba(245,245,245,.16); --rule-solid:#6b7186;
+    --hot-fill:#5c3d0e; --hot-stroke:#f59e0b; --hot-ink:#fef3c7;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1f2230; --paper-2:#2d3142; --card:#272b3a; --ink:#f5f5f5; --ink-strong:#ffffff;
+  --muted:#bfc0c0; --soft:#a3acc0; --rule:rgba(245,245,245,.16); --rule-solid:#6b7186;
+  --hot-fill:#5c3d0e; --hot-stroke:#f59e0b; --hot-ink:#fef3c7;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;}
+.fig{box-sizing:border-box;max-width:760px;margin:0 auto;padding:12px 16px 14px;outline:none}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--hot-stroke) inset;border-radius:8px}
+.fig *{box-sizing:border-box}
+.fig-stage{display:block;width:100%;height:auto}
+.fig-stage text{font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif}
+.fig-stage .mono{font-family:ui-monospace,"SF Mono","Cascadia Mono",Consolas,"Noto Sans Mono CJK TC",monospace}
+.fig-read{display:flex;gap:10px;align-items:baseline;margin:8px 0 10px;min-height:3em;font-size:15px;line-height:1.5}
+.fig-read b{flex:none;font-size:15px;color:var(--hot-stroke);font-variant-numeric:tabular-nums;min-width:7.4em;white-space:nowrap}
+.fig-read span{flex:1;min-width:0}
+.fig-ctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fig-ctrl button{appearance:none;font:inherit;font-size:14px;min-height:36px;min-width:36px;padding:6px 12px;border-radius:8px;
+  border:1px solid var(--rule-solid);background:var(--card);color:var(--ink);cursor:pointer}
+.fig-ctrl button:hover{border-color:var(--ink)}
+.fig-ctrl .play{font-weight:600}
+.fig-ctrl .theme{margin-left:auto}
+.fig-legend{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--soft)}
+.fig-legend i{display:inline-block;width:14px;height:14px;border-radius:3px;background:var(--hot-fill);border:2px solid var(--hot-stroke)}
+.fig-track{margin-top:10px}
+.fig-track input{width:100%;margin:0;accent-color:var(--hot-stroke);height:28px;cursor:pointer}
+.fig-ticks{display:flex;margin-top:2px}
+.fig-ticks span{flex:1;text-align:center;font-size:12px;color:var(--soft);font-variant-numeric:tabular-nums;
+  border-top:2px solid var(--rule);padding-top:3px;white-space:nowrap}
+.fig-ticks span+span{border-left:1px solid var(--rule)}
+.fig-ticks span.on{color:var(--ink);font-weight:700;border-top-color:var(--hot-stroke)}
+@media (max-width:420px){
+  .fig{padding:10px 16px 12px}
+  .fig-read{flex-direction:column;gap:2px;min-height:4.6em}
+  .fig-ctrl{gap:6px}
+  .fig-ctrl button{padding:6px 9px}
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="webhook-retry-overwrite" data-dur="14.4" data-rest="14.4" tabindex="0"
+  aria-label="Webhook 重送事故的動畫：handler 同步呼叫發票平台要 20 秒以上，金流商等滿 10 秒沒收到 2xx 就判定失敗、5 分鐘後重送同一個 evt_A；中間的退款 evt_B 把 ord_88 改成 refunded，遲到的 evt_A 又把它蓋回 paid，最後開出 3 張發票、寄出 3 封感謝信。">
+
+  <svg class="fig-stage" viewBox="0 0 600 448" role="img" aria-labelledby="webhook-retry-overwrite-title webhook-retry-overwrite-desc">
+    <title id="webhook-retry-overwrite-title">Webhook 重送：遲到的 evt_A 蓋回 paid，發票越開越多</title>
+    <desc id="webhook-retry-overwrite-desc">金流商、handler、發票平台三方之間的事件與回應，以及訂單 ord_88 的 status、已開發票張數、感謝信封數隨時間 T1 到 T8 的變化。</desc>
+    <defs>
+      <marker id="wro-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--rule-solid)"/>
+      </marker>
+    </defs>
+    <!-- lifeline stubs and wires (drawn before boxes) -->
+    <g stroke="var(--rule-solid)" stroke-width="2" fill="none">
+      <line x1="96" y1="144" x2="96" y2="252" stroke-dasharray="4 5"/>
+      <line x1="300" y1="144" x2="300" y2="252" stroke-dasharray="4 5"/>
+      <line x1="504" y1="144" x2="504" y2="252" stroke-dasharray="4 5"/>
+      <line x1="96" y1="184" x2="512" y2="184" marker-end="url(#wro-arrow)"/>
+      <line x1="504" y1="236" x2="88" y2="236" marker-end="url(#wro-arrow)"/>
+    </g>
+    <!-- broken connection mark on the response wire -->
+    <g id="wro-cut" opacity="0" transform="translate(196,236)">
+      <circle r="13" fill="var(--hot-fill)" stroke="var(--hot-stroke)" stroke-width="2"/>
+      <path d="M-5,-5 L5,5 M5,-5 L-5,5" stroke="var(--hot-stroke)" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <g id="wro-actors"></g>
+    <g id="wro-cards"></g>
+    <g id="wro-packets"></g>
+  </svg>
+
+  <div class="fig-read" aria-live="polite"><b id="wro-sec">T8 09:10 之後</b><span id="wro-cap"></span></div>
+
+  <div class="fig-ctrl">
+    <button type="button" class="play" aria-label="播放">▶ 播放</button>
+    <button type="button" class="prev" aria-label="上一步">◀</button>
+    <button type="button" class="next" aria-label="下一步">▶|</button>
+    <span class="fig-legend"><i aria-hidden="true"></i>琥珀色＝出事的地方</span>
+    <button type="button" class="theme" aria-label="切換深淺色">◐</button>
+  </div>
+  <div class="fig-track">
+    <input type="range" min="0" max="14.4" step="0.01" value="14.4" aria-label="時間軸">
+    <div class="fig-ticks" aria-hidden="true"></div>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var S = 1.8;                        // playback seconds per step
+  var CX = {c:96, a:300, p:504};      // lifeline centres: 金流商, handler, 發票平台
+  var WIRE = {req:184, res:236};
+  var CUT_X = 196;
+  var fig = document.querySelector(".fig");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- facts: the article's incident timeline (T1–T8) ----
+  var STEPS = [
+    { sec:"T1 09:00:00", tick:"T1",
+      cap:"金流商送出 evt_A（扣款成功）第 1 次。handler 把 status 改成 paid，開始呼叫發票平台；平台被打爆，要 20 秒以上才回來。",
+      pre:{c:["送出 evt_A","等 10 秒"]},
+      pk:[{f:"c",t:"a",l:"evt_A #1",on:{a:["改成 paid","呼叫發票平台"],status:"paid",note:["evt_A 改的",""]}},
+          {f:"a",t:"p",l:"開發票",on:{p:["要 20 秒以上","被打爆"],hot:["p"]}}] },
+    { sec:"T2 09:00:10", tick:"T2",
+      cap:"金流商等滿 10 秒沒收到 2xx，判定失敗，排 5 分鐘後重送，斷開連線。handler 還在等發票平台。",
+      pre:{c:["等滿 10 秒","判定失敗"],a:["還在等","發票平台"],cut:true,hot:["c","p"]},
+      pk:[] },
+    { sec:"T3 09:00:22", tick:"T3",
+      cap:"發票開好、感謝信寄出，handler 回 200，但連線已斷，對方已經不在了。",
+      pre:{c:["連線已斷","沒收到 200"],cut:true},
+      pk:[{f:"p",t:"a",l:"發票開好",on:{p:["發票開好",""],a:["開票、寄信","回 200"],inv:1,mail:1}},
+          {f:"a",t:"c",l:"200",dead:1}] },
+    { sec:"T4 09:03:00", tick:"T4",
+      cap:"客人申請退款，金流商送出 evt_B（已退款）。handler 把 status 改成 refunded，很快就回 200。",
+      pre:{c:["送出 evt_B","已退款"],p:["",""],cut:false},
+      pk:[{f:"c",t:"a",l:"evt_B",on:{a:["改 refunded","很快回 200"],status:"refunded",note:["evt_B 改的",""]}},
+          {f:"a",t:"c",l:"200",on:{c:["evt_B","收到 200"]}}] },
+    { sec:"T5 09:05:00", tick:"T5",
+      cap:"金流商重送 evt_A 第 2 次。handler 沒看事件 ID，又把 status 改成 paid，蓋掉 T4 的 refunded，又開始呼叫發票平台。",
+      pre:{c:["重送 evt_A","第 2 次"],hot:["c"]},
+      pk:[{f:"c",t:"a",l:"evt_A #2",hot:1,on:{a:["又改成 paid","又呼叫發票"],status:"paid",over:true,note:["遲到的 evt_A","蓋回 paid ❌"],hot:["a","status"]}},
+          {f:"a",t:"p",l:"開發票",on:{p:["要 20 秒以上","被打爆"],hot:["p"]}}] },
+    { sec:"T6 09:05:10", tick:"T6",
+      cap:"又等滿 10 秒，金流商判定失敗，再排下一次。handler 還在等發票平台。",
+      pre:{c:["又等滿 10 秒","又判定失敗"],a:["還在等","發票平台"],cut:true,hot:["c","p"]},
+      pk:[] },
+    { sec:"T7 09:05:21", tick:"T7",
+      cap:"連線已斷。handler 開出第 2 張發票、寄出第 2 封感謝信。",
+      pre:{c:["連線已斷","沒收到 200"],cut:true},
+      pk:[{f:"p",t:"a",l:"發票開好",hot:1,on:{p:["第 2 張開好",""],a:["第 2 張發票","第 2 封信"],inv:2,mail:2,hot:["inv","mail"]}},
+          {f:"a",t:"c",l:"200",dead:1}] },
+    { sec:"T8 09:10 之後", tick:"T8",
+      cap:"重送 evt_A 第 3 次，T5 到 T7 再重演一次：3 張發票、3 封一模一樣的感謝信，已退款的訂單卻顯示已付款。",
+      pre:{c:["重送 evt_A","第 3 次"],cut:false,hot:["c"]},
+      pk:[{f:"c",t:"a",l:"evt_A #3",hot:1,on:{a:["T5 到 T7","再重演一次"],status:"paid",hot:["a"]}},
+          {f:"p",t:"a",l:"發票開好",hot:1,on:{p:["第 3 張開好",""],inv:3,mail:3,hot:["inv","mail"]}}] }
+  ];
+  var N = STEPS.length;
+
+  // ---- build the SVG once ----
+  function el(name, attrs, parent, text){
+    var n = document.createElementNS(NS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  var actors = {};
+  var gA = document.getElementById("wro-actors");
+  [["c","金流商",8],["a","handler",212],["p","發票平台",416]].forEach(function(r){
+    var g = el("g", {}, gA);
+    var box = el("rect", {x:r[2], y:8, width:176, height:136, rx:8, "stroke-width":2}, g);
+    el("text", {x:r[2]+88, y:50, "text-anchor":"middle", "font-size":28, "font-weight":600, fill:"var(--ink)", "class":r[0]==="a"?"mono":""}, g, r[1]);
+    el("line", {x1:r[2]+20, y1:66, x2:r[2]+156, y2:66, stroke:"var(--rule)", "stroke-width":2}, g);
+    var s1 = el("text", {x:r[2]+88, y:100, "text-anchor":"middle", "font-size":26}, g);
+    var s2 = el("text", {x:r[2]+88, y:132, "text-anchor":"middle", "font-size":26}, g);
+    actors[r[0]] = {box:box, s1:s1, s2:s2};
+  });
+
+  var gC = document.getElementById("wro-cards");
+  function card(x, title, mono){
+    var g = el("g", {}, gC);
+    var box = el("rect", {x:x, y:272, width:176, height:168, rx:8, "stroke-width":2}, g);
+    var tt = el("text", {x:x+88, y:308, "text-anchor":"middle", "font-size":26, "font-weight":600}, g, title);
+    var v = el("text", {x:x+88, y:362, "text-anchor":"middle", "font-size":mono?32:40, "font-weight":700, "class":mono?"mono":""}, g);
+    var n1 = el("text", {x:x+88, y:398, "text-anchor":"middle", "font-size":26}, g);
+    var n2 = el("text", {x:x+88, y:430, "text-anchor":"middle", "font-size":26}, g);
+    return {box:box, tt:tt, v:v, n1:n1, n2:n2};
+  }
+  var cStatus = card(8, "訂單 ord_88", true);
+  var cInv = card(212, "已開發票", false);
+  var cMail = card(416, "感謝信", false);
+  var cutG = document.getElementById("wro-cut");
+
+  var gP = document.getElementById("wro-packets");
+  var pills = [0,1].map(function(){
+    var g = el("g", {opacity:0}, gP);
+    var r = el("rect", {x:0, y:-20, height:40, rx:20, "stroke-width":2}, g);
+    var tip = el("path", {d:"", "stroke-width":0}, g);
+    var t = el("text", {x:0, y:9, "text-anchor":"middle", "font-size":26, "font-weight":600}, g);
+    return {g:g, r:r, tip:tip, t:t, w:0, label:null};
+  });
+  function textW(s){ var w = 0; for (var i=0;i<s.length;i++){ w += /[⺀-￿]/.test(s[i]) ? 26 : (s[i] === " " ? 8 : 15.6); } return w; }
+
+  // ---- state at time t ----
+  function initial(){
+    return {c:["",""], a:["等事件進來",""], p:["平常 1 秒",""], status:"—", note:["",""], over:false, inv:0, mail:0, cut:false, hot:[]};
+  }
+  function apply(st, patch){
+    for (var k in patch){ if (k !== "hot") st[k] = patch[k]; }
+    if (patch.hot) st.hot = st.hot.concat(patch.hot);
+  }
+  function windows(n){ return n === 1 ? [[0.06,0.5]] : [[0.04,0.34],[0.38,0.68]]; }
+  function ease(x){ return x<.5 ? 4*x*x*x : 1-Math.pow(-2*x+2,3)/2; }
+
+  function stateAt(t){
+    var u = Math.max(0, Math.min(t / S, N - 1e-6));
+    var k = Math.floor(u), p = u - k;
+    var st = initial();
+    for (var i=0;i<k;i++){ apply(st, STEPS[i].pre); STEPS[i].pk.forEach(function(q){ if (q.on) apply(st, q.on); }); }
+    st.hot = [];
+    var cur = STEPS[k];
+    apply(st, cur.pre);
+    var w = windows(cur.pk.length), packets = [];
+    cur.pk.forEach(function(q, j){
+      var a = w[j][0], b = w[j][1];
+      if (p < a) { packets.push(null); return; }
+      var f = Math.min(1, (p - a) / (b - a));
+      packets.push({q:q, f:ease(f), arrived:f >= 1});
+      if (f >= 1 && q.on) apply(st, q.on);
+    });
+    // an arrived packet leaves the wire once the next one sets off on the same wire (they share an end)
+    if (packets[0] && packets[1] && (CX[packets[0].q.t] > CX[packets[0].q.f]) === (CX[packets[1].q.t] > CX[packets[1].q.f])) packets[0] = null;
+    st.k = k; st.packets = packets;
+    return st;
+  }
+
+  // ---- paint ----
+  var secEl = document.getElementById("wro-sec"), capEl = document.getElementById("wro-cap");
+  var ticks = fig.querySelector(".fig-ticks"), range = fig.querySelector('input[type="range"]');
+  var lastK = -1;
+  function setText(n, s){ if (n.textContent !== s) n.textContent = s; }
+  function paintBox(rect, hot){
+    rect.setAttribute("fill", hot ? "var(--hot-fill)" : "var(--card)");
+    rect.setAttribute("stroke", hot ? "var(--hot-stroke)" : "var(--rule-solid)");
+  }
+  function ink(hot){ return hot ? "var(--hot-ink)" : "var(--ink)"; }
+  function soft(hot){ return hot ? "var(--hot-ink)" : "var(--soft)"; }
+  function paintCard(C, hot, v, n1, n2){
+    paintBox(C.box, hot);
+    C.tt.setAttribute("fill", ink(hot));
+    setText(C.v, v); C.v.setAttribute("fill", ink(hot));
+    setText(C.n1, n1); setText(C.n2, n2);
+    C.n1.setAttribute("fill", soft(hot)); C.n2.setAttribute("fill", soft(hot));
+  }
+
+  function paint(t){
+    var st = stateAt(t);
+    ["c","a","p"].forEach(function(id){
+      var A = actors[id], hot = st.hot.indexOf(id) >= 0;
+      paintBox(A.box, hot);
+      setText(A.s1, st[id][0]); setText(A.s2, st[id][1]);
+      A.s1.setAttribute("fill", ink(hot)); A.s2.setAttribute("fill", ink(hot));
+    });
+    cutG.setAttribute("opacity", st.cut ? 1 : 0);
+    // result cards: once overwritten / duplicated, they stay amber
+    paintCard(cStatus, st.over, st.status, st.note[0], st.note[1]);
+    var invHot = st.inv >= 2;
+    paintCard(cInv, invHot, st.inv + " 張", st.inv >= 2 ? "evt_A 送幾次" : (st.inv ? "" : "還沒開"), st.inv >= 2 ? "就開幾張" : "");
+    var mailHot = st.mail >= 2;
+    paintCard(cMail, mailHot, st.mail + " 封", st.mail >= 2 ? "客人收到" : (st.mail ? "" : "還沒寄"), st.mail >= 2 ? st.mail + " 封一樣的" : "");
+    // packets
+    pills.forEach(function(P, j){
+      var pk = st.packets[j];
+      if (!pk){
+        P.g.setAttribute("opacity", 0);
+        if (P.label !== null){
+          P.label = null; P.t.textContent = ""; P.g.removeAttribute("transform");
+          ["fill","stroke","stroke-dasharray","width"].forEach(function(a){ P.r.removeAttribute(a); });
+          P.r.setAttribute("x", 0); P.tip.setAttribute("d", ""); P.tip.removeAttribute("fill");
+          P.t.removeAttribute("fill"); P.t.setAttribute("class", "");
+        }
+        return;
+      }
+      var q = pk.q, right = CX[q.t] > CX[q.f];
+      if (P.label !== q.l){
+        P.label = q.l; P.w = textW(q.l) + 32;
+        P.r.setAttribute("x", -P.w/2); P.r.setAttribute("width", P.w);
+        P.t.textContent = q.l;
+      }
+      var h = P.w/2;
+      P.tip.setAttribute("d", right ? "M"+(h-2)+",-9 L"+(h+10)+",0 L"+(h-2)+",9 z" : "M"+(-h+2)+",-9 L"+(-h-10)+",0 L"+(-h+2)+",9 z");
+      // a reply on a dead connection only gets as far as the break
+      var toX = q.dead ? CUT_X + h + 16 : CX[q.t];
+      var x = CX[q.f] + (toX - CX[q.f]) * pk.f;
+      var y = right ? WIRE.req : WIRE.res;
+      P.g.setAttribute("transform", "translate(" + x.toFixed(1) + "," + y + ")");
+      var hot = !!q.hot;
+      P.r.setAttribute("fill", hot ? "var(--hot-fill)" : "var(--card)");
+      P.r.setAttribute("stroke", hot ? "var(--hot-stroke)" : "var(--muted)");
+      P.r.setAttribute("stroke-dasharray", q.dead && pk.arrived ? "6 5" : "none");
+      P.tip.setAttribute("fill", hot ? "var(--hot-stroke)" : "var(--muted)");
+      P.t.setAttribute("fill", ink(hot));
+      P.t.setAttribute("class", /^[#A-Za-z0-9]/.test(q.l) ? "mono" : "");
+      P.g.setAttribute("opacity", q.dead && pk.arrived ? 0.4 : 1);
+    });
+    if (st.k !== lastK){
+      setText(secEl, STEPS[st.k].sec); setText(capEl, STEPS[st.k].cap);
+      var spans = ticks.children;
+      for (var i=0;i<spans.length;i++) spans[i].className = i === st.k ? "on" : "";
+      lastK = st.k;
+    }
+    range.value = t;
+  }
+
+  // ---- controller ----
+  var DUR = N * S, REST = DUR;
+  var t = 0, playing = false, raf = 0, visible = true, lastTs = 0;
+  STEPS.forEach(function(s){
+    var sp = document.createElement("span");
+    sp.textContent = s.tick;
+    ticks.appendChild(sp);
+  });
+  range.max = DUR;
+  fig.setAttribute("data-dur", DUR);
+  fig.setAttribute("data-rest", REST);
+
+  var playBtn = fig.querySelector(".play");
+  function setPlaying(v){
+    playing = v;
+    playBtn.textContent = v ? "❚❚ 暫停" : "▶ 播放";
+    playBtn.setAttribute("aria-label", v ? "暫停" : "播放");
+    if (v) arm(); else stop();
+  }
+  function arm(){ if (!raf && playing && visible){ lastTs = 0; raf = requestAnimationFrame(tick); } }
+  function stop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function tick(ts){
+    raf = 0;
+    if (!playing || !visible) return;
+    if (lastTs) t = Math.min(DUR, t + (ts - lastTs) / 1000);
+    lastTs = ts;
+    paint(t);
+    if (t >= DUR){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function seek(v){ t = Math.max(0, Math.min(DUR, +v || 0)); setPlaying(false); paint(t); }
+  window.seek = seek;
+  window.DUR = DUR;
+  window.timeline = function(){ return {dur: DUR, rest: REST, steps: N}; };
+
+  function stepTo(d){
+    var k = Math.min(N - 1, Math.floor(Math.min(t, DUR - 1e-6) / S + 1e-6));
+    var settled = (t / S) - k >= 0.7;
+    var nk = d > 0 ? (settled ? k + 1 : k) : (settled ? k : k - 1);
+    nk = Math.max(0, Math.min(N - 1, nk));
+    seek(nk * S + (nk === N - 1 ? S : S * 0.75));
+  }
+
+  playBtn.addEventListener("click", function(){
+    if (playing){ setPlaying(false); return; }
+    if (t >= DUR - 1e-3) t = 0;
+    setPlaying(true);
+  });
+  fig.querySelector(".prev").addEventListener("click", function(){ stepTo(-1); });
+  fig.querySelector(".next").addEventListener("click", function(){ stepTo(1); });
+  range.addEventListener("input", function(){ seek(range.value); });
+  fig.addEventListener("keydown", function(e){
+    if (e.target !== fig) return;
+    if (e.key === "ArrowRight"){ stepTo(1); e.preventDefault(); }
+    else if (e.key === "ArrowLeft"){ stepTo(-1); e.preventDefault(); }
+    else if (e.key === " " || e.key === "Enter"){ playBtn.click(); e.preventDefault(); }
+  });
+  fig.querySelector(".theme").addEventListener("click", function(){
+    var root = document.documentElement;
+    var cur = root.getAttribute("data-theme");
+    var dark = cur ? cur === "dark" : (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) arm(); else stop();
+    }, {rootMargin:"120px"}).observe(fig);
+  }
+
+  // start paused at the rest frame (also under reduced motion): T8, paid ❌ with 3 invoices and 3 letters
+  void reduce;
+  t = REST; paint(t);
+})();
+</script>
+</body>
+</html>

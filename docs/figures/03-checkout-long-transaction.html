@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>結帳長交易時間軸</title>
+<style>
+:root{
+  --paper:#f7f7f5; --paper-2:#ecece8; --ink:#1f2433; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(31,36,51,.14); --rule-solid:#c4c6cc;
+  --neutral-fill:#dfe2e8; --neutral-stroke:#8a93a6;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#78350f;
+  --void:#9aa1ae; --ok:#2f6b4f; --ok-fill:#dcefe4; --bad:#b42318; --bad-fill:#fde4e1;
+  --focus:#2e5aa8;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1d2130; --paper-2:#272c3e; --ink:#eef0f4; --muted:#b7bdca; --soft:#9aa3b6;
+    --rule:rgba(238,240,244,.14); --rule-solid:rgba(200,204,214,.3);
+    --neutral-fill:#363c52; --neutral-stroke:#7d869c;
+    --hot-fill:rgba(251,191,36,.26); --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+    --void:#6f778a; --ok:#7fd1a4; --ok-fill:rgba(127,209,164,.14); --bad:#ff8a7a; --bad-fill:rgba(255,138,122,.14);
+    --focus:#8fb4f0;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1d2130; --paper-2:#272c3e; --ink:#eef0f4; --muted:#b7bdca; --soft:#9aa3b6;
+  --rule:rgba(238,240,244,.14); --rule-solid:rgba(200,204,214,.3);
+  --neutral-fill:#363c52; --neutral-stroke:#7d869c;
+  --hot-fill:rgba(251,191,36,.26); --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+  --void:#6f778a; --ok:#7fd1a4; --ok-fill:rgba(127,209,164,.14); --bad:#ff8a7a; --bad-fill:rgba(255,138,122,.14);
+  --focus:#8fb4f0;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:14px;line-height:1.5;-webkit-text-size-adjust:100%}
+.fig{margin:0;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0;box-sizing:border-box;position:relative}
+.fig *{box-sizing:border-box}
+.fig:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace}
+
+/* readout */
+.hud{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:start}
+.clock{display:flex;flex-direction:column;gap:2px;min-width:96px}
+.clock .sec{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+.clock .open{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.clock .open b{color:var(--hot-ink);font-weight:700}
+.cap{display:flex;gap:8px;align-items:flex-start}
+.cap .tag{flex:none;font-size:12px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--paper-2);color:var(--ink);border:1px solid var(--rule-solid)}
+.cap .txt{font-size:14px;min-height:42px}
+
+/* lanes */
+.lanes{border-top:1px solid var(--rule);display:flex;flex-direction:column}
+.lane{display:grid;grid-template-columns:128px 1fr;gap:8px 12px;padding:8px 0;border-bottom:1px solid var(--rule);min-height:56px;align-items:start}
+.lname{font-size:13px;font-weight:600;line-height:1.35}
+.lname small{display:block;font-size:12px;font-weight:400;color:var(--soft)}
+.lbody{display:flex;flex-direction:column;gap:6px;min-width:0}
+.status{font-size:13px;color:var(--ink);min-height:20px}
+.status code{font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace;font-size:12px;background:var(--paper-2);padding:0 4px;border-radius:4px}
+.track{position:relative;height:20px;border-radius:4px;background:var(--paper-2)}
+.bar{position:absolute;top:0;height:100%;border-radius:4px;width:0}
+.bar.wait{background:repeating-linear-gradient(135deg,var(--neutral-fill) 0 6px,transparent 6px 10px);border:1px solid var(--neutral-stroke)}
+.bar.hot{background:var(--hot-fill);border:1.5px solid var(--hot-stroke)}
+.bar.pay{background:var(--neutral-fill);border:1px solid var(--neutral-stroke)}
+.bar.pending{background:transparent;border:1.5px dashed var(--neutral-stroke)}
+.bar.voided{background:repeating-linear-gradient(135deg,transparent 0 5px,var(--void) 5px 6px);border:1.5px dashed var(--void)}
+.bar .in{position:absolute;left:6px;top:50%;transform:translateY(-50%);font-size:12px;white-space:nowrap;color:var(--hot-ink);font-weight:600;overflow:hidden;max-width:calc(100% - 8px)}
+.pin{position:absolute;top:-4px;height:28px;width:0;border-left:2px solid var(--ink)}
+.limit{position:absolute;top:-4px;bottom:-4px;width:0;border-left:2px dashed var(--bad)}
+.mark{position:absolute;top:50%;transform:translate(calc(-100% - 4px),-50%);font-size:12px;font-weight:700;padding:0 6px;height:20px;line-height:18px;border-radius:10px;white-space:nowrap}
+.mark.bad{background:var(--bad-fill);color:var(--bad);border:1px solid var(--bad)}
+.mark.money{background:var(--hot-fill);color:var(--hot-ink);border:1.5px solid var(--hot-stroke)}
+
+/* pool */
+.pool{display:grid;grid-template-columns:repeat(10,12px);gap:4px;align-items:center}
+.cell{width:12px;height:12px;border-radius:3px;background:var(--neutral-fill);border:1px solid var(--neutral-stroke)}
+.cell.a{background:var(--hot-fill);border:1.5px solid var(--hot-stroke)}
+.poolrow{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.who{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;height:22px;padding:0 8px;border-radius:11px;border:1px solid var(--neutral-stroke);background:var(--paper);color:var(--ink);white-space:nowrap}
+.who.go{border-color:var(--ok);color:var(--ok);background:var(--ok-fill)}
+.lockrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:22px}
+.rowchip{display:inline-flex;align-items:center;gap:6px;font-size:12px;height:22px;padding:0 8px;border-radius:6px;border:1px solid var(--neutral-stroke);background:var(--paper)}
+.rowchip.locked{background:var(--hot-fill);border:1.5px solid var(--hot-stroke);color:var(--hot-ink);font-weight:700}
+.rowchip.voided{text-decoration:line-through;color:var(--void);border-style:dashed}
+
+/* axis */
+.axis{display:grid;grid-template-columns:128px 1fr;gap:12px}
+.axis .ticks{position:relative;height:18px}
+.tick{position:absolute;top:0;font-size:12px;color:var(--soft);transform:translateX(-50%);white-space:nowrap}
+.tick.first{transform:none}
+.tick.last{transform:translateX(-100%);color:var(--bad)}
+
+/* result */
+.result{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.res{border-radius:8px;padding:8px 12px;border:1px solid var(--rule-solid);background:var(--paper-2)}
+.res .k{font-size:12px;color:var(--soft)}
+.res .v{font-size:14px;font-weight:700}
+.res.back .v{color:var(--ok)}
+.res.money{background:var(--hot-fill);border:1.5px solid var(--hot-stroke)}
+.res.money .k,.res.money .v{color:var(--hot-ink)}
+
+/* controls */
+.ctrl{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.btn{font:inherit;font-size:13px;min-height:40px;min-width:40px;padding:0 12px;border-radius:8px;border:1px solid var(--rule-solid);background:var(--paper-2);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{border-color:var(--ink)}
+.btn:focus-visible,.chip:focus-visible,.scrub:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.btn svg{width:14px;height:14px;fill:currentColor}
+.scrubwrap{flex:1 1 200px;min-width:160px;display:flex;align-items:center;min-height:40px}
+.scrub{width:100%;accent-color:var(--hot-stroke);height:32px;margin:0}
+.chips{display:flex;gap:4px;flex-wrap:wrap}
+.chip{font:inherit;font-size:12px;font-weight:700;min-width:36px;min-height:32px;border-radius:6px;border:1px solid var(--rule-solid);background:var(--paper);color:var(--muted);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.theme{position:absolute;top:12px;right:12px;min-height:32px;font-size:12px}
+.fig.has-theme .hud{padding-right:72px}
+
+@media (max-width:640px){
+  .lane{grid-template-columns:1fr;gap:4px}
+  .lname small{display:inline;margin-left:6px}
+  .axis{grid-template-columns:1fr}
+  .axis .pad{display:none}
+}
+@media (max-width:480px){
+  .fig{padding:12px}
+  .hud{grid-template-columns:1fr}
+  .clock{flex-direction:row;gap:12px;align-items:baseline}
+  .result{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="checkout-long-transaction" data-dur="14" data-rest="14" tabindex="0"
+  aria-label="時間軸動畫：顧客 A 的結帳交易在第 6 秒拿到連線、建立訂單並鎖住庫存列，接著在交易裡等金流回應；連線和鎖被佔住到第 30 秒逾時，交易被 ROLLBACK，訂單和庫存作廢，但金流商已經扣了錢。">
+
+  <div class="hud">
+    <div class="clock" aria-live="off">
+      <span class="sec mono" id="sec">第 30 秒</span>
+      <span class="open" id="open">交易開著 <b id="openN">24</b> 秒</span>
+    </div>
+    <div class="cap">
+      <span class="tag" id="tag">T6</span>
+      <span class="txt" id="cap" aria-live="polite"></span>
+    </div>
+  </div>
+
+  <div class="lanes">
+    <!-- A -->
+    <div class="lane">
+      <div class="lname">顧客 A<small>結帳請求</small></div>
+      <div class="lbody">
+        <div class="status" id="sA"></div>
+        <div class="track">
+          <div class="bar wait" id="bQueue" style="left:0%"></div>
+          <div class="bar hot" id="bTx" style="left:18.75%"><span class="in">交易開著</span></div>
+          <div class="limit" style="left:93.75%"></div>
+          <div class="mark bad" id="mRb" style="left:93.75%">ROLLBACK</div>
+          <div class="pin" id="pinA"></div>
+        </div>
+      </div>
+    </div>
+    <!-- pool -->
+    <div class="lane">
+      <div class="lname">連線池<small>最多 20 條</small></div>
+      <div class="lbody">
+        <div class="status" id="sP"></div>
+        <div class="poolrow">
+          <div class="pool" id="pool" aria-hidden="true"></div>
+          <span class="who" id="wC">C 等連線</span>
+        </div>
+      </div>
+    </div>
+    <!-- inventory row -->
+    <div class="lane">
+      <div class="lname">庫存列<small>PostgreSQL</small></div>
+      <div class="lbody">
+        <div class="status" id="sI"></div>
+        <div class="lockrow">
+          <span class="rowchip" id="cInv">這個商品的庫存列</span>
+          <span class="who" id="wB">B 等鎖</span>
+        </div>
+        <div class="track">
+          <div class="bar hot" id="bLock" style="left:18.75%"><span class="in">列鎖被 A 握著</span></div>
+          <div class="limit" style="left:93.75%"></div>
+          <div class="pin" id="pinI"></div>
+        </div>
+      </div>
+    </div>
+    <!-- order -->
+    <div class="lane">
+      <div class="lname">訂單 #1001<small>PostgreSQL</small></div>
+      <div class="lbody">
+        <div class="status" id="sO"></div>
+        <div class="track">
+          <div class="bar pending" id="bOrder" style="left:18.75%"></div>
+          <div class="limit" style="left:93.75%"></div>
+          <div class="pin" id="pinO"></div>
+        </div>
+      </div>
+    </div>
+    <!-- payment -->
+    <div class="lane">
+      <div class="lname">金流商<small>交易管不到</small></div>
+      <div class="lbody">
+        <div class="status" id="sY"></div>
+        <div class="track">
+          <div class="bar pay" id="bPay" style="left:18.75%"></div>
+          <div class="limit" style="left:93.75%"></div>
+          <div class="mark money" id="mMoney" style="left:93.75%">已扣款</div>
+          <div class="pin" id="pinY"></div>
+        </div>
+      </div>
+    </div>
+    <div class="axis" aria-hidden="true">
+      <div class="pad"></div>
+      <div class="ticks">
+        <span class="tick first" style="left:0%">0 秒</span>
+        <span class="tick" style="left:18.75%">6 秒</span>
+        <span class="tick last" style="left:93.75%">30 秒逾時上限</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="result" id="result">
+    <div class="res back"><div class="k">ROLLBACK 退得回</div><div class="v">訂單 #1001 作廢</div></div>
+    <div class="res back"><div class="k">ROLLBACK 退得回</div><div class="v">扣掉的庫存還原</div></div>
+    <div class="res money"><div class="k">ROLLBACK 退不回</div><div class="v">錢已經扣了</div></div>
+  </div>
+
+  <div class="ctrl">
+    <button class="btn" id="play" type="button" aria-label="播放">
+      <svg viewBox="0 0 14 14" aria-hidden="true" id="icon"><path d="M3 1.5v11l9-5.5z"/></svg><span id="playTxt">播放</span>
+    </button>
+    <div class="scrubwrap">
+      <input class="scrub" id="scrub" type="range" min="0" max="14" step="0.05" value="14" aria-label="時間軸，拖曳看每一刻的狀態">
+    </div>
+    <div class="chips" role="group" aria-label="跳到時間點" id="chips"></div>
+  </div>
+  <button class="btn theme" id="theme" type="button" aria-label="切換深淺色" hidden>深淺</button>
+</figure>
+
+<script>
+(function(){
+  var DUR = 14, REST = 14, SPAN = 32; // 軸：0–32 秒，30 秒在 93.75%
+  var KEYS = [
+    {id:'T1', t:0,
+     cap:'第 0 秒：顧客 A 送出結帳，但 20 條連線全被佔著，只能排隊等。',
+     A:'送出結帳，排隊等連線',
+     P:'20 條全被佔著，都是 <code>idle in transaction</code>',
+     I:'還沒有人動到', O:'還不存在', Y:'還沒收到請求'},
+    {id:'T2', t:3,
+     cap:'第 6 秒：A 拿到一條連線，<code>BEGIN</code>，建立訂單 #1001（寫進去了，還沒 commit）。',
+     A:'拿到連線，<code>BEGIN</code>，建立訂單 #1001',
+     P:'A 拿到其中一條',
+     I:'還沒有人動到', O:'寫進去了，還沒 commit', Y:'還沒收到請求'},
+    {id:'T3', t:4.5,
+     cap:'第 6 秒：<code>UPDATE inventory</code> 扣庫存，這個商品的庫存列被 A 鎖住。',
+     A:'<code>UPDATE inventory</code> 扣庫存',
+     P:'A 的連線在跑 SQL',
+     I:'被 A 鎖住', O:'寫進去了，還沒 commit', Y:'還沒收到請求'},
+    {id:'T4', t:6,
+     cap:'第 6 秒起：A 在交易裡呼叫 <code>charge()</code> 等金流。B 買同一個商品，卡在 A 的鎖；C 想看商品頁，拿不到連線。',
+     A:'呼叫 <code>charge()</code>，等金流回應',
+     P:'A 的連線：<code>idle in transaction</code>；C 拿不到連線',
+     I:'被 A 鎖住；B 買同一個商品，卡住等鎖', O:'寫進去了，還沒 commit', Y:'收到扣款請求，處理中（當晚回應要 25 秒）'},
+    {id:'T5', t:11.5,
+     cap:'第 30 秒：A 碰到 30 秒逾時上限，被應用程式中斷。金流那邊扣款成功，回應還沒送回來。',
+     A:'碰到 30 秒逾時上限，被中斷',
+     P:'B、C 還在等',
+     I:'還被 A 鎖住；B 還在等', O:'寫進去了，還沒 commit', Y:'扣款成功，回應還沒送回來'},
+    {id:'T6', t:13,
+     cap:'第 30 秒：交易被 <code>ROLLBACK</code>。訂單 #1001 和扣掉的庫存一起作廢，B 終於拿到鎖——但錢已經扣了，資料庫退不回來。',
+     A:'交易被 <code>ROLLBACK</code>',
+     P:'A 的交易結束，不再佔著這條連線',
+     I:'鎖放開，B 終於拿到鎖；扣掉的庫存作廢', O:'作廢', Y:'錢已經扣了'}
+  ];
+  var $ = function(id){ return document.getElementById(id); };
+  var fig = $('fig');
+  var el = {sec:$('sec'), open:$('open'), openN:$('openN'), tag:$('tag'), cap:$('cap'),
+    sA:$('sA'), sP:$('sP'), sI:$('sI'), sO:$('sO'), sY:$('sY'),
+    bQueue:$('bQueue'), bTx:$('bTx'), bLock:$('bLock'), bOrder:$('bOrder'), bPay:$('bPay'),
+    mRb:$('mRb'), mMoney:$('mMoney'), wB:$('wB'), wC:$('wC'), cInv:$('cInv'),
+    result:$('result'), scrub:$('scrub'), play:$('play'), playTxt:$('playTxt'), icon:$('icon')};
+  var pins = [$('pinA'), $('pinI'), $('pinO'), $('pinY')];
+
+  // pool cells
+  var pool = $('pool'), cells = [];
+  for (var i=0;i<20;i++){ var c=document.createElement('div'); c.className='cell'; pool.appendChild(c); cells.push(c); }
+
+  // chips
+  var chipWrap = $('chips'), chips = [];
+  KEYS.forEach(function(k){
+    var b=document.createElement('button'); b.type='button'; b.className='chip'; b.textContent=k.id;
+    b.setAttribute('aria-label','跳到 '+k.id); b.setAttribute('aria-pressed','false');
+    b.addEventListener('click', function(){ pause(); seek(k.t + (k.id==='T6'?1:0)); });
+    chipWrap.appendChild(b); chips.push(b);
+  });
+
+  function clamp(x,a,b){ return x<a?a:(x>b?b:x); }
+  function simSec(t){ // tour 秒 → 模擬秒
+    if (t<=3) return 6*t/3;
+    if (t<=6) return 6;
+    if (t<=11.5) return 6 + 24*clamp((t-6)/5,0,1);
+    return 30;
+  }
+  function pct(s){ return (s/SPAN*100)+'%'; }
+  function fade(t,k){ return clamp((t-k)/0.3,0,1); }
+
+  var lastKey = -1, cur = REST;
+  function render(t){
+    cur = t;
+    var s = simSec(t), k = 0;
+    for (var i=0;i<KEYS.length;i++) if (t >= KEYS[i].t) k = i;
+    var K = KEYS[k];
+    el.sec.textContent = '第 ' + Math.floor(s+1e-6) + ' 秒';
+    var open = s>=6 && k>=1 ? Math.floor(s-6+1e-6) : 0;
+    el.open.style.visibility = k>=1 ? 'visible' : 'hidden';
+    el.openN.textContent = open;
+    if (k !== lastKey){
+      lastKey = k;
+      el.tag.textContent = K.id; el.cap.innerHTML = K.cap;
+      el.sA.innerHTML = K.A; el.sP.innerHTML = K.P; el.sI.innerHTML = K.I; el.sO.innerHTML = K.O; el.sY.innerHTML = K.Y;
+      chips.forEach(function(c,j){ c.setAttribute('aria-pressed', j===k ? 'true':'false'); });
+    }
+    // A：排隊 0–6，交易 6–30
+    el.bQueue.style.width = pct(Math.min(s,6));
+    var txEnd = s;
+    el.bTx.style.width = k>=1 ? pct(Math.max(0, txEnd-6)) : '0%';
+    el.bTx.style.opacity = k>=1 ? (k>=5 ? 0.55 : 1) : 0;
+    el.mRb.style.opacity = k>=5 ? fade(t,KEYS[5].t) : 0;
+    // pool
+    cells[0].className = (k>=1 && k<5) ? 'cell a' : 'cell';
+    el.wC.style.visibility = (k>=3 && k<=5) ? 'visible' : 'hidden';
+    el.wC.style.opacity = k>=3 ? fade(t,KEYS[3].t) : 0;
+    // inventory lock
+    el.bLock.style.width = k>=2 ? pct(Math.max(0, s-6)) : '0%';
+    el.bLock.style.opacity = k>=2 ? (k>=5 ? 0.55 : 1) : 0;
+    el.cInv.className = 'rowchip' + (k>=2 && k<5 ? ' locked' : '') + (k>=5 ? ' voided' : '');
+    el.cInv.textContent = k>=2 && k<5 ? '庫存列（已上鎖）' : (k>=5 ? '扣掉的庫存（作廢）' : '這個商品的庫存列');
+    el.wB.style.visibility = k>=3 ? 'visible' : 'hidden';
+    el.wB.style.opacity = k>=3 ? fade(t,KEYS[3].t) : 0;
+    el.wB.className = 'who' + (k>=5 ? ' go' : '');
+    el.wB.textContent = k>=5 ? 'B 拿到鎖' : 'B 等鎖';
+    // order
+    el.bOrder.style.width = k>=1 ? pct(Math.max(0.6, s-6)) : '0%';
+    el.bOrder.className = 'bar ' + (k>=5 ? 'voided' : 'pending');
+    // payment
+    el.bPay.style.width = k>=3 ? pct(Math.max(0.6, s-6)) : '0%';
+    el.mMoney.style.opacity = k>=4 ? fade(t,KEYS[4].t) : 0;
+    // result
+    var r = k>=5 ? fade(t,KEYS[5].t) : 0;
+    el.result.style.opacity = 0.18 + 0.82*r;
+    el.result.setAttribute('aria-hidden', k>=5 ? 'false' : 'true');
+    // playhead
+    var left = pct(s);
+    for (var p=0;p<pins.length;p++) pins[p].style.left = left;
+    el.scrub.value = t;
+  }
+
+  // playback
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var playing = false, visible = true, raf = 0, last = 0;
+  function setBtn(){
+    el.play.setAttribute('aria-label', playing ? '暫停' : (cur>=DUR ? '重播' : '播放'));
+    el.playTxt.textContent = playing ? '暫停' : (cur>=DUR ? '重播' : '播放');
+    el.icon.innerHTML = playing ? '<path d="M2.5 1.5h3v11h-3zM8.5 1.5h3v11h-3z"/>' : '<path d="M3 1.5v11l9-5.5z"/>';
+  }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? (now-last)/1000 : 0; last = now;
+    var t = Math.min(DUR, cur + dt);
+    if (reduce){ // 減少動態：只停在關鍵格
+      var shown = 0; for (var i=0;i<KEYS.length;i++) if (t>=KEYS[i].t) shown = KEYS[i].t + 0.3;
+      cur = t; renderAt(t>=DUR ? DUR : Math.min(shown, t)); cur = t;
+    } else render(t);
+    if (t >= DUR){ playing = false; cur = DUR; render(DUR); setBtn(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+  function renderAt(t){ render(t); }
+  function arm(){ if (playing && visible && !raf){ last = 0; raf = requestAnimationFrame(frame); } }
+  function play(){ if (cur >= DUR) render(0); playing = true; setBtn(); arm(); }
+  function pause(){ playing = false; if (raf){ cancelAnimationFrame(raf); raf = 0; } setBtn(); }
+  function seek(t){ pause(); render(clamp(+t||0, 0, DUR)); setBtn(); }
+
+  el.play.addEventListener('click', function(){ playing ? pause() : play(); });
+  el.scrub.addEventListener('input', function(){ seek(parseFloat(el.scrub.value)); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target === el.scrub) return;
+    var k = 0; for (var i=0;i<KEYS.length;i++) if (cur >= KEYS[i].t) k = i;
+    if (e.key === 'ArrowRight'){ e.preventDefault(); seek(k+1 < KEYS.length ? KEYS[k+1].t : DUR); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(cur > KEYS[k].t + 0.01 ? KEYS[k].t : (k>0 ? KEYS[k-1].t : 0)); }
+    else if (e.key === ' ' && e.target === fig){ e.preventDefault(); playing ? pause() : play(); }
+  });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; if (visible) arm(); }, {rootMargin:'120px'}).observe(fig);
+  }
+
+  // 主題：網站會設定根元素 data-theme；單獨開檔時顯示切換鈕
+  var inFrame = false; try { inFrame = window.self !== window.top; } catch(e){ inFrame = true; }
+  var themeBtn = $('theme');
+  if (!inFrame){
+    themeBtn.hidden = false; fig.classList.add('has-theme');
+    themeBtn.addEventListener('click', function(){
+      var r = document.documentElement, curT = r.getAttribute('data-theme');
+      var dark = curT ? curT === 'dark' : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+      r.setAttribute('data-theme', dark ? 'light' : 'dark');
+    });
+  }
+  // 在 iframe 裡回報高度給網站
+  if (inFrame && 'ResizeObserver' in window){
+    var lastH = 0;
+    new ResizeObserver(function(es){
+      var h = Math.ceil(es[0].contentRect.height + 32);
+      if (h !== lastH){ lastH = h; try { parent.postMessage({type:'figure-height', fig:'checkout-long-transaction', height:h}, '*'); } catch(e){} }
+    }).observe(fig);
+  }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:KEYS.map(function(k){ return {id:k.id, t:k.t}; })}; };
+  render(REST); setBtn();
+})();
+</script>
+</body>
+</html>

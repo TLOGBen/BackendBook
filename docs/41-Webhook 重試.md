@@ -2,29 +2,73 @@
 
 > Webhook 是別的服務在某件事發生時（例如付款成功），主動發一個 HTTP POST 到你的 API 通知你。Webhook 重試（webhook retry）是對方在時限內沒收到你回的成功狀態碼（200、201 這類 2 開頭的狀態碼，合稱 2xx），就把同一個事件再送一次。所以接收的一方會收到重複、順序錯亂的事件，程式要能承受；發送的一方則要限制重試次數，失敗了留紀錄、能重送。
 
-**難度**：★★☆　**閱讀時間**：約 22 分鐘　**前置知識**：[冪等性](25-冪等性.md)、[重試機制](26-重試機制.md)、[Webhook 驗證](40-Webhook%20驗證.md)
+**難度**：★★☆　**閱讀時間**：約 22 分鐘　**前置知識**：[唯一約束](14-唯一約束.md)、[冪等性](25-冪等性.md)、[重試機制](26-重試機制.md)、[Webhook 驗證](40-Webhook%20驗證.md)
+
+## 核心問題與理念
+
+**它要解決的問題**：接收付款通知的程式要等發票平台回應，拖過了金流商規定的 10 秒，金流商以為沒送到，把同一個付款通知又送了兩次，結果開出 3 張發票。其中一份晚到的舊通知，還把已經退款的訂單改回「已付款」（下面的情境會完整走一遍）。
+
+**核心理念**：收到就先存起來、馬上回「收到了」；同一個事件 ID 只存一次，慢的工作之後再做。
+
+**想通的那一步**：
+
+- **卡住的地方**：直覺的做法是把事情全部做完才回 200，讓 200 代表「真的處理好了」。但發送方只等幾秒，下游一慢就逾時重送；就算回了 200，回應也可能在路上掉了，對方照樣重送。
+- **火花**：把「簽收」和「處理」拆開。簽收只做一件事：用事件 ID 當主鍵（同一個值只能存一筆的欄位）把事件存進資料庫，存好就回 200，重複的存不進去也照樣回 200；處理交給背景程式在自己這邊慢慢做、失敗自己重試。這樣對方重送幾次，資料庫裡都只會留下一筆。
+
+## 閱讀前推薦具備知識
+
+| 知識 | 要會到什麼程度 | 這篇哪裡會用到 | 不熟的話先看 |
+|---|---|---|---|
+| HTTP 狀態碼 | **必備**：看到 200、400、401、409、503，能分出哪些算成功（2xx）、哪些是「請求有問題」（4xx）、哪些是「伺服器出問題」（5xx） | 「立刻回 2xx」那張狀態碼表、地雷 4、情境演練第 2 題 | [MDN：HTTP 狀態碼](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status) |
+| [唯一約束](14-唯一約束.md) | **必備**：看得懂 `INSERT ... ON CONFLICT (event_id) DO NOTHING` 撞到主鍵時不報錯、寫入 0 列，也看得懂 `DO UPDATE` 裡的 `EXCLUDED` 指的是這次想寫入的那一列 | 生命週期的第二張圖、`receiver.py` 的 `store_event()`、`worker.py` 的條件式更新 | 本系列第 14 篇 |
+| [冪等性](25-冪等性.md) | **必備**：能說出為什麼去重要靠資料庫的唯一約束，「先查有沒有、沒有再寫」在兩個請求同時到時擋不住 | 收件箱表的設計、地雷 3 | 本系列第 25 篇 |
+| [重試機制](26-重試機制.md) | **加分**：知道重試要有次數上限，等待間隔要一次比一次長 | 「發送方：當你要提供 webhook 給別人」、`sender.py` 的 `deliver()` | 本系列第 26 篇 |
+| [Webhook 驗證](40-Webhook%20驗證.md) | **加分**：知道收到 webhook 的第一步是驗簽章，驗不過就回 401、不存 | 「接收方：四個動作」的第 1 步 | 本系列第 40 篇 |
+| FastAPI 的路由與 `async` | **加分**：看得懂 `@app.post("/webhooks/payments")` 把一個函式綁到一個網址，`await request.body()` 是在等請求的 body 讀進來 | 「動手看看」的 `receiver.py` | [FastAPI 教學（繁中）](https://fastapi.tiangolo.com/zh-hant/tutorial/) |
+
+**快速自我檢查**：`webhook_inbox` 的主鍵是 `event_id`，表裡已經有 `evt_123`。handler 又收到一次 `evt_123`，執行 `INSERT INTO webhook_inbox (event_id, event_type, payload) VALUES ('evt_123', ...) ON CONFLICT (event_id) DO NOTHING`。這句會報錯嗎？`cur.rowcount` 是多少？如果 handler 接著回 `409 Conflict`，發送方會把這次投遞當成成功還是失敗？
+
+<details markdown="1"><summary>看答案</summary>
+
+不會報錯，`cur.rowcount` 是 0：撞到主鍵，`DO NOTHING` 就安靜地跳過。409 是 4xx，不在 2xx 裡，發送方只認 2xx 是成功，所以會當成這次沒送到，之後再送。
+
+答不出前半，先看上表「唯一約束」那一列；答不出後半，先看「HTTP 狀態碼」那一列。
+
+</details>
 
 ## 為什麼要在意：一個具體的情境
 
 這是一個假設情境。你負責一個訂閱制服務的後端，串了金流商的 webhook：客人每次扣款成功，金流商就發一個 `payment.succeeded` 事件，POST 到你 API 上專門接收 webhook 的網址 `/webhooks/payments`（這種接收用的網址叫 endpoint）；客人退款時，則發一個 `payment.refunded` 事件。這家金流商規定 10 秒內要收到 2xx，沒收到就當作沒送到，5 分鐘後重送（這兩個數字是這個情境的假設，各家不同）。
 
-處理這個網址的函式（handler）長這樣：
+處理這個網址的函式（handler）收到事件後，依序做下面四步，全部做完才回 200：
 
-```python
-# ❌ 出事的寫法：沒去重、照收到的順序覆蓋狀態、慢工作全部做完才回 200
-@app.post("/webhooks/payments")
-async def receive(request: Request) -> Response:
-    event = json.loads(await request.body())
-    order_id = event["data"]["object"]["order_id"]
-    new_status = "paid" if event["type"] == "payment.succeeded" else "refunded"
-    db.execute("UPDATE orders SET status = %s WHERE id = %s", (new_status, order_id))
-    if event["type"] == "payment.succeeded":
-        invoice_api.create(order_id)    # 呼叫發票平台開電子發票：平常 1 秒
-        send_thank_you_mail(order_id)   # 寄感謝信
-    return Response(status_code=200)    # 前面全部做完才回
+1. 照事件類型，把訂單的 status 直接改成 paid 或 refunded（`UPDATE orders SET status = %s`）。
+2. 如果是扣款成功，呼叫發票平台開電子發票（`invoice_api.create(order_id)`），平常 1 秒。
+3. 寄感謝信。
+4. 回 200。
+
+整個 handler 都沒有看事件 ID，同一個事件送來幾次，這四步就做幾次。
+
+這張圖看的是一個請求在 handler 裡走過的路，上色的那一步會拖慢回應：
+
+```mermaid
+flowchart LR
+    S["金流商"] -->|"POST 事件"| H["handler"]
+    H --> U["改 status 誰最後到誰說了算"]
+    U --> INV["呼叫發票平台 開發票"]
+    INV --> M["寄感謝信"]
+    M --> OK["回 200"]
+    OK -.->|"回得太晚 對方已經斷線"| S
+    classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class INV hot
 ```
 
-平常整串大約 1.5 秒，沒出過問題。月初續約日早上 9 點，幾萬筆自動扣款同時成功；偏偏發票平台也被各家廠商打爆，`invoice_api.create` 要 20 秒以上才回來。下面追一筆訂單 `ord_88`，它的扣款事件 ID 是 `evt_A`，退款事件 ID 是 `evt_B`：
+平常整串大約 1.5 秒，沒出過問題。月初續約日早上 9 點，幾萬筆自動扣款同時成功；偏偏發票平台也被各家廠商打爆，`invoice_api.create` 要 20 秒以上才回來。下面追一筆訂單 `ord_88`，它的扣款事件 ID 是 `evt_A`，退款事件 ID 是 `evt_B`，圖和表一格一格看：
+
+<figure class="draw-fig">
+<iframe class="draw-fig__frame" src="../figures/41-webhook-retry-overwrite.html" title="按播放或拖時間軸追訂單 ord_88：handler 等發票平台超過 10 秒，金流商就把同一個 evt_A 再送一次；注意遲到的 evt_A 怎麼把退款後的 refunded 蓋回 paid，發票又怎麼從 1 張變成 3 張。" loading="lazy" style="height: 500px;"></iframe>
+<figcaption>按播放或拖時間軸追訂單 ord_88：handler 等發票平台超過 10 秒，金流商就把同一個 evt_A 再送一次；注意遲到的 evt_A 怎麼把退款後的 refunded 蓋回 paid，發票又怎麼從 1 張變成 3 張。</figcaption>
+</figure>
 
 | 時間 | 金流商（發送方） | 你的 handler | `ord_88` 的 status | 已開發票 |
 |---|---|---|---|---|
@@ -41,7 +85,7 @@ async def receive(request: Request) -> Response:
 
 **工程師看到的**：應用程式日誌裡，同一個 `evt_A` 出現三次「開立發票」；金流商後台的投遞紀錄顯示 `evt_A` 前幾次都是逾時；發票平台的回應時間從平常 1 秒拉到 20 秒以上。
 
-**根因**有三個，都在上面那段程式碼裡：
+**根因**有三個，都在 handler 的那四步裡：
 
 - `invoice_api.create(order_id)` 這一行讓回應超過 10 秒，觸發金流商重送。
 - 整個 handler 沒看事件 ID，同一個 `evt_A` 送幾次，發票和信就重複幾次。
@@ -55,12 +99,14 @@ async def receive(request: Request) -> Response:
 
 ```mermaid
 flowchart LR
-    S["金流商 發送方"] -->|"POST 事件 沒收到 2xx 就重送"| API["你的 API webhook handler"]
+    S["金流商 發送方"] e1@-->|"POST 事件 沒收到 2xx 就重送"| API["你的 API webhook handler"]
     API -. "回 2xx 等於簽收" .-> S
-    API -->|"存事件 重複就略過"| INBOX["PostgreSQL 收件箱表"]
+    API e2@-->|"存事件 重複就略過"| INBOX["PostgreSQL 收件箱表"]
     W["背景工作者"] -->|"撈出未處理的事件"| INBOX
     W -->|"開發票 寄信"| EXT["發票平台 寄信服務"]
     W -->|"更新訂單狀態"| BIZ["PostgreSQL 訂單表"]
+    e1@{ animate: true }
+    e2@{ animate: true }
     classDef hot fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
     class API,INBOX hot
 ```
@@ -205,31 +251,40 @@ flowchart TD
 
 亂序的來源很多：發送方用多個工作者並行投遞、某個事件第一次失敗進了重試排程、網路路徑不同、你自己的背景工作者也是多個並行在處理。所以 **webhook 抵達的順序，和事件發生的順序，沒有保證一致。** Stripe 的文件也明講不保證事件的投遞順序。
 
-```
-事件發生順序：   10:00 subscription.active   10:05 subscription.canceled
-                    │ 第 1 次投遞失敗              │ 第 1 次就成功
-                    │ 10:06 重試成功               │
-抵達你這邊的順序：  canceled (10:05 事件)  →  active (10:00 事件)
-天真的實作結果：    最後狀態 = active  ❌  使用者明明取消了
-```
+下面追一個訂閱 `sub_1`：10:00 它變成 active，10:05 使用者取消，變成 canceled。最右兩欄比較兩種處理方式：「照收到的順序覆蓋」，和下面解法 A 的「比事件時間，舊的略過」。
+
+| 時間 | 發送方 | 你這邊收到 | 照收到的順序覆蓋 | 比事件時間（解法 A） |
+|---|---|---|---|---|
+| T1 10:00 | 產生 active 事件，第 1 次投遞失敗，排進重試 | 沒收到 | 還沒有資料 | 還沒有資料 |
+| T2 10:05 | 產生 canceled 事件，第 1 次就成功 | canceled（10:05 的事件） | canceled | canceled |
+| T3 10:06 | 重試 active 事件，這次成功 | active（10:00 的事件） | active ❌ | canceled，10:00 比 10:05 舊，略過 |
+| T4 之後 | 沒有新事件 | 沒有 | 停在 active，使用者明明取消了 | canceled ✅ |
 
 三種解法，由簡單到穩健：
 
-**解法 A：比時間戳或版本號，只接受比較新的。** 事件裡通常有「事件產生時間」，或者物件本身帶版本號、`updated_at`。你在資料表裡記下「目前這筆資料是根據哪個時間點的事件更新的」，新來的事件比較舊就略過。用 SQL 寫成一個條件式更新：
+**解法 A：比時間戳或版本號，只接受比較新的。** 事件裡通常有「事件產生時間」，或者物件本身帶版本號、`updated_at`。你在資料表裡記下「目前這筆資料是根據哪個時間點的事件更新的」，新來的事件比較舊就略過。
 
-```sql
--- 只有在新事件比目前資料還新時才覆蓋
-INSERT INTO subscriptions (id, status, source_updated_at)
-VALUES ('sub_1', 'active', '2026-10-24 10:00:00+00')
-ON CONFLICT (id) DO UPDATE
-    SET status = EXCLUDED.status,
-        source_updated_at = EXCLUDED.source_updated_at
-    WHERE subscriptions.source_updated_at < EXCLUDED.source_updated_at;
-```
+用 SQL 寫成一個條件式更新：`INSERT ... ON CONFLICT (id) DO UPDATE` 後面加上 `WHERE subscriptions.source_updated_at < EXCLUDED.source_updated_at`。`EXCLUDED` 代表這次想寫進去的那一列，所以這個條件的意思是「資料表裡記的時間比新事件舊，才覆蓋」；不符合就什麼都不改。完整程式在「動手看看」的〈3. 背景工作者 `worker.py`〉。
 
 要小心時間戳的精度：如果對方只給到「秒」，同一秒內發生的兩個事件你就分不出先後。Stripe 就是這樣：事件的 `created` 只到秒，Stripe 文件明講不要拿它判斷事件順序。這時候要找更可靠的排序依據（例如物件本身的版本號），或改用解法 B。下面的範例用時間戳，只是為了好示範。
 
 **解法 B：把 webhook 當「通知」，收到後回頭打 API 拿最新狀態。** 不管事件內容是什麼，只把它當作「`sub_1` 有變動了」，接著呼叫對方的 API 查 `sub_1` 現在是什麼狀態，以 API 回傳的為準。這樣順序就不重要了，因為你永遠拿到的是最新的。代價是多一次 API 呼叫，大量事件時要注意對方的[速率限制](30-速率限制.md)。有些廠商乾脆設計「瘦事件」（thin event），payload 只給 ID，接收方只能用這種方式。
+
+這張圖看的是解法 B 的來回：事件只負責通知，狀態以回頭查到的為準。
+
+```mermaid
+sequenceDiagram
+    participant S as 金流商 發送方
+    participant R as 你的服務
+    participant API as 金流商 API
+    S->>R: 事件 sub_1 有變動
+    R-->>S: 200 OK
+    R->>API: 查 sub_1 現在的狀態
+    API-->>R: canceled
+    R->>R: 以 API 回傳的狀態寫進資料表
+```
+
+就算晚到的是 10:00 的舊事件，回頭查到的也是現在的 canceled。
 
 **解法 C：狀態機防呆。** 有些狀態轉換本來就不合法，例如「已退款」不該回到「已付款」。在套用事件前檢查狀態轉換是否合法，可以擋掉一部分亂序造成的錯誤。這通常和 A 或 B 搭配使用，不單獨用。
 
@@ -245,15 +300,17 @@ ON CONFLICT (id) DO UPDATE
 flowchart LR
     A["業務交易 寫入訂單"] --> B["同一個交易寫 outbox"]
     B --> C["投遞排程 撈到期的 delivery"]
-    C --> D["HTTP POST 設逾時 不跟隨轉址"]
+    C e1@--> D["HTTP POST 設逾時 不跟隨轉址"]
     D -- "2xx" --> E["標記成功"]
     D -- "非 2xx 或逾時" --> F{"還沒到最大次數?"}
     F -- "是" --> G["指數退避加抖動 排下一次"]
-    G --> C
+    G e2@--> C
     F -- "否" --> H["標記失敗 等人工重送"]
     H --> I{"這個 endpoint 連續失敗太久?"}
     I -- "是" --> J["停用 endpoint 寄信通知客戶"]
     D --> K["寫投遞紀錄 狀態碼 耗時 回應片段"]
+    e1@{ animate: true }
+    e2@{ animate: true }
 ```
 
 逐一說明：
@@ -319,7 +376,6 @@ _hits: dict[str, int] = defaultdict(int)  # 只給故障模擬用，正式環境
 
 app = FastAPI()
 
-
 def store_event(event: dict) -> bool:
     """存進收件箱。回傳 True 代表新事件，False 代表重複。"""
     with psycopg.connect(DSN) as conn:  # 正常離開 with 時自動 commit
@@ -332,7 +388,6 @@ def store_event(event: dict) -> bool:
             (event["id"], event["type"], Jsonb(event)),
         )
         return cur.rowcount == 1  # 撞到主鍵時 rowcount 是 0
-
 
 @app.post("/webhooks/payments")
 async def receive(request: Request) -> Response:
@@ -370,7 +425,6 @@ import psycopg
 DSN = "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
 MAX_ATTEMPTS = 5
 
-
 def apply_event(conn: psycopg.Connection, event: dict) -> None:
     obj = event["data"]["object"]
     # ✅ 只有事件比目前資料還新才覆蓋；舊事件晚到就什麼都不做
@@ -385,7 +439,6 @@ def apply_event(conn: psycopg.Connection, event: dict) -> None:
         """,
         {"id": obj["id"], "status": obj["status"], "ts": event["created"]},
     )
-
 
 def process_one(conn: psycopg.Connection) -> bool:
     with conn.transaction():
@@ -420,7 +473,6 @@ def process_one(conn: psycopg.Connection) -> bool:
             print(f"[worker] {event_id} 處理失敗：{e!r}")
     return True
 
-
 if __name__ == "__main__":
     with psycopg.connect(DSN, autocommit=True) as conn:
         while True:
@@ -444,7 +496,6 @@ URL = "http://127.0.0.1:8000/webhooks/payments"
 MAX_ATTEMPTS = 5
 BASE, CAP = 1.0, 30.0  # 示範用 1 秒起跳；正式環境是分鐘到小時等級
 
-
 def post_once(event: dict) -> int:
     try:
         r = httpx.post(
@@ -457,7 +508,6 @@ def post_once(event: dict) -> int:
         return r.status_code
     except httpx.TransportError:  # 連不上、逾時都算失敗
         return 0
-
 
 def deliver(event: dict) -> bool:
     # 示範用 sleep；正式環境是把 next_attempt_at 寫進資料表，由排程撈出來送
@@ -472,7 +522,6 @@ def deliver(event: dict) -> bool:
     print(f"[sender] {event['id']} 放棄，寫進投遞紀錄等人工重送")
     return False
 
-
 def make(event_id: str, created: str, status: str) -> dict:
     return {
         "id": event_id,
@@ -480,7 +529,6 @@ def make(event_id: str, created: str, status: str) -> dict:
         "created": created,
         "data": {"object": {"id": "sub_1", "status": status}},
     }
-
 
 if __name__ == "__main__":
     newer = make("evt_002", "2026-10-24T10:05:00Z", "canceled")
@@ -517,7 +565,7 @@ SELECT event_id, processed_at IS NOT NULL AS done FROM webhook_inbox;  -- 只有
 SELECT * FROM subscriptions;  -- sub_1 的 status 是 canceled，source_updated_at 是 10:05
 ```
 
-**做個對照實驗**：把 `worker.py` 裡 `ON CONFLICT ... DO UPDATE` 那段的 `WHERE` 拿掉，`TRUNCATE webhook_inbox, subscriptions;` 之後重跑。你會看到 `sub_1` 最後變成 `active`，也就是事故情境裡「取消了卻又變回啟用」的狀況。
+**做個對照實驗**：把 `worker.py` 裡 `ON CONFLICT ... DO UPDATE` 那段的 `WHERE` 拿掉，`TRUNCATE webhook_inbox, subscriptions;` 之後重跑。你會看到 `sub_1` 最後變成 `active`，也就是「事件順序」那張 `sub_1` 時間表裡「取消了卻又變回 active」的狀況。
 
 玩完記得收拾：`docker stop pg-webhook`（`--rm` 會順便刪掉容器）。
 

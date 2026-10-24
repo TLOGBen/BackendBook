@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>兩份下單流程</title>
+<style>
+:root{
+  --paper:#ffffff; --panel:#f4f5f8; --ink:#1f2430; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(31,36,48,.18); --rule-strong:#b9bec9; --group:#e9ecf2;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111; --hot-text:#b45309;
+  --ok-stroke:#1f2430;
+  --sans:system-ui,-apple-system,"Segoe UI","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --mono:ui-monospace,"SF Mono",Consolas,"Cascadia Mono",Menlo,"PingFang TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --panel:#282c37; --ink:#e8eaf0; --muted:#b4bccb; --soft:#9aa4b8;
+    --rule:rgba(232,234,240,.22); --rule-strong:rgba(232,234,240,.34); --group:#252935;
+    --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fbbf24;
+    --ok-stroke:#e8eaf0;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --panel:#282c37; --ink:#e8eaf0; --muted:#b4bccb; --soft:#9aa4b8;
+  --rule:rgba(232,234,240,.22); --rule-strong:rgba(232,234,240,.34); --group:#252935;
+  --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fbbf24;
+  --ok-stroke:#e8eaf0;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-text-size-adjust:100%}
+.fig{margin:0 auto;padding:16px;max-width:1120px;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--muted);border-radius:8px}
+code,.code{font-family:var(--mono);font-size:.92em}
+
+/* mode switch */
+.modes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.mode{min-height:36px;padding:6px 14px;border-radius:8px;border:1px solid var(--rule-strong);background:var(--paper);color:var(--ink);font:600 14px/1.3 var(--sans);cursor:pointer;text-align:left}
+.mode:hover{background:var(--panel)}
+.mode[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.mode:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+/* stage */
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:24px;align-items:start}
+.flows{display:flex;flex-direction:column;gap:12px;min-width:0}
+.grp{background:var(--group);border:1.5px solid var(--rule-strong);border-radius:8px;padding:10px 12px 12px;min-width:0}
+.grp-cap{font-size:13px;font-weight:650;line-height:1.35;margin-bottom:8px}
+.grp-cap .code{font-weight:500;color:var(--soft)}
+.grp-cap .note{display:block;font-weight:400;color:var(--soft);font-size:12px}
+.grp.one{border-width:2px;border-color:var(--ink)}
+.row{display:grid;grid-template-columns:96px repeat(4,minmax(0,1fr));gap:8px;align-items:stretch}
+.row + .row{margin-top:8px}
+.hd{font-size:13px;font-weight:600;color:var(--muted);text-align:center;white-space:nowrap;overflow:hidden;padding-bottom:2px}
+.lane{display:flex;flex-direction:column;justify-content:center;min-width:0;height:60px;border-right:1px solid var(--rule);padding-right:6px}
+.lane b{font-size:14px;line-height:1.25}
+.lane small{font-size:12px;color:var(--soft);line-height:1.25}
+.cell{position:relative;height:60px;min-width:0;border-radius:8px;border:1px dashed var(--rule-strong);display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;background:transparent}
+.cell .in{display:flex;flex-direction:column;align-items:center;gap:2px;will-change:opacity,transform}
+.cell .main{font-size:15px;font-weight:700;line-height:1.2;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cell .sub{font-size:12px;color:var(--soft);line-height:1.2;white-space:nowrap}
+.cell.on{border:1.5px solid var(--rule-strong);background:var(--paper)}
+.cell.hot.on{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.cell.hot.on .sub{color:var(--hot-ink)}
+.cell.miss.on{border-style:dashed;border-width:2px}
+.cell.stop.on{border:2.5px solid var(--ok-stroke)}
+.cell.skip.on{border:1px dashed var(--rule-strong);background:transparent;color:var(--soft)}
+.cell.now::after{content:"";position:absolute;inset:-5px;border-radius:11px;border:2px solid var(--ink);pointer-events:none}
+
+/* states */
+.states{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border-radius:8px;padding:10px 12px 12px;min-width:0}
+.c-title{font-size:13px;font-weight:600;color:var(--muted)}
+.stock{display:flex;align-items:baseline;gap:6px;margin-top:2px}
+.stock .num{font-size:40px;font-weight:750;line-height:1;font-variant-numeric:tabular-nums}
+.stock .unit{font-size:13px;color:var(--soft)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;min-height:26px;align-items:center}
+.chip{display:inline-block;padding:3px 8px;border-radius:6px;font-size:13px;font-weight:650;line-height:1.3;background:var(--paper);border:1.5px solid var(--rule-strong);white-space:nowrap;will-change:opacity}
+.chip.hot{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.chips .none{font-size:13px;color:var(--soft)}
+.result{min-width:0}
+.badge{display:inline-block;padding:5px 10px;border-radius:6px;font-size:14px;font-weight:700;line-height:1.35;border:1.5px solid var(--rule-strong);background:var(--panel)}
+.badge.hot{background:var(--hot-fill);color:var(--hot-ink);border-color:var(--hot-stroke)}
+.out{margin-top:8px;font-size:12px;line-height:1.5;color:var(--soft);overflow-wrap:anywhere}
+.out .code{color:var(--ink);font-size:12px}
+
+/* readout + controls */
+.readout{margin-top:16px;font-size:15px;line-height:1.6;min-height:3.2em;color:var(--ink)}
+.readout .hl{color:var(--hot-text);font-weight:700}
+.controls{margin-top:12px;display:flex;align-items:center;gap:8px}
+.btn{height:36px;min-width:36px;padding:0 12px;border-radius:8px;border:1px solid var(--rule-strong);background:var(--paper);color:var(--ink);font:600 14px var(--sans);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{background:var(--panel)}
+.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.btn.icon{padding:0;width:36px}
+.scrub{flex:1;min-width:0;height:32px;accent-color:var(--ink);margin:0}
+.stepno{font-size:12px;color:var(--soft);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:4.5em;text-align:right}
+.legend{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--soft)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:20px;height:12px;border-radius:3px}
+.sw.dash{border:1.5px dashed var(--rule-strong)}
+.sw.hot{background:var(--hot-fill);border:1.5px solid var(--hot-stroke)}
+.sw.stop{border:2.5px solid var(--ok-stroke)}
+.sw.now{border:2px solid var(--ink)}
+
+@media (max-width:719px){
+  .stage{grid-template-columns:minmax(0,1fr);gap:16px}
+  .grp{padding:8px 8px 10px}
+  .row{grid-template-columns:44px repeat(4,minmax(0,1fr));gap:4px}
+  .hd{font-size:12px}
+  .lane{height:56px;padding-right:2px}
+  .lane b{font-size:13px}
+  .lane .long{display:none}
+  .cell{height:56px;padding:2px;border-radius:6px}
+  .cell .main{font-size:13px}
+  .cell .sub{white-space:normal;line-height:1.15}
+  .states{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .card{padding:8px}
+  .stock .num{font-size:32px}
+  .chip{font-size:12px;padding:2px 6px}
+  .result{grid-column:1 / -1}
+  .readout{font-size:14px;min-height:6.6em}
+  .controls{flex-wrap:wrap}
+  .scrub{order:5;flex-basis:100%}
+  .stepno{margin-left:auto}
+}
+@media (max-width:380px){
+  .c-title{font-size:12px}
+  .chips{gap:4px}
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="two-flows-last-book" data-dur="12.8" data-rest="12.8" tabindex="0"
+  aria-label="動畫：BOOK-1 只剩 1 本。重構前網站和批次匯入各有一份下單流程，網站那份先查庫存再扣款；批次那份沒查庫存就扣款，inventory.deduct 丟出的庫存不足例外被吞掉，結果 1 本書收了 alice 和 bob 各 360 元、開了 ORD-1 和 ORD-2 兩張出貨單。切到重構後，兩個入口共用同一個 PlaceOrderUseCase，bob 在查庫存就被擋下，丟出 OutOfStockException，沒有扣款，只有 alice 被扣款。">
+  <div class="modes" role="group" aria-label="切換重構前後">
+    <button class="mode" id="m0" type="button" aria-pressed="true">重構前：兩份流程</button>
+    <button class="mode" id="m1" type="button" aria-pressed="false">重構後：一份 <span class="code">PlaceOrderUseCase</span></button>
+  </div>
+
+  <div class="stage">
+    <div class="flows" id="flows"></div>
+
+    <div class="states">
+      <div class="card">
+        <div class="c-title">BOOK-1 庫存</div>
+        <div class="stock"><span class="num" id="stock">1</span><span class="unit">本</span></div>
+      </div>
+      <div class="card">
+        <div class="c-title">金流扣款紀錄</div>
+        <div class="chips" id="charges"></div>
+      </div>
+      <div class="card">
+        <div class="c-title">出貨單</div>
+        <div class="chips" id="ships"></div>
+      </div>
+      <div class="result" id="result" style="opacity:0">
+        <div class="badge" id="badge"></div>
+        <div class="out" id="out"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="readout" id="readout" aria-live="polite"></div>
+
+  <div class="controls">
+    <button class="btn" id="play" type="button" aria-label="播放">▶ <span id="playtxt">播放</span></button>
+    <button class="btn icon" id="prev" type="button" aria-label="上一步">‹</button>
+    <button class="btn icon" id="next" type="button" aria-label="下一步">›</button>
+    <input class="scrub" id="scrub" type="range" min="0" max="12.8" step="0.05" value="12.8" aria-label="時間軸">
+    <span class="stepno" id="stepno">8 / 8</span>
+    <button class="btn icon" id="theme" type="button" aria-label="切換深淺色">◐</button>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw dash"></i>虛線：還沒做，或流程裡沒有這一步</span>
+    <span><i class="sw hot"></i>出事的地方</span>
+    <span><i class="sw stop"></i>在這裡被擋下</span>
+    <span><i class="sw now"></i>現在這一步</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var STEP = 1.6;
+  var HEAD = ['查庫存', '扣款', '扣庫存', '出貨'];
+  // cell: [step, main, sub, kind]
+  var MODES = [
+    {
+      n: 8,
+      groups: [
+        { cap: '網站那份流程 <span class="code">OrderController</span>', cls: '',
+          rows: [{ who: '網站', name: 'alice', cells: [[1,'剩 1','夠',''],[2,'360','扣款成功',''],[3,'1→0','扣成功',''],[4,'ORD-1','通知出貨','']] }] },
+        { cap: '批次那份流程 <span class="note">很久以前從舊程式複製過來改的</span>', cls: '',
+          rows: [{ who: '批次', name: 'bob', cells: [[5,'沒查','少了這步','hot miss'],[5,'360','扣款成功','hot'],[6,'例外','被吞掉','hot'],[7,'ORD-2','通知出貨','hot']] }] }
+      ],
+      stock: [[0,1],[3,0]],
+      charges: [[2,'alice 360',''],[5,'bob 360','hot']],
+      ships: [[4,'ORD-1',''],[7,'ORD-2','hot']],
+      resultAt: 7,
+      badge: '1 本書：收 2 次錢、開 2 張出貨單', badgeHot: true,
+      out: '批次日誌：<span class="code">匯入成功：ORD-2，扣款 360</span>，沒有任何錯誤',
+      text: [
+        'BOOK-1 只剩最後 <b>1</b> 本，單價 300 元，未滿 1000 元加運費 60 元，一筆 <b>360</b> 元。網站和批次匯入做的都是「下單」，卻<b>各有一份</b>流程。',
+        'T1　alice 從網站下單，先查庫存：剩 1 本，夠。',
+        'T2　網站扣款 360 元成功。',
+        'T3　網站扣庫存，1 變 0。',
+        'T4　訂單 ORD-1 通知出貨。網站這份順序是對的：先查庫存，夠了才扣款。',
+        'T5　客服匯入 bob 的訂單。批次那份流程<span class="hl">沒有查庫存這一步</span>，直接 <code>payment.charge</code> 扣款 360 元，成功。',
+        'T6　<code>inventory.deduct</code> 看到剩 0 本，什麼都不做、回傳 <code>false</code>，<span class="hl">程式沒檢查</span>，繼續往下跑。',
+        'T7　訂單 ORD-2 也通知出貨，印出「匯入成功」。<span class="hl">1 本書收了 2 次錢、開了 2 張出貨單</span>。庫存是 0、沒變成負數，所以庫存監控也沒叫。'
+      ]
+    },
+    {
+      n: 7,
+      groups: [
+        { cap: '<span class="code">PlaceOrderUseCase</span>：唯一一份流程 <span class="note">OrderController、BulkImportCommand 都只把輸入翻成同一張 PlaceOrderCommand</span>', cls: 'one',
+          rows: [
+            { who: '網站', name: 'alice', cells: [[1,'剩 1','夠',''],[2,'360','扣款成功',''],[3,'1→0','扣成功',''],[4,'ORD-1','HTTP 201','']] },
+            { who: '批次', name: 'bob', cells: [[5,'剩 0','不夠','stop'],[6,'—','沒執行','skip'],[6,'—','沒執行','skip'],[6,'—','沒執行','skip']] }
+          ] }
+      ],
+      stock: [[0,1],[3,0]],
+      charges: [[2,'alice 360','']],
+      ships: [[4,'ORD-1','']],
+      resultAt: 6,
+      badge: '1 本書：收 1 次錢、開 1 張出貨單', badgeHot: false,
+      out: '批次輸出：<span class="code">第 1 行：失敗，庫存不足 BOOK-1</span>',
+      text: [
+        '重構後：網站的 <code>OrderController</code> 和批次的 <code>BulkImportCommand</code> 都只把輸入翻成 <code>PlaceOrderCommand</code>，交給<b>同一個</b> <code>PlaceOrderUseCase</code>。BOOK-1 一樣只剩 1 本。',
+        'alice 從網站下單，先查庫存：剩 1 本，夠。',
+        '扣款 360 元成功。',
+        '扣庫存，1 變 0。',
+        '訂單 ORD-1 通知出貨，網站回 HTTP 201。',
+        'bob 從批次匯入，走的是<b>同一份流程</b>：先查庫存，剩 0 本，不夠，丟出 <code>OutOfStockException</code>。',
+        '後面的扣款、扣庫存、出貨都沒有執行，批次印出「第 1 行：失敗，庫存不足 BOOK-1」。<b>只有 alice 被扣款</b>，最後一本書只賣出一次。'
+      ]
+    }
+  ];
+  MODES.forEach(function(m){ m.dur = (m.n - 1) * STEP + 1.6; });
+
+  var root = document.documentElement;
+  var fig = document.querySelector('.fig');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var $ = function(id){ return document.getElementById(id); };
+  var flows = $('flows'), stockEl = $('stock'), chargesEl = $('charges'), shipsEl = $('ships');
+  var result = $('result'), badge = $('badge'), outEl = $('out'), readout = $('readout');
+  var scrub = $('scrub'), stepno = $('stepno'), playBtn = $('play'), playTxt = $('playtxt');
+  var modeBtns = [$('m0'), $('m1')];
+
+  function mk(tag, cls, html){ var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+  function clamp(v, a, b){ return v < a ? a : (v > b ? b : v); }
+  function ease(x){ x = clamp(x, 0, 1); return 1 - Math.pow(1 - x, 3); }
+  function fade(){ return reduce.matches ? 0.0001 : 0.35; }
+  function prog(t, te){ return ease((t - te) / fade()); }
+  function setS(c, el, k, v){ if (c[k] !== v){ c[k] = v; el.style[k] = v; } }
+  function setCls(o, el, k, on){ var key = 'c_' + k; if (o[key] !== on){ o[key] = on; el.classList.toggle(k, on); } }
+
+  var mode = 0, M = MODES[0], cells = [], chips = [], t = M.dur;
+  var playing = false, visible = true, raf = 0, last = 0;
+  var cache = {}, lastText = -1, lastStock = null;
+
+  function stepOf(x){ return Math.min(M.n - 1, Math.floor(x / STEP + 1e-6)); }
+
+  function build(){
+    M = MODES[mode];
+    var frag = document.createDocumentFragment();
+    cells = [];
+    M.groups.forEach(function(g){
+      var gEl = mk('div', 'grp ' + g.cls);
+      gEl.appendChild(mk('div', 'grp-cap', g.cap));
+      var hr = mk('div', 'row');
+      hr.appendChild(mk('div', ''));
+      HEAD.forEach(function(h){ hr.appendChild(mk('div', 'hd', h)); });
+      gEl.appendChild(hr);
+      g.rows.forEach(function(r){
+        var row = mk('div', 'row');
+        row.appendChild(mk('div', 'lane', '<b>' + r.who + '</b><small>' + r.name + '</small>' + (r.long ? '<small class="long code">' + r.long + '</small>' : '')));
+        r.cells.forEach(function(d){
+          var c = mk('div', 'cell ' + d[3]);
+          var inner = mk('div', 'in', '<span class="main">' + d[1] + '</span><span class="sub">' + d[2] + '</span>');
+          inner.style.opacity = '0';
+          c.appendChild(inner);
+          row.appendChild(c);
+          cells.push({ el: c, inner: inner, step: d[0], te: d[0] * STEP, cache: {} });
+        });
+        gEl.appendChild(row);
+      });
+      frag.appendChild(gEl);
+    });
+    flows.textContent = '';
+    flows.appendChild(frag);
+
+    chips = [];
+    [[chargesEl, M.charges], [shipsEl, M.ships]].forEach(function(p){
+      p[0].textContent = '';
+      var none = mk('span', 'none', '無');
+      p[0].appendChild(none);
+      var list = [];
+      p[1].forEach(function(d){
+        var ch = mk('span', 'chip ' + d[2], d[1]);
+        ch.style.display = 'none';
+        p[0].appendChild(ch);
+        list.push({ el: ch, te: d[0] * STEP, cache: {} });
+      });
+      chips.push({ none: none, list: list, cache: {} });
+    });
+    badge.textContent = M.badge;
+    badge.classList.toggle('hot', M.badgeHot);
+    outEl.innerHTML = M.out;
+    cache = {}; lastText = -1; lastStock = null;
+    scrub.max = String(M.dur);
+    fig.setAttribute('data-dur', String(M.dur));
+    modeBtns.forEach(function(b, i){ b.setAttribute('aria-pressed', String(i === mode)); });
+  }
+
+  function render(){
+    var st = stepOf(t);
+    cells.forEach(function(c){
+      var p = prog(t, c.te);
+      setS(c.cache, c.inner, 'opacity', p.toFixed(3));
+      setS(c.cache, c.inner, 'transform', 'translateY(' + ((1 - p) * 6).toFixed(2) + 'px)');
+      setCls(c.cache, c.el, 'on', t >= c.te);
+      setCls(c.cache, c.el, 'now', st < M.n - 1 && st > 0 && c.step === st);
+    });
+    var stock = 1;
+    M.stock.forEach(function(s){ if (t >= s[0] * STEP) stock = s[1]; });
+    if (lastStock !== stock){ lastStock = stock; stockEl.textContent = String(stock); }
+    chips.forEach(function(g){
+      var any = false;
+      g.list.forEach(function(ch){
+        var on = t >= ch.te;
+        if (on) any = true;
+        setS(ch.cache, ch.el, 'display', on ? '' : 'none');
+        setS(ch.cache, ch.el, 'opacity', on ? prog(t, ch.te).toFixed(3) : '0');
+      });
+      setS(g.cache, g.none, 'display', any ? 'none' : '');
+    });
+    setS(cache, result, 'opacity', prog(t, M.resultAt * STEP).toFixed(3));
+    if (lastText !== st){ lastText = st; readout.innerHTML = M.text[st]; stepno.textContent = (st + 1) + ' / ' + M.n; }
+    var sv = t.toFixed(2);
+    if (scrub.value !== sv) scrub.value = sv;
+  }
+
+  function updatePlay(){
+    playTxt.textContent = playing ? '暫停' : '播放';
+    playBtn.firstChild.nodeValue = playing ? '❚❚ ' : '▶ ';
+    playBtn.setAttribute('aria-label', playing ? '暫停' : '播放');
+  }
+  function tick(now){
+    if (!playing || !visible){ raf = 0; return; }
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    t = Math.min(M.dur, t + dt);
+    render();
+    if (t >= M.dur){ playing = false; raf = 0; updatePlay(); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function startLoop(){ if (raf || !playing || !visible) return; last = performance.now(); raf = requestAnimationFrame(tick); }
+  function stopLoop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function play(){ if (t >= M.dur - 0.01) t = 0; playing = true; updatePlay(); render(); startLoop(); }
+  function pause(){ playing = false; stopLoop(); updatePlay(); }
+  function seek(x){ pause(); t = clamp(Number(x) || 0, 0, M.dur); render(); }
+  function gotoStep(k){ k = clamp(k, 0, M.n - 1); seek(k === M.n - 1 ? M.dur : k * STEP + 1.2); }
+  function setMode(i, autoplay){
+    if (i === mode && cells.length) return;
+    pause(); mode = i; build();
+    if (autoplay && !reduce.matches){ t = 0; render(); play(); }
+    else { t = M.dur; render(); }
+  }
+
+  playBtn.addEventListener('click', function(){ playing ? pause() : play(); });
+  $('prev').addEventListener('click', function(){ gotoStep(stepOf(t) - 1); });
+  $('next').addEventListener('click', function(){ gotoStep(stepOf(t) + 1); });
+  scrub.addEventListener('input', function(){ seek(parseFloat(scrub.value)); });
+  modeBtns.forEach(function(b, i){ b.addEventListener('click', function(){ setMode(i, true); }); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target === scrub) return;
+    if (e.key === 'ArrowRight'){ gotoStep(stepOf(t) + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft'){ gotoStep(stepOf(t) - 1); e.preventDefault(); }
+    else if (e.key === 'Home'){ gotoStep(0); e.preventDefault(); }
+    else if (e.key === 'End'){ seek(M.dur); e.preventDefault(); }
+    else if ((e.key === ' ' || e.key === 'Enter') && e.target === fig){ playing ? pause() : play(); e.preventDefault(); }
+  });
+  $('theme').addEventListener('click', function(){
+    var cur = root.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) startLoop(); else stopLoop();
+    }, { rootMargin: '120px' }).observe(fig);
+  }
+
+  window.timeline = function(){ return M.dur; };
+  window.seek = seek;
+  window.setMode = function(i){ setMode(i, false); };
+
+  build();
+  t = M.dur;
+  render();
+  updatePlay();
+})();
+</script>
+</body>
+</html>

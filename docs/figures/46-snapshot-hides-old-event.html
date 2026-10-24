@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>快照藏住舊格式事件</title>
+<style>
+:root{
+  --paper:#ffffff; --card:#f5f6f8; --ghost:#fafafb; --ink:#1f2430; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(31,36,48,.16); --rule-strong:#9aa3b5;
+  --read:#2e5aa8; --read-tint:rgba(46,90,168,.10);
+  --snap:#4f5d75; --snap-tint:rgba(79,93,117,.12);
+  --hot-fill:#fde68a; --hot-line:#b45309; --hot-ink:#111111;
+  --focus:#2e5aa8;
+  --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,"Noto Sans Mono","Noto Sans TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2029; --card:#272b36; --ghost:#22252f; --ink:#e7e9ef; --muted:#b4bccb; --soft:#9aa3b5;
+    --rule:rgba(231,233,239,.16); --rule-strong:#6b7487;
+    --read:#8db4ef; --read-tint:rgba(141,180,239,.14);
+    --snap:#b4bccb; --snap-tint:rgba(180,188,203,.14);
+    --hot-fill:#4d3b0f; --hot-line:#f59e0b; --hot-ink:#fde68a;
+    --focus:#8db4ef; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2029; --card:#272b36; --ghost:#22252f; --ink:#e7e9ef; --muted:#b4bccb; --soft:#9aa3b5;
+  --rule:rgba(231,233,239,.16); --rule-strong:#6b7487;
+  --read:#8db4ef; --read-tint:rgba(141,180,239,.14);
+  --snap:#b4bccb; --snap-tint:rgba(180,188,203,.14);
+  --hot-fill:#4d3b0f; --hot-line:#f59e0b; --hot-ink:#fde68a;
+  --focus:#8db4ef; color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-text-size-adjust:100%}
+*{box-sizing:border-box}
+
+.fig{margin:0;padding:12px 16px 16px;max-width:960px;min-width:0;outline:none}
+.fig:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;border-radius:8px}
+
+/* controls */
+.ctrl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctrl button{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--rule);border-radius:6px;min-height:36px;min-width:36px;padding:0 12px;cursor:pointer}
+.ctrl button:hover{border-color:var(--rule-strong)}
+.ctrl button:focus-visible,.ticks button:focus-visible,.scrub:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.ctrl .play{font-weight:600;min-width:84px}
+.ctrl .theme{margin-left:auto;font-size:12px;padding:0 8px;color:var(--soft)}
+.scrubrow{margin-top:8px}
+.scrub{width:100%;margin:0;height:32px;accent-color:var(--hot-line);cursor:pointer}
+.ticks{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.ticks button{font:inherit;font-size:12px;line-height:1.2;color:var(--soft);background:transparent;border:1px solid transparent;border-radius:6px;min-height:36px;padding:2px 0;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ticks button b{font-family:var(--mono);font-size:13px;color:var(--muted);font-weight:600}
+.ticks button[aria-current="step"]{border-color:var(--hot-line);background:var(--hot-fill);color:var(--hot-ink)}
+.ticks button[aria-current="step"] b{color:var(--hot-ink)}
+.ticks .when{font-size:12px}
+@media (max-width:519px){ .ticks .when{display:none} }
+
+/* narration */
+.say{margin-top:12px;padding:12px;border-left:4px solid var(--hot-line);background:var(--card);border-radius:0 8px 8px 0;min-height:72px}
+.say .tag{font-family:var(--mono);font-weight:700;margin-right:8px}
+.say .tw{color:var(--soft);font-size:13px;margin-right:8px}
+.say code,.code,.data,.log{font-family:var(--mono)}
+.say code{font-size:13px;background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:0 4px}
+
+/* stream */
+.lane{margin-top:16px}
+.lane-h{font-size:13px;font-weight:600;color:var(--muted);margin:0 0 8px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.lane-h small{font-weight:400;color:var(--soft);font-size:12px}
+.stream{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto auto;gap:8px 12px}
+.ev{grid-row:1;position:relative;background:var(--card);border:1.5px solid var(--rule);border-radius:8px;padding:12px;min-height:112px;min-width:0;transition:background-color .3s,border-color .3s,opacity .3s}
+.ev .top{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.ev .v{font-family:var(--mono);font-weight:700;font-size:14px}
+.ev .type{font-family:var(--mono);font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.ev .data{display:block;font-size:13px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+.ev .fmt{display:inline-block;margin-top:4px;font-size:12px;color:var(--soft)}
+.ev .chip{display:block;margin-top:8px;font-size:12px;line-height:1.4;min-height:17px;color:var(--soft)}
+.ev.ghost{background:var(--ghost);border-style:dashed;opacity:.55}
+.ev.ghost .top,.ev.ghost .data,.ev.ghost .fmt{visibility:hidden}
+.ev.ghost .chip{color:var(--soft)}
+.ev.s-snap{opacity:.8}
+.ev.s-read,.ev.s-new{border-color:var(--read);background:var(--read-tint)}
+.ev.s-read .chip,.ev.s-new .chip{color:var(--read);font-weight:600}
+.ev.s-hidden{border:2px dashed var(--hot-line)}
+.ev.s-hidden .chip{color:var(--hot-line);font-weight:600}
+.ev.s-err,.ev.s-zero{border:2px solid var(--hot-line);background:var(--hot-fill);color:var(--hot-ink)}
+.ev.s-err .data,.ev.s-zero .data,.ev.s-err .fmt,.ev.s-zero .fmt,.ev.s-err .chip,.ev.s-zero .chip{color:var(--hot-ink)}
+.ev.s-err .chip,.ev.s-zero .chip{font-weight:700}
+.ev.s-unread{opacity:.5}
+.ev.s-kept .chip{color:var(--muted);font-weight:600}
+
+.cov{grid-row:2;grid-column:1 / span var(--cov,1);border:1.5px solid var(--snap);background:var(--snap-tint);border-radius:6px;min-height:36px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--muted);padding:4px 8px;text-align:center;transition:opacity .3s}
+.cov.void{border-style:dashed;background:repeating-linear-gradient(135deg,transparent 0 6px,var(--snap-tint) 6px 12px);text-decoration:line-through;text-decoration-thickness:2px}
+.cov.none{display:none}
+.snapline{margin-top:8px;font-size:13px;color:var(--muted);min-height:20px}
+.snapline b{color:var(--ink)}
+
+@media (max-width:559px){
+  .stream{grid-template-columns:12px minmax(0,1fr);grid-template-rows:repeat(3,auto);gap:8px}
+  .ev{grid-column:2;grid-row:auto;min-height:0}
+  .ev[data-i="0"]{grid-row:1} .ev[data-i="1"]{grid-row:2} .ev[data-i="2"]{grid-row:3}
+  .cov{grid-column:1;grid-row:1 / span var(--cov,1);min-height:0;padding:0;font-size:0;border-radius:6px}
+  .cov span{display:none}
+  .cov.void{text-decoration:none}
+}
+
+/* arrow to readers */
+.down{display:flex;align-items:center;gap:8px;margin:12px 0 0;color:var(--soft);font-size:12px}
+.down::before{content:"";display:block;width:2px;height:20px;background:var(--rule-strong);margin-left:20px}
+.down i{font-style:normal}
+
+/* readers */
+.readers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:8px}
+@media (max-width:559px){ .readers{grid-template-columns:minmax(0,1fr)} }
+.rd{background:var(--card);border:1.5px solid var(--rule);border-radius:8px;padding:12px;min-width:0;transition:border-color .3s,background-color .3s,opacity .3s}
+.rd.idle{opacity:.62}
+.rd.active{border-color:var(--rule-strong)}
+.rd h3{margin:0;font-size:14px;font-weight:600}
+.rd .sub{font-size:12px;color:var(--soft);margin-top:2px}
+.rd .code{display:inline-block;margin-top:8px;font-size:13px;padding:2px 8px;border-radius:4px;border:1px solid var(--rule);background:var(--paper);overflow-wrap:anywhere;transition:background-color .3s,border-color .3s}
+.rd .code.hot{background:var(--hot-fill);border-color:var(--hot-line);color:var(--hot-ink)}
+.rd .note{font-size:12px;color:var(--soft);margin-left:4px}
+.rd .out{margin-top:8px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-height:34px}
+.rd .val{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.3;padding:0 4px;border-radius:4px}
+.rd .val.hot{background:var(--hot-fill);color:var(--hot-ink);box-shadow:0 0 0 1.5px var(--hot-line)}
+.rd .val.dim{color:var(--soft);font-weight:400;font-size:16px}
+.rd .unit{font-size:12px;color:var(--soft)}
+.rd .right{font-size:13px;color:var(--muted)}
+.rd .log{display:block;margin-top:4px;font-size:12px;color:var(--muted);min-height:18px;overflow-wrap:anywhere}
+.rd .log.hot{color:var(--hot-line);font-weight:700}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px;font-size:12px;color:var(--soft)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:16px;height:12px;border-radius:3px}
+.k-hot{background:var(--hot-fill);border:1.5px solid var(--hot-line)}
+.k-read{background:var(--read-tint);border:1.5px solid var(--read)}
+.k-snap{background:var(--snap-tint);border:1.5px solid var(--snap)}
+.k-hid{border:1.5px dashed var(--hot-line)}
+
+/* motion: a replay sweeps left to right, then the reader's output lands */
+@keyframes pop{0%{transform:scale(.92)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
+@keyframes sweep{0%{box-shadow:0 0 0 0 var(--read)}40%{box-shadow:0 0 0 4px var(--read-tint)}100%{box-shadow:0 0 0 0 transparent}}
+.anim .ev.s-read,.anim .ev.s-new,.anim .ev.s-err,.anim .ev.s-zero{animation:sweep .7s cubic-bezier(.16,1,.3,1) both;animation-delay:calc(var(--d,0) * 360ms)}
+.anim .rd.active .val{animation:pop .45s cubic-bezier(.34,1.56,.64,1) both;animation-delay:calc(var(--rd,0) * 360ms)}
+.anim .cov{animation:pop .4s cubic-bezier(.34,1.56,.64,1) both}
+.instant *,.instant *::before{transition:none!important;animation:none!important}
+@media (prefers-reduced-motion: reduce){
+  *,*::before{transition:none!important;animation:none!important}
+}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="snapshot-hides-old-event" data-dur="18.2" data-rest="13" tabindex="0"
+  aria-label="錢包 w-1 的事故時間軸：快照讓舊格式的 v2 事件 PointsRedeemed {points: 1000} 一直沒被讀到；T5 快照全部作廢後，T6 從 v1 完整重播，套用 v2 時找不到 amount，錢包頁 500；T7 報表投影重建時拿到 0，可用點數算成 2,800（正確是 1,800）。左右鍵切換時間點，空白鍵播放或暫停。">
+  <div class="ctrl" role="group" aria-label="播放控制">
+    <button type="button" class="play" data-act="play" aria-label="播放">▶ 播放</button>
+    <button type="button" data-act="prev" aria-label="上一格">◀</button>
+    <button type="button" data-act="next" aria-label="下一格">▶</button>
+    <button type="button" class="theme" data-act="theme" aria-label="切換深淺色">深淺色</button>
+  </div>
+  <div class="scrubrow">
+    <input class="scrub" type="range" min="0" max="6" step="1" value="5" aria-label="時間軸 T1 到 T7" aria-valuetext="T6">
+    <div class="ticks" role="group" aria-label="跳到時間點"></div>
+  </div>
+
+  <div class="say" aria-live="polite"></div>
+
+  <div class="lane">
+    <p class="lane-h">事件串流 <span class="data" style="font-family:var(--mono)">w-1</span><small>事件永久保存，一筆都不會被改</small></p>
+    <div class="stream">
+      <div class="ev" data-i="0" style="--d:0"><div class="top"><span class="v">v1</span><span class="type">PointsEarned</span></div><span class="data">{points: 3000}</span><span class="chip"></span></div>
+      <div class="ev" data-i="1" style="--d:1"><div class="top"><span class="v">v2</span><span class="type">PointsRedeemed</span></div><span class="data">{points: 1000}</span><span class="fmt">舊格式：只有 points</span><span class="chip"></span></div>
+      <div class="ev" data-i="2" style="--d:2"><div class="top"><span class="v">v3</span><span class="type">PointsRedeemed</span></div><span class="data">{amount: 200}</span><span class="fmt">新格式：amount</span><span class="chip"></span></div>
+      <div class="cov"><span></span></div>
+    </div>
+    <div class="snapline"></div>
+  </div>
+
+  <div class="down"><i>載入時讀事件的兩支程式</i></div>
+  <div class="readers">
+    <div class="rd" data-r="wallet">
+      <h3>錢包頁</h3>
+      <div class="sub">載入時用 <span style="font-family:var(--mono)">apply</span> 套用事件</div>
+      <span class="code"></span><span class="note"></span>
+      <div class="out"><span class="val"></span><span class="unit"></span></div>
+      <span class="log"></span>
+    </div>
+    <div class="rd" data-r="report">
+      <h3>報表投影</h3>
+      <div class="sub">背景程式讀所有事件，整理成報表</div>
+      <span class="code"></span><span class="note"></span>
+      <div class="out"><span class="val"></span><span class="unit"></span><span class="right"></span></div>
+      <span class="log"></span>
+    </div>
+  </div>
+
+  <div class="legend" aria-hidden="true">
+    <span><i class="k-hot"></i>事情發生在這裡</span>
+    <span><i class="k-read"></i>這一步讀到的事件</span>
+    <span><i class="k-snap"></i>快照涵蓋的範圍</span>
+    <span><i class="k-hid"></i>舊格式藏在快照裡</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  'use strict';
+  var STEP = 2.6;            // seconds per state when playing
+  var REST = 5;              // T6: the full replay that blows up
+  // Every value below comes from 46-事件來源.md, 「為什麼要在意」的時間軸表格。
+  var S = [
+    { t:'T1', when:'半年前',
+      say:'會員賺到 3,000 點，寫入 v1。快照存成版本 1、餘額 3,000。',
+      ev:[['new','新寫入，已套用'],null,null], cov:1, covText:'快照 版本 1',
+      snap:'<b>快照</b>：版本 1，餘額 3,000',
+      w:{active:1, code:'讀 data["points"]', val:'3,000', unit:'點'},
+      r:{active:0, code:'（重構前的版本）', val:'—'} },
+    { t:'T2', when:'三個月前',
+      say:'兌換 1,000 點，寫入 v2。這時的程式讀 <code>points</code>，沒問題。快照更新成版本 2、餘額 2,000。',
+      ev:[['snap','在快照裡'],['new','新寫入，讀 points 正常'],null], cov:2, covText:'快照 版本 2',
+      snap:'<b>快照</b>：版本 2，餘額 2,000',
+      w:{active:1, code:'讀 data["points"]', val:'2,000', unit:'點'},
+      r:{active:0, code:'（重構前的版本）', val:'—'} },
+    { t:'T3', when:'第 0 週',
+      say:'部署重構：<code>apply</code> 改讀 <code>data["amount"]</code>，投影改成 <code>data.get("amount", 0)</code>。測試只用新資料，全部通過。事件一筆都沒動。',
+      ev:[['snap','在快照裡'],['snap','在快照裡'],null], cov:2, covText:'快照 版本 2',
+      snap:'<b>快照</b>：版本 2，餘額 2,000',
+      w:{active:1, code:'讀 data["amount"]', hot:1, note:'剛改，測試全過', val:'2,000', unit:'點'},
+      r:{active:1, code:'data.get("amount", 0)', hot:1, note:'剛改', val:'—'} },
+    { t:'T4', when:'第 1 週',
+      say:'再兌換 200 點，寫入 v3。從快照版本 2 接著算，只讀到 v3；舊格式的 v2 被快照蓋住，<b>沒被讀到</b>，所以看不出問題。',
+      ev:[['snap','在快照裡'],['hidden','舊格式還在，但沒被讀到'],['new','新寫入，讀 amount 正常']], cov:3, covText:'快照 版本 3',
+      snap:'<b>快照</b>：版本 3，餘額 1,800（從版本 2 接著算）',
+      w:{active:1, code:'讀 data["amount"]', val:'1,800', unit:'點'},
+      r:{active:0, code:'data.get("amount", 0)', val:'—'} },
+    { t:'T5', when:'第 2 週',
+      say:'另一個改版調整快照格式，<b>作廢所有舊快照</b>，同時重建報表投影。',
+      ev:[['kept','還在，沒壞'],['kept','還在，沒壞'],['kept','還在，沒壞']], cov:3, covText:'快照全部作廢', covVoid:1,
+      snap:'<b>快照</b>：全部作廢',
+      w:{active:0, code:'讀 data["amount"]', val:'—'},
+      r:{active:1, code:'data.get("amount", 0)', val:'重建中', dim:1} },
+    { t:'T6', when:'',
+      say:'會員打開錢包頁。沒有快照，只能從 v1 <b>完整重播</b>；套用 v2 時找不到 <code>amount</code>，錢包頁 500。',
+      ev:[['read','重播：讀到'],['err','套用時找不到 amount'],['unread','沒跑到這裡']], cov:0,
+      snap:'<b>沒有快照</b> → 只能從 v1 完整重播',
+      w:{active:1, code:'讀 data["amount"]', val:'500 錯誤', hot:1, log:"日誌：KeyError: 'amount'", logHot:1},
+      r:{active:0, code:'data.get("amount", 0)', val:'重建中', dim:1} },
+    { t:'T7', when:'',
+      say:'報表投影重建到 v2，<code>data.get("amount", 0)</code> 拿到 0，等於沒扣這 1,000 點。沒有報錯，日誌裡什麼都沒有。',
+      ev:[['read','投影：讀到'],['zero','拿到 0，當成扣 0 點'],['read','投影：讀到']], cov:0,
+      snap:'<b>沒有快照</b> → 只能從 v1 完整重播',
+      w:{active:0, code:'讀 data["amount"]', val:'500 錯誤', dim:1},
+      r:{active:1, code:'data.get("amount", 0)', val:'2,800', hot:1, unit:'可用點數', right:'正確是 1,800', log:'日誌：沒有任何錯誤'} }
+  ];
+
+  var fig = document.querySelector('.fig');
+  var root = document.documentElement;
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var $ = function(s, el){ return (el || fig).querySelector(s); };
+  var evs = [].slice.call(fig.querySelectorAll('.ev'));
+  var cov = $('.cov'), scrub = $('.scrub'), say = $('.say'), snapline = $('.snapline');
+  var playBtn = $('[data-act="play"]'), ticks = $('.ticks');
+  var rds = { w: $('[data-r="wallet"]'), r: $('[data-r="report"]') };
+  var idx = REST, playing = false, timer = 0, visible = true, played = false;
+
+  S.forEach(function(s, i){
+    var b = document.createElement('button');
+    b.type = 'button'; b.dataset.i = i;
+    b.setAttribute('aria-label', s.t + (s.when ? '（' + s.when + '）' : ''));
+    b.innerHTML = '<b>' + s.t + '</b>' + (s.when ? '<span class="when">' + s.when + '</span>' : '<span class="when">&nbsp;</span>');
+    b.addEventListener('click', function(){ pause(); go(i, true); });
+    ticks.appendChild(b);
+  });
+
+  function setReader(el, d){
+    el.className = 'rd ' + (d.active ? 'active' : 'idle');
+    var code = $('.code', el); code.textContent = d.code; code.className = 'code' + (d.hot && d.note ? ' hot' : '');
+    $('.note', el).textContent = d.note || '';
+    var v = $('.val', el); v.textContent = d.val;
+    v.className = 'val' + (d.hot && !d.note ? ' hot' : '') + (d.dim ? ' dim' : '');
+    $('.unit', el).textContent = d.unit || '';
+    var r = $('.right', el); if (r) r.textContent = d.right || '';
+    var lg = $('.log', el); lg.textContent = d.log || ''; lg.className = 'log' + (d.logHot ? ' hot' : '');
+  }
+
+  function render(i, animate){
+    var s = S[i];
+    fig.classList.remove('anim');
+    fig.classList.toggle('instant', !animate);
+    // events
+    var sweep = 0;
+    evs.forEach(function(el, k){
+      var e = s.ev[k];
+      el.className = 'ev' + (e ? ' s-' + e[0] : ' ghost');
+      $('.chip', el).textContent = e ? e[1] : '還沒發生';
+      if (e && /read|new|err|zero/.test(e[0])) { el.style.setProperty('--d', sweep); sweep++; }
+    });
+    // snapshot coverage
+    cov.className = 'cov' + (s.cov ? '' : ' none') + (s.covVoid ? ' void' : '');
+    cov.style.setProperty('--cov', s.cov || 1);
+    $('span', cov).textContent = s.covText || '';
+    cov.setAttribute('aria-label', s.covText || '沒有快照');
+    snapline.innerHTML = s.snap;
+    // narration
+    say.innerHTML = '<span class="tag">' + s.t + '</span>' + (s.when ? '<span class="tw">' + s.when + '</span>' : '') + s.say;
+    // readers; the output lands after the sweep
+    rds.w.style.setProperty('--rd', sweep);
+    rds.r.style.setProperty('--rd', sweep);
+    setReader(rds.w, s.w); setReader(rds.r, s.r);
+    // controls
+    scrub.value = i;
+    scrub.setAttribute('aria-valuetext', s.t + (s.when ? '，' + s.when : ''));
+    [].forEach.call(ticks.children, function(b, k){ if (k === i) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
+    if (animate && !reduce.matches) { void fig.offsetWidth; fig.classList.add('anim'); }
+  }
+
+  function go(i, animate){ idx = Math.max(0, Math.min(S.length - 1, i)); render(idx, animate); }
+
+  function tick(){
+    timer = 0;
+    if (!playing) return;
+    if (idx >= S.length - 1) { pause(); return; }
+    go(idx + 1, true);
+    schedule();
+  }
+  function schedule(){ clearTimeout(timer); if (playing && visible) timer = setTimeout(tick, STEP * 1000); }
+  function play(){
+    if (!played || idx >= S.length - 1) { idx = -1; }
+    played = true; playing = true;
+    playBtn.textContent = '❚❚ 暫停'; playBtn.setAttribute('aria-label', '暫停');
+    if (idx < 0) { go(0, true); }
+    schedule();
+  }
+  function pause(){
+    playing = false; clearTimeout(timer); timer = 0;
+    playBtn.textContent = '▶ 播放'; playBtn.setAttribute('aria-label', '播放');
+  }
+
+  fig.addEventListener('click', function(e){
+    var b = e.target.closest('[data-act]'); if (!b) return;
+    var a = b.dataset.act;
+    if (a === 'play') { playing ? pause() : play(); }
+    else if (a === 'prev') { pause(); go(idx - 1, true); }
+    else if (a === 'next') { pause(); go(idx + 1, true); }
+    else if (a === 'theme') {
+      var dark = root.dataset.theme ? root.dataset.theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.dataset.theme = dark ? 'light' : 'dark';
+    }
+  });
+  scrub.addEventListener('input', function(){ pause(); played = true; go(+scrub.value, true); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target === scrub) return;
+    var k = e.key;
+    if (k === 'ArrowRight' || k === 'ArrowDown') { pause(); go(idx + 1, true); }
+    else if (k === 'ArrowLeft' || k === 'ArrowUp') { pause(); go(idx - 1, true); }
+    else if (k === 'Home') { pause(); go(0, true); }
+    else if (k === 'End') { pause(); go(S.length - 1, true); }
+    else if ((k === ' ' || k === 'Enter') && e.target === fig) { playing ? pause() : play(); }
+    else return;
+    e.preventDefault();
+  });
+
+  // pause while off screen
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function(en){
+      visible = en[0].isIntersecting;
+      if (visible) schedule(); else { clearTimeout(timer); timer = 0; }
+    }, { rootMargin: '120px' }).observe(fig);
+  }
+
+  // host hooks: seek(t) paints that instant and pauses
+  window.DUR = S.length * STEP;
+  window.timeline = function(){ return { dur: window.DUR, rest: REST * STEP, step: STEP, states: S.map(function(s){ return s.t; }) }; };
+  window.seek = function(t){ pause(); go(Math.floor((+t || 0) / STEP + 1e-6), false); };
+
+  // tell an embedding page our height, once per resize
+  if (window.parent !== window && 'ResizeObserver' in window) {
+    var last = 0;
+    new ResizeObserver(function(){
+      var h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+      if (h !== last) { last = h; try { window.parent.postMessage({ type: 'draw-figure-height', fig: 'snapshot-hides-old-event', height: h }, '*'); } catch (e) {} }
+    }).observe(document.body);
+  }
+
+  render(REST, false);
+})();
+</script>
+</body>
+</html>

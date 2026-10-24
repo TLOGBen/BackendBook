@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鎖佇列卡死</title>
+<style>
+:root{
+  --bg:#ffffff; --panel:#f4f5f7; --chip:#ffffff;
+  --ink:#1f2937; --muted:#4b5563; --soft:#5f6673; --rule:#d1d5db;
+  --hold:#2e5aa8; --hold-tint:#e8eefa;
+  --amber-fill:#fde68a; --amber-stroke:#b45309; --amber-ink:#111111;
+  --bad:#b91c1c; --ok:#166534;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --panel:#272b35; --chip:#2b303b;
+    --ink:#e5e7eb; --muted:#b4bac6; --soft:#a3aab7; --rule:#3d4351;
+    --hold:#86abe8; --hold-tint:#25324a;
+    --amber-fill:#4a3512; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+    --bad:#f87171; --ok:#86efac;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --panel:#272b35; --chip:#2b303b;
+  --ink:#e5e7eb; --muted:#b4bac6; --soft:#a3aab7; --rule:#3d4351;
+  --hold:#86abe8; --hold-tint:#25324a;
+  --amber-fill:#4a3512; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+  --bad:#f87171; --ok:#86efac;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);}
+body{font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,sans-serif;font-size:13px;line-height:1.45;-webkit-text-size-adjust:100%;}
+.lqj{box-sizing:border-box;margin:0 auto;max-width:980px;padding:8px 16px 12px;outline:none;}
+.lqj *{box-sizing:border-box;}
+.lqj:focus-visible{box-shadow:inset 0 0 0 2px var(--hold);border-radius:8px;}
+.lqj code,.lqj .mono{font-family:ui-monospace,"Cascadia Mono",Consolas,"SFMono-Regular",Menlo,"Noto Sans TC","Microsoft JhengHei",monospace;}
+.lqj button{font:inherit;color:inherit;cursor:pointer;}
+
+/* top row */
+.lqj-top{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+.lqj-mode{display:flex;flex:1 1 auto;min-width:0;border:1px solid var(--rule);border-radius:8px;overflow:hidden;background:var(--panel);}
+.lqj-mode button{flex:1 1 50%;min-height:36px;padding:6px 8px;border:0;background:transparent;font-size:13px;line-height:1.3;color:var(--muted);}
+.lqj-mode button+button{border-left:1px solid var(--rule);}
+.lqj-mode button[aria-checked="true"]{background:var(--bg);color:var(--ink);font-weight:700;box-shadow:inset 0 -3px 0 var(--amber-stroke);}
+.lqj-theme{flex:0 0 auto;width:36px;height:36px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);font-size:16px;}
+.lqj-theme[hidden]{display:none;}
+
+/* stage */
+.lqj-stage{position:relative;width:100%;height:196px;overflow:hidden;}
+.lqj-n{position:absolute;left:0;top:0;will-change:transform,opacity;}
+.lqj-holder{border:1.5px solid var(--hold);border-radius:8px;background:var(--panel);}
+.lqj-h1{position:absolute;left:12px;top:10px;font-size:14px;font-weight:700;}
+.lqj-h2{position:absolute;left:12px;top:36px;font-size:12px;color:var(--soft);}
+.lqj-report{height:68px;padding:6px 10px;border:1.5px solid var(--hold);border-radius:6px;background:var(--hold-tint);overflow:hidden;}
+.lqj-report .r1{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap;}
+.lqj-report .r2{font-size:12px;color:var(--muted);white-space:nowrap;}
+.lqj-report .bar{position:absolute;left:0;right:0;bottom:0;height:4px;
+  background-image:repeating-linear-gradient(90deg,var(--hold) 0 12px,transparent 12px 24px);opacity:.7;}
+.lqj-qhead{font-size:12px;color:var(--soft);white-space:nowrap;}
+.lqj-alter{width:164px;height:88px;padding:6px 8px;border:2px solid var(--amber-stroke);border-radius:8px;background:var(--amber-fill);color:var(--amber-ink);overflow:hidden;}
+.lqj-alter .a1{font-size:13px;font-weight:700;white-space:nowrap;}
+.lqj-alter .a2{font-size:12px;white-space:nowrap;}
+.lqj-alter .a3{margin-top:4px;font-size:12px;font-weight:700;white-space:nowrap;}
+.lqj-alter.killed{border-style:dashed;}
+.lqj-api{width:64px;height:40px;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--muted);border-radius:6px;background:var(--chip);color:var(--ink);font-size:12px;font-weight:700;}
+.lqj-api.held{border-color:var(--hold);background:var(--hold-tint);color:var(--hold);}
+.lqj-cohort{z-index:2;width:64px;height:40px;display:flex;align-items:center;justify-content:center;border:1.5px dashed var(--muted);border-radius:6px;background:var(--panel);font-size:12px;font-weight:700;color:var(--ink);}
+.lqj-badge{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--bg);border:1.5px solid var(--bad);color:var(--bad);font-size:12px;font-weight:700;}
+.lqj-glabel{font-size:12px;color:var(--soft);white-space:nowrap;}
+.lqj-retry{font-size:12px;color:var(--soft);white-space:nowrap;}
+
+/* readout + tiles */
+.lqj-readout{margin:12px 0 8px;min-height:40px;font-size:14px;line-height:1.5;}
+.lqj-readout b{display:inline-block;min-width:28px;margin-right:6px;padding:0 6px;border-radius:4px;background:var(--amber-fill);color:var(--amber-ink);border:1px solid var(--amber-stroke);font-size:12px;text-align:center;}
+.lqj-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+.lqj-tile{padding:8px 10px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);min-width:0;}
+.lqj-tl{font-size:12px;color:var(--soft);}
+.lqj-tv{margin-top:2px;font-size:14px;font-weight:700;overflow-wrap:anywhere;}
+.lqj-tv.bad{color:var(--bad);}
+.lqj-tv.ok{color:var(--ok);}
+
+/* controls */
+.lqj-ctrl{display:flex;align-items:center;gap:8px;margin-top:12px;}
+.lqj-ctrl button{min-width:40px;height:36px;padding:0 10px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);font-size:13px;}
+.lqj-ctrl .lqj-play{font-weight:700;}
+.lqj-now{margin-left:auto;font-size:12px;color:var(--soft);white-space:nowrap;}
+.lqj-track{position:relative;margin-top:8px;padding:0 8px;}
+.lqj-track input{display:block;width:100%;margin:0;height:28px;accent-color:var(--amber-stroke);}
+.lqj-ticks{position:relative;height:32px;}
+.lqj-ticks button{position:absolute;top:0;width:30px;height:32px;margin-left:-15px;padding:0;border:0;background:transparent;font-size:12px;color:var(--soft);}
+.lqj-ticks button.on{color:var(--ink);font-weight:700;}
+.lqj-legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:4px;font-size:12px;color:var(--soft);}
+.lqj-legend span{display:inline-flex;align-items:center;gap:6px;}
+.lqj-sw{display:inline-block;width:14px;height:14px;border-radius:3px;border:1.5px solid;}
+</style>
+</head>
+<body>
+<figure class="fig lqj" data-fig="lock-queue-jam" data-dur="24" data-rest="13" tabindex="0"
+  aria-label="動畫：PostgreSQL 的鎖佇列。報表長交易拿著 ACCESS SHARE 不放，ALTER TABLE 要 ACCESS EXCLUSIVE 只能排隊，後面新來的 API 查詢又全部排在 ALTER 後面，整張 orders 表讀寫都卡住；切換到設 lock_timeout = '3s'，ALTER 等 3 秒就逾時退出，排隊的查詢放行。">
+  <div class="lqj-top">
+    <div class="lqj-mode" role="radiogroup" aria-label="遷移有沒有設 lock_timeout">
+      <button type="button" role="radio" aria-checked="true" data-mode="a">沒設 lock_timeout</button>
+      <button type="button" role="radio" aria-checked="false" data-mode="b">設 lock_timeout = '3s'</button>
+    </div>
+    <button type="button" class="lqj-theme" aria-label="切換深淺色">◐</button>
+  </div>
+
+  <div class="lqj-stage" aria-hidden="true">
+    <div class="lqj-n lqj-holder"><div class="lqj-h1"><code>orders</code> 表（約 8000 萬列）</div><div class="lqj-h2">現在持有表鎖的：</div></div>
+    <div class="lqj-n lqj-qhead">等鎖佇列（大致先來先排）→</div>
+    <div class="lqj-n lqj-report"><div class="r1">報表長交易</div><div class="r2 mono">SELECT count(*)</div><div class="r2">拿著 ACCESS SHARE・還在跑</div><div class="bar"></div></div>
+    <div class="lqj-n lqj-badge lqj-b1">✕</div>
+    <div class="lqj-n lqj-badge lqj-b2">✕</div>
+    <div class="lqj-n lqj-glabel">等：排在前面的 ALTER</div>
+    <div class="lqj-n lqj-retry">等幾秒再重試：</div>
+    <div class="lqj-n lqj-cohort">越積越多</div>
+    <div class="lqj-n lqj-alter"><div class="a1 mono">ALTER TABLE</div><div class="a2">要 ACCESS EXCLUSIVE</div><div class="a3"></div></div>
+  </div>
+
+  <div class="lqj-readout" aria-live="polite"><b></b><span></span></div>
+
+  <div class="lqj-tiles">
+    <div class="lqj-tile"><div class="lqj-tl"><code>orders</code> 能不能讀寫</div><div class="lqj-tv" data-tile="0"></div></div>
+    <div class="lqj-tile"><div class="lqj-tl">API 請求</div><div class="lqj-tv" data-tile="1"></div></div>
+    <div class="lqj-tile"><div class="lqj-tl">網站</div><div class="lqj-tv" data-tile="2"></div></div>
+  </div>
+
+  <div class="lqj-ctrl">
+    <button type="button" class="lqj-play" aria-label="從頭播放">▶ 播放</button>
+    <button type="button" class="lqj-prev" aria-label="上一個時間點">‹</button>
+    <button type="button" class="lqj-next" aria-label="下一個時間點">›</button>
+    <span class="lqj-now"></span>
+  </div>
+  <div class="lqj-track">
+    <input type="range" min="0" max="24" step="0.05" value="13" aria-label="時間軸，拖曳看每個時間點">
+    <div class="lqj-ticks"></div>
+  </div>
+
+  <div class="lqj-legend">
+    <span><i class="lqj-sw" style="background:var(--amber-fill);border-color:var(--amber-stroke)"></i>ALTER TABLE（要 ACCESS EXCLUSIVE，跟所有鎖衝突）</span>
+    <span><i class="lqj-sw" style="background:var(--hold-tint);border-color:var(--hold)"></i>已拿到鎖（SELECT 拿 ACCESS SHARE，只跟 ACCESS EXCLUSIVE 衝突）</span>
+    <span><i class="lqj-badge" style="display:inline-flex;width:18px;height:18px;font-size:12px">✕</i>鎖衝突，只能排隊</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var fig = document.querySelector('.lqj');
+  var stage = fig.querySelector('.lqj-stage');
+  var $ = function(s){ return fig.querySelector(s); };
+  var el = {
+    holder: $('.lqj-holder'), qhead: $('.lqj-qhead'), report: $('.lqj-report'),
+    reportR3: $('.lqj-report .r2:nth-of-type(3)'), bar: $('.lqj-report .bar'),
+    b1: $('.lqj-b1'), b2: $('.lqj-b2'), glabel: $('.lqj-glabel'), retry: $('.lqj-retry'),
+    cohort: $('.lqj-cohort'), alter: $('.lqj-alter'), a2: $('.lqj-alter .a2'), a3: $('.lqj-alter .a3'),
+    rk: $('.lqj-readout b'), rt: $('.lqj-readout span'),
+    tiles: [].slice.call(fig.querySelectorAll('.lqj-tv')),
+    play: $('.lqj-play'), prev: $('.lqj-prev'), next: $('.lqj-next'), now: $('.lqj-now'),
+    range: $('.lqj-track input'), ticks: $('.lqj-ticks'), theme: $('.lqj-theme'),
+    modes: [].slice.call(fig.querySelectorAll('.lqj-mode button'))
+  };
+
+  /* ---------- the two timelines (facts from 16-零停機遷移.md, 事故一) ---------- */
+  var MODES = {
+    a: {
+      dur: 24, rest: 13, tq: 3.0, tr: 19.0,
+      arrivals: [0.6,1.7,2.6, 6.2,6.9,7.5,8.1,8.6,9.1,9.6,10.1,10.6,11.1,11.6,12.1,12.6,13.1,13.6,14.2,14.8,15.4,16.0,16.6,17.2,17.8, 19.8,20.8,21.8,22.8],
+      keys: [
+        {t:0,  k:'T1', s:'報表交易 BEGIN，SELECT count(*) 開始跑，拿到 ACCESS SHARE，一直不放。API 的 SELECT 跟它相容，照常拿到鎖、做完。'},
+        {t:3,  k:'T2', s:'遷移送出 ALTER TABLE，要 ACCESS EXCLUSIVE，跟報表的鎖衝突，開始排隊。沒設 lock_timeout，就是無限等。'},
+        {t:6,  k:'T3', s:'新來的 SELECT、INSERT 跟報表相容，卻跟排在前面的 ALTER 衝突，全部排到它後面。'},
+        {t:10, k:'T4', s:'卡住的請求越積越多，資料庫連線全被占滿；p99 延遲從 80ms 飆到 30 秒逾時。'},
+        {t:14, k:'T5', s:'健康檢查失敗，負載平衡器把機器一台台標成不健康：網站掛了。'},
+        {t:18, k:'T6', s:'約 4 分鐘後，on-call 手動把遷移的行程砍掉，佇列解開，排隊的請求一起放行。'}
+      ],
+      tiles: function(t){
+        return [
+          t < 6 ? (t < 3 ? ['可以','ok'] : ['可以（ALTER 在等）','']) : t < 19 ? ['卡住','bad'] : ['可以','ok'],
+          t < 6 ? ['正常（p99 80ms）','ok'] : t < 10 ? ['排隊卡住','bad'] : t < 19 ? ['連線池占滿，p99 30 秒逾時','bad'] : ['放行，恢復','ok'],
+          t < 10 ? ['正常','ok'] : t < 14 ? ['一直轉圈圈','bad'] : t < 19 ? ['健康檢查失敗，掛了','bad'] : ['恢復','ok']
+        ];
+      }
+    },
+    b: {
+      dur: 18, rest: 6.8, tq: 0.6, tr: 6.0,
+      arrivals: [3.2,3.9,4.6,5.3, 6.9,7.8,8.7, 10.4,11.2, 14.6,15.5,16.4,17.2],
+      keys: [
+        {t:0,   k:'T1', s:'報表的 SELECT 拿著 ACCESS SHARE。遷移先 SET lock_timeout = \'3s\'，再送出 ALTER TABLE，一樣開始排隊。'},
+        {t:3,   k:'T2', s:'報表還在跑。新來的查詢一樣排到 ALTER 後面，暫時卡住。'},
+        {t:6,   k:'T3', s:'3 秒後等鎖逾時，報錯 55P03（lock_not_available），ALTER 退出佇列，排隊的查詢放行。'},
+        {t:9.5, k:'T4', s:'報表跑完，提交，放掉 ACCESS SHARE。'},
+        {t:12,  k:'T5', s:'等幾秒重試，這次馬上拿到 ACCESS EXCLUSIVE，幾毫秒做完。失敗的遷移頂多重跑。'}
+      ],
+      tiles: function(t){
+        return [
+          t < 3 ? ['可以（ALTER 在等）',''] : t < 6 ? ['卡住','bad'] : ['可以','ok'],
+          t < 3 ? ['正常','ok'] : t < 6 ? ['排隊卡住','bad'] : ['放行，正常','ok'],
+          t < 3 ? ['正常','ok'] : t < 6 ? ['卡住，最多 3 秒','bad'] : ['正常','ok']
+        ];
+      }
+    }
+  };
+
+  /* ---------- chip pool (one element per arrival, per mode) ---------- */
+  var pools = {};
+  function buildPool(m){
+    var list = MODES[m].arrivals.map(function(a, i){
+      var d = document.createElement('div');
+      d.className = 'lqj-n lqj-api mono';
+      d.textContent = (i % 3 === 2) ? 'INSERT' : 'SELECT';
+      d.style.opacity = '0';
+      stage.appendChild(d);
+      return {a:a, el:d, x:-1, y:-1, o:-1, held:null};
+    });
+    var M = MODES[m], k = 0, s = 0;
+    list.forEach(function(c){
+      if (c.a >= M.tq && c.a < M.tr) { c.q = k++; } else { c.q = -1; c.s = s++; }
+    });
+    // released chips also get a served slot index
+    list.forEach(function(c){ if (c.q >= 0) c.s = c.q; });
+    return list;
+  }
+
+  /* ---------- layout (read once per resize) ---------- */
+  var L = null;
+  function r4(v){ return Math.round(v / 4) * 4; }
+  function layout(W, m){
+    var o = {W: W, wide: W >= 560};
+    if (o.wide){
+      var hw = r4(Math.max(220, Math.min(280, W * 0.34)));
+      var x0 = hw + 48;
+      o.holder = {x:0, y:0, w:hw, h:196};
+      o.report = {x:12, y:72, w:hw - 24};
+      o.qhead = {x:x0, y:28};
+      o.alterSlot = {x:x0, y:60};
+      o.b1 = {x:hw + 12, y:92, show:true};
+      o.b2 = {x:x0 + 168, y:92, show:true};
+      var sx = x0 + 164 + 32, per = Math.max(1, Math.floor((W - sx + 8) / 72));
+      o.slots = [];
+      for (var r = 0; r < 2; r++) for (var c = 0; c < per; c++) o.slots.push({x: sx + c * 72, y: 60 + r * 48});
+      o.glabel = {x:sx, y:156};
+      o.retryLabel = {x:x0, y:160};
+      o.retry = {x:x0, y:184};
+      o.H = m === 'b' ? 276 : 196;
+    } else {
+      o.holder = {x:0, y:0, w:W, h:196};
+      o.report = {x:12, y:72, w:W - 24};
+      o.qhead = {x:0, y:208};
+      o.alterSlot = {x:0, y:232};
+      o.b1 = {show:false}; o.b2 = {show:false};
+      var per2 = Math.max(1, Math.floor((W + 8) / 72));
+      o.slots = [];
+      for (var r2 = 0; r2 < 2; r2++) for (var c2 = 0; c2 < per2; c2++) o.slots.push({x: c2 * 72, y: 332 + r2 * 48});
+      o.glabel = {x:0, y:428};
+      o.retryLabel = {x:0, y:456};
+      o.retry = {x:0, y:480};
+      o.H = m === 'b' ? 572 : 448;
+    }
+    var hw2 = o.holder.w, n = Math.max(1, Math.floor((hw2 - 24 + 8) / 72));
+    o.served = [];
+    for (var i = 0; i < n; i++) o.served.push({x: 12 + i * 72, y: 144});
+    o.hold = {x:12, y:60};
+    o.entryX = W - 64;
+    return o;
+  }
+
+  /* ---------- helpers ---------- */
+  function clamp(v, a, b){ return v < a ? a : v > b ? b : v; }
+  function ease(p){ p = clamp(p, 0, 1); return 1 - Math.pow(1 - p, 3); }
+  function mix(a, b, p){ return {x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p}; }
+  function put(node, x, y, o){
+    var tr = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px)';
+    if (node._tr !== tr){ node.style.transform = tr; node._tr = tr; }
+    var op = String(Math.round(clamp(o, 0, 1) * 100) / 100);
+    if (node._op !== op){ node.style.opacity = op; node._op = op; node.style.visibility = op === '0' ? 'hidden' : 'visible'; }
+  }
+  function txt(node, s){ if (node._tx !== s){ node.textContent = s; node._tx = s; } }
+
+  /* ---------- state ---------- */
+  var reduce = false;
+  try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){}
+  var S = {mode:'a', t:MODES.a.rest, playing:false, fresh:true, visible:true, raf:0, last:0};
+
+  /* ---------- the draw function: frame t, nothing else ---------- */
+  function draw(t){
+    var m = S.mode, M = MODES[m];
+    if (!L) return;
+    put(el.holder, L.holder.x, L.holder.y, 1);
+    el.holder.style.width = L.holder.w + 'px'; el.holder.style.height = L.holder.h + 'px';
+    el.report.style.width = L.report.w + 'px';
+    put(el.qhead, L.qhead.x, L.qhead.y, 1);
+
+    // report: holds ACCESS SHARE; in mode b it commits at 9.5
+    var rOp = 1;
+    if (m === 'b' && t >= 9.5){ rOp = 1 - clamp((t - 9.5) / 0.7, 0, 1); txt(el.reportR3, 'COMMIT，放掉 ACCESS SHARE'); }
+    else txt(el.reportR3, '拿著 ACCESS SHARE・還在跑');
+    put(el.report, L.report.x, L.report.y, rOp);
+    el.bar.style.backgroundPosition = Math.round((t * 24) % 24) + 'px 0';
+
+    // ALTER
+    var aP = null, aO = 1, a2 = '要 ACCESS EXCLUSIVE', a3 = '', killed = false;
+    var entryA = {x: L.entryX - 100, y: L.alterSlot.y};
+    if (m === 'a'){
+      if (t < 3){ aP = entryA; aO = 0; }
+      else if (t < 3.6){ var p = ease((t - 3) / 0.6); aP = mix(entryA, L.alterSlot, p); aO = clamp((t - 3) / 0.25, 0, 1); a3 = '送出，要拿鎖'; }
+      else if (t < 18.5){ aP = L.alterSlot; a3 = '排隊中・無限等'; }
+      else { aP = L.alterSlot; aO = 1 - clamp((t - 18.5) / 0.6, 0, 1); a3 = '行程被砍掉'; killed = true; }
+    } else {
+      if (t < 0.6){ aP = entryA; aO = 0; }
+      else if (t < 1.2){ aP = mix(entryA, L.alterSlot, ease((t - 0.6) / 0.6)); aO = clamp((t - 0.6) / 0.25, 0, 1); a3 = 'lock_timeout = 3s'; }
+      else if (t < 6){ aP = L.alterSlot; a3 = '排隊中・已等 ' + clamp(Math.ceil((t - 0.6) / 1.8), 1, 3) + ' 秒'; }
+      else if (t < 6.6){ aP = mix(L.alterSlot, L.retry, ease((t - 6) / 0.6)); a3 = '逾時 55P03・退出'; killed = true; }
+      else if (t < 12){ aP = L.retry; a3 = '55P03，等著重試'; killed = true; }
+      else if (t < 12.6){ aP = mix(L.retry, L.hold, ease((t - 12) / 0.6)); a3 = '重試'; }
+      else if (t < 13.4){ aP = L.hold; a2 = '持有 ACCESS EXCLUSIVE'; a3 = '幾毫秒做完'; }
+      else { aP = L.hold; a2 = '持有 ACCESS EXCLUSIVE'; a3 = '完成，放鎖'; aO = 1 - clamp((t - 13.4) / 0.6, 0, 1); }
+    }
+    put(el.alter, aP.x, aP.y, aO);
+    txt(el.a2, a2); txt(el.a3, a3);
+    el.alter.classList.toggle('killed', killed);
+
+    var retryOn = m === 'b' && t >= 6 && t < 12.6;
+    put(el.retry, L.retryLabel.x, L.retryLabel.y, retryOn ? 1 : 0);
+
+    // API chips
+    var pool = pools[m], slots = L.slots, nS = slots.length, nV = L.served.length;
+    var arrivedQ = 0, anyQ = false;
+    pool.forEach(function(c){ if (c.q >= 0 && t >= c.a + 0.5 && t < M.tr) arrivedQ++; });
+    var overflow = arrivedQ > nS;
+    pool.forEach(function(c){
+      var entry, x, y, o = 0, held = false;
+      if (t < c.a){ put(c.el, L.entryX, 0, 0); return; }
+      if (c.q < 0){
+        // compatible and unblocked: straight into the holder, done quickly
+        var tgt = L.served[c.s % nV]; entry = {x: L.entryX, y: tgt.y};
+        var p1 = ease((t - c.a) / 0.5), pt = mix(entry, tgt, p1);
+        o = Math.min(clamp((t - c.a) / 0.2, 0, 1), 1 - clamp((t - c.a - 0.9) / 0.3, 0, 1));
+        held = t - c.a >= 0.5; x = pt.x; y = pt.y;
+      } else {
+        var slot = slots[Math.min(c.q, nS - 1)];
+        entry = {x: L.entryX, y: slot.y};
+        var rel = M.tr + Math.min(c.q, 10) * 0.08;
+        if (t < rel){
+          var p2 = ease((t - c.a) / 0.5), q = mix(entry, slot, p2);
+          x = q.x; y = q.y; o = clamp((t - c.a) / 0.2, 0, 1);
+          if (overflow && c.q >= nS - 1 && t >= c.a + 0.5) o = 0;
+          if (t >= c.a + 0.5) anyQ = true;
+        } else {
+          var tg = L.served[c.s % nV], p3 = ease((t - rel) / 0.45), r = mix(slot, tg, p3);
+          x = r.x; y = r.y; held = t - rel >= 0.45;
+          o = 1 - clamp((t - rel - 0.75) / 0.35, 0, 1);
+        }
+      }
+      if (c.held !== held){ c.el.classList.toggle('held', held); c.held = held; }
+      put(c.el, x, y, o);
+    });
+    var last = slots[nS - 1];
+    put(el.cohort, last.x, last.y, overflow && t < M.tr ? 1 : 0);
+    put(el.glabel, L.glabel.x, L.glabel.y, anyQ && t < M.tr ? 1 : 0);
+    var alterQueued = (m === 'a') ? (t >= 3.6 && t < 18.5) : (t >= 1.2 && t < 6);
+    put(el.b1, L.b1.x || 0, L.b1.y || 0, L.b1.show && alterQueued ? 1 : 0);
+    put(el.b2, L.b2.x || 0, L.b2.y || 0, L.b2.show && anyQ && alterQueued ? 1 : 0);
+
+    // readout, tiles, controls
+    var key = M.keys[0];
+    M.keys.forEach(function(k){ if (t >= k.t - 1e-6) key = k; });
+    txt(el.rk, key.k); txt(el.rt, key.s);
+    M.tiles(t).forEach(function(v, i){
+      txt(el.tiles[i], v[0]);
+      if (el.tiles[i]._c !== v[1]){ el.tiles[i].className = 'lqj-tv' + (v[1] ? ' ' + v[1] : ''); el.tiles[i]._c = v[1]; }
+    });
+    var tb = el.ticks.children;
+    for (var i = 0; i < tb.length; i++) tb[i].classList.toggle('on', tb[i]._k === key.k);
+    txt(el.now, key.k + (m === 'a' && key.k === 'T6' ? '（約 4 分鐘後）' : m === 'b' && key.k === 'T3' ? '（3 秒後）' : ''));
+    var rv = String(Math.round(t * 20) / 20);
+    if (el.range.value !== rv && document.activeElement !== el.range) el.range.value = rv;
+  }
+
+  /* ---------- controls ---------- */
+  function buildTicks(){
+    var M = MODES[S.mode];
+    el.ticks.innerHTML = '';
+    M.keys.forEach(function(k){
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = k.k; b._k = k.k;
+      b.setAttribute('aria-label', '跳到 ' + k.k);
+      b.style.left = (k.t / M.dur * 100) + '%';
+      b.addEventListener('click', function(){ S.fresh = false; seek(k.t + 0.01); });
+      el.ticks.appendChild(b);
+    });
+    el.range.max = String(M.dur);
+    fig.setAttribute('data-dur', String(M.dur));
+    fig.setAttribute('data-rest', String(M.rest));
+    window.DUR = M.dur;
+  }
+  function setPlayLabel(){
+    var s = S.playing ? '❚❚ 暫停' : '▶ 播放';
+    txt(el.play, s);
+    el.play.setAttribute('aria-label', S.playing ? '暫停' : (S.fresh || S.t >= MODES[S.mode].dur - 0.01 ? '從頭播放' : '繼續播放'));
+  }
+  function stop(){ S.playing = false; if (S.raf){ cancelAnimationFrame(S.raf); S.raf = 0; } setPlayLabel(); }
+  function seek(t){
+    stop();
+    S.t = clamp(+t || 0, 0, MODES[S.mode].dur);
+    draw(S.t);
+  }
+  function frame(now){
+    S.raf = 0;
+    if (!S.playing || !S.visible) return;
+    var dt = S.last ? Math.min(0.1, (now - S.last) / 1000) : 0;
+    S.last = now;
+    S.t += dt;
+    var D = MODES[S.mode].dur;
+    if (S.t >= D){ S.t = D; draw(S.t); stop(); return; }
+    draw(S.t);
+    S.raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (S.playing && S.visible && !S.raf){ S.last = 0; S.raf = requestAnimationFrame(frame); } }
+  function play(){
+    var D = MODES[S.mode].dur;
+    if (S.fresh || S.t >= D - 0.01) S.t = 0;
+    S.fresh = false; S.playing = true; setPlayLabel(); draw(S.t); arm();
+  }
+  function setMode(m){
+    if (!MODES[m]) return;
+    stop();
+    S.mode = m; S.fresh = true;
+    el.modes.forEach(function(b){ b.setAttribute('aria-checked', b.getAttribute('data-mode') === m ? 'true' : 'false'); });
+    pools[m].forEach(function(c){ c.el._op = null; });
+    for (var k in pools) if (k !== m) pools[k].forEach(function(c){ put(c.el, 0, 0, 0); });
+    relayout(true);
+    buildTicks();
+    S.t = MODES[m].rest;
+    draw(S.t); setPlayLabel();
+  }
+  function stepKey(dir){
+    var M = MODES[S.mode], ks = M.keys.map(function(k){ return k.t; }), t = S.t, tgt = null;
+    if (dir > 0){ for (var i = 0; i < ks.length; i++) if (ks[i] > t + 0.05){ tgt = ks[i]; break; } if (tgt === null) tgt = M.dur; }
+    else { for (var j = ks.length - 1; j >= 0; j--) if (ks[j] < t - 0.05){ tgt = ks[j]; break; } if (tgt === null) tgt = 0; }
+    S.fresh = false; seek(tgt + (tgt < M.dur ? 0.01 : 0));
+  }
+
+  el.play.addEventListener('click', function(){ if (S.playing) stop(); else play(); });
+  el.prev.addEventListener('click', function(){ stepKey(-1); });
+  el.next.addEventListener('click', function(){ stepKey(1); });
+  el.range.addEventListener('input', function(){ S.fresh = false; seek(parseFloat(el.range.value)); });
+  el.modes.forEach(function(b){ b.addEventListener('click', function(){ setMode(b.getAttribute('data-mode')); }); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target === el.range) return;
+    if (e.key === 'ArrowRight'){ stepKey(1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft'){ stepKey(-1); e.preventDefault(); }
+    else if ((e.key === ' ' || e.key === 'k') && e.target === fig){ if (S.playing) stop(); else play(); e.preventDefault(); }
+  });
+
+  /* theme switch: hidden when the host page (iframe parent) owns the theme */
+  var inFrame = false;
+  try { inFrame = window.self !== window.top; } catch(e){ inFrame = true; }
+  if (inFrame) el.theme.hidden = true;
+  el.theme.addEventListener('click', function(){
+    var root = document.documentElement, cur = root.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+
+  /* layout on resize only */
+  var lastW = -1;
+  function relayout(force){
+    var W = stage.clientWidth;
+    if (!force && W === lastW) return;
+    lastW = W;
+    L = layout(W, S.mode);
+    stage.style.height = L.H + 'px';
+    draw(S.t);
+  }
+  if (window.ResizeObserver){ new ResizeObserver(function(){ relayout(false); }).observe(stage); }
+  else window.addEventListener('resize', function(){ relayout(false); });
+
+  if (window.IntersectionObserver){
+    new IntersectionObserver(function(es){
+      S.visible = es[0].isIntersecting;
+      if (S.visible) arm(); else if (S.raf){ cancelAnimationFrame(S.raf); S.raf = 0; }
+    }, {rootMargin:'120px'}).observe(fig);
+  }
+
+  pools.a = buildPool('a'); pools.b = buildPool('b');
+  buildTicks();
+  relayout(true);
+  setPlayLabel();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ relayout(true); });
+
+  /* hooks for checks, render.mjs and the host page */
+  window.seek = function(t){ S.fresh = false; seek(t); };
+  window.timeline = function(){ return MODES[S.mode].dur; };
+  window.setMode = setMode;
+  void reduce; /* no autoplay at all: every visitor starts paused at data-rest (T4) */
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>結帳請求的瀑布圖</title>
+<style>
+:root{
+  --bg:#ffffff; --card:#f5f6f8; --ink:#1f2937; --muted:#4b5563; --soft:#5b6472;
+  --rule:rgba(31,41,55,.12); --rule-2:rgba(31,41,55,.22);
+  --svc-checkout:#4f6f95; --svc-coupon:#5f7f52; --svc-pricing:#75688a;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#92400e; --hot-tint:rgba(253,230,138,.35);
+  --cursor:#b45309; --btn:#1f2937; --btn-ink:#ffffff;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --card:#272b35; --ink:#e5e7eb; --muted:#c3c8d0; --soft:#a3abb8;
+    --rule:rgba(229,231,235,.12); --rule-2:rgba(229,231,235,.24);
+    --svc-checkout:#86a6cc; --svc-coupon:#9cb98c; --svc-pricing:#ab9dc4;
+    --hot-fill:#a16207; --hot-stroke:#fbbf24; --hot-ink:#fcd34d; --hot-tint:rgba(251,191,36,.14);
+    --cursor:#fbbf24; --btn:#e5e7eb; --btn-ink:#1e2129;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --card:#272b35; --ink:#e5e7eb; --muted:#c3c8d0; --soft:#a3abb8;
+  --rule:rgba(229,231,235,.12); --rule-2:rgba(229,231,235,.24);
+  --svc-checkout:#86a6cc; --svc-coupon:#9cb98c; --svc-pricing:#ab9dc4;
+  --hot-fill:#a16207; --hot-stroke:#fbbf24; --hot-ink:#fcd34d; --hot-tint:rgba(251,191,36,.14);
+  --cursor:#fbbf24; --btn:#e5e7eb; --btn-ink:#1e2129;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);
+  font:13px/1.5 "Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-text-size-adjust:100%}
+.fig{margin:0;padding:16px;box-sizing:border-box;width:100%;max-width:960px;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--cursor);border-radius:8px}
+.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"Noto Sans TC","Microsoft JhengHei",monospace}
+.part-h{font-size:14px;font-weight:600;margin:0 0 8px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.part-h .n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;
+  background:var(--ink);color:var(--bg);font-size:12px;flex:none}
+.dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:1px;flex:none}
+
+/* ① logs */
+.logs{display:grid;grid-template-columns:1fr;gap:12px}
+@media (min-width:600px){.logs{grid-template-columns:1fr 1fr}}
+.log{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:12px;min-width:0}
+.log-h{font-weight:600;font-size:13px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.log-h .cnt{font-weight:400;font-size:12px;color:var(--soft);white-space:nowrap}
+.lines{height:80px;overflow:hidden;margin:8px 0;display:flex;flex-direction:column;justify-content:flex-end;
+  font-size:12px;line-height:20px;border-left:2px solid var(--rule-2);padding-left:8px}
+.lines div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lines .wait{color:var(--soft);font-style:italic;font-family:inherit}
+.lines .new{color:var(--ink)}
+.lines .old{color:var(--soft)}
+.log-f{font-size:12px;color:var(--muted)}
+.gap-note{font-size:12px;color:var(--muted);text-align:center;margin:12px 0 4px}
+.join{font-size:13px;color:var(--ink);text-align:center;margin:4px 0 16px;font-weight:600}
+
+/* ② waterfall */
+.wf{border-top:1px solid var(--rule);padding-top:12px}
+.tid{font-size:12px;color:var(--muted);word-break:break-all;margin:0 0 8px}
+.axis{position:relative;height:20px;font-size:12px;color:var(--soft);border-bottom:1px solid var(--rule-2)}
+.axis span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+.axis span:first-child{transform:none}
+.body{position:relative;padding-top:4px}
+.grid{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed var(--rule-2);pointer-events:none}
+.cursor{position:absolute;top:-20px;bottom:0;width:0;border-left:2px solid var(--cursor);pointer-events:none;opacity:.85;z-index:3}
+.row{position:relative;margin-top:8px}
+.lab{display:flex;justify-content:space-between;gap:8px;align-items:baseline;min-height:20px;position:relative;z-index:2}
+.lab .nm{min-width:0}
+.lab .dur{font-size:12px;color:var(--soft);white-space:nowrap;min-width:72px;text-align:right}
+.track{position:relative;height:16px;margin-top:2px}
+.bar{position:absolute;top:2px;height:12px;border-radius:3px;width:0}
+.l1 .nm{padding-left:12px}.l2 .nm{padding-left:24px}.l3 .nm{padding-left:36px}
+.stair{position:relative;height:248px;margin-top:4px}
+.stair svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.stair rect{fill:var(--svc-pricing)}
+.stair rect.hot{fill:var(--hot-fill);stroke:var(--hot-stroke);stroke-width:1.5}
+.note{position:absolute;font-size:12px;line-height:1.45;color:var(--muted);opacity:0;transition:opacity .35s ease;z-index:2}
+.note b{display:block;font-size:13px;color:var(--ink);font-weight:600}
+.note.on{opacity:1}
+.note-a{left:24%;right:0;top:0}
+.note-b{left:8%;width:64%;top:142px;border-left:3px solid var(--hot-stroke);background:var(--hot-tint);padding:4px 8px;border-radius:0 6px 6px 0;box-sizing:border-box}
+.note-b b{color:var(--hot-ink)}
+
+/* controls */
+.ctl{display:flex;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap}
+.play{width:36px;height:36px;border-radius:50%;border:0;background:var(--btn);color:var(--btn-ink);cursor:pointer;
+  display:grid;place-items:center;flex:none;padding:0}
+.play svg{width:14px;height:14px;fill:currentColor}
+.play:focus-visible,.theme:focus-visible,input[type=range]:focus-visible{outline:2px solid var(--cursor);outline-offset:2px}
+.scrub{flex:1 1 160px;min-width:0;height:32px;accent-color:var(--cursor);margin:0;cursor:pointer}
+.ms{font-size:13px;min-width:72px;text-align:right;white-space:nowrap}
+.theme{height:32px;border:1px solid var(--rule-2);background:transparent;color:var(--muted);border-radius:16px;
+  padding:0 12px;font:inherit;font-size:12px;cursor:pointer;flex:none}
+.now{margin-top:8px;font-size:13px;color:var(--ink);min-height:40px}
+.user{font-size:12px;color:var(--muted)}
+.user b{color:var(--ink);font-weight:600}
+@media (prefers-reduced-motion: reduce){.note{transition:none}}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="trace-waterfall" data-dur="10" data-rest="10" tabindex="0"
+  aria-label="一筆 30 件商品的結帳請求：checkout-api 與 coupon-service 的日誌各自看都正常，用同一個 trace_id 拼成瀑布圖後，看得出 coupon-service 一件一件依序呼叫 pricing-service 30 次，其中第 16 件等滿 2 秒逾時再重試，整個請求花了約 3.8 秒。">
+
+  <div class="part-h"><span class="n">1</span>各服務自己的日誌：每一段單獨看都不慢</div>
+  <div class="logs">
+    <div class="log">
+      <div class="log-h"><span><span class="dot" style="background:var(--svc-checkout)"></span>checkout-api 的日誌</span><span class="cnt" id="cntA">0 行</span></div>
+      <div class="lines mono" id="linesA"></div>
+      <div class="log-f">只知道「慢在 coupon-service」，看不到是哪一段</div>
+    </div>
+    <div class="log">
+      <div class="log-h"><span><span class="dot" style="background:var(--svc-coupon)"></span>coupon-service 的日誌</span><span class="cnt" id="cntB">0 行</span></div>
+      <div class="lines mono" id="linesB"></div>
+      <div class="log-f">每一行都很快：「我這邊很正常啊」</div>
+    </div>
+  </div>
+  <div class="gap-note">兩邊的日誌沒有共同的編號，對不起來</div>
+  <div class="join">↓ 每個服務送出的 span 都帶著同一個 trace_id，拼起來 ↓</div>
+
+  <div class="wf">
+    <div class="part-h"><span class="n">2</span>用同一個 trace_id 拼成的瀑布圖</div>
+    <div class="tid mono">trace_id = 4bf92f3577b34da6a3ce929d0e0e4736</div>
+    <div class="axis" aria-hidden="true"><span style="left:0">0</span><span style="left:26.316%">1 秒</span><span style="left:52.632%">2 秒</span><span style="left:78.947%">3 秒</span></div>
+    <div class="body" id="wfBody">
+      <div class="grid" style="left:26.316%"></div><div class="grid" style="left:52.632%"></div><div class="grid" style="left:78.947%"></div>
+      <div class="cursor" id="cursor"></div>
+
+      <div class="row l0">
+        <div class="lab"><span class="nm"><span class="dot" style="background:var(--svc-checkout)"></span>checkout-api：POST /checkout（root span）</span><span class="dur mono" data-d="root"></span></div>
+        <div class="track"><div class="bar" data-s="0" data-e="3800" style="background:var(--svc-checkout)"></div></div>
+      </div>
+      <div class="row l1">
+        <div class="lab"><span class="nm"><span class="dot" style="background:var(--svc-checkout)"></span>checkout-api：呼叫 coupon-service</span><span class="dur mono" data-d="call"></span></div>
+        <div class="track"><div class="bar" data-s="0" data-e="3500" style="background:var(--svc-checkout)"></div></div>
+      </div>
+      <div class="row l2">
+        <div class="lab"><span class="nm"><span class="dot" style="background:var(--svc-coupon)"></span>coupon-service：POST /apply 算折扣</span><span class="dur mono" data-d="apply"></span></div>
+        <div class="track"><div class="bar" data-s="0" data-e="3500" style="background:var(--svc-coupon)"></div></div>
+      </div>
+      <div class="row l3">
+        <div class="lab"><span class="nm"><span class="dot" style="background:var(--svc-pricing)"></span>pricing-service：GET /price，一件一次</span><span class="dur mono" id="nCalls"></span></div>
+        <div class="stair">
+          <svg id="stair" viewBox="0 0 3800 248" preserveAspectRatio="none" role="img" aria-labelledby="trace-waterfall-title trace-waterfall-desc">
+            <title id="trace-waterfall-title">30 次查價依序排開</title>
+            <desc id="trace-waterfall-desc">coupon-service 對 30 件商品各呼叫一次 pricing-service，一次等一次，每次約 50 ms；第 16 件等滿 2 秒逾時，重試一次 50 ms 回應。</desc>
+          </svg>
+          <div class="note note-a" id="noteA"><b>一排依序排開的小 span ＝ N+1</b>30 件商品就打 30 次 HTTP，一次等一次；每一次都只要約 50 ms</div>
+          <div class="note note-b" id="noteB"><b>特別長的一條 ＝ 逾時重試</b>第 16 件等滿 2 秒沒回應（timeout=2），重試一次，50 ms 就回來</div>
+        </div>
+      </div>
+      <div class="row l1">
+        <div class="lab"><span class="nm"><span class="dot" style="background:var(--svc-checkout)"></span>checkout-api：inventory、payment、寫訂單</span><span class="dur mono" data-d="tail"></span></div>
+        <div class="track"><div class="bar" data-s="3500" data-e="3800" style="background:var(--svc-checkout)"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ctl">
+    <button class="play" id="play" type="button" aria-label="播放"><svg viewBox="0 0 14 14" id="playIcon"><path d="M3 1.5v11l9.5-5.5z"/></svg></button>
+    <input class="scrub" id="scrub" type="range" min="0" max="3800" step="10" value="3800" aria-label="拖動時間軸（毫秒）">
+    <span class="ms mono" id="ms">3800 ms</span>
+    <button class="theme" id="theme" type="button" aria-label="切換深色或淺色">深／淺</button>
+  </div>
+  <div class="now" id="now"></div>
+  <div class="user" id="user"></div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var END = 3800, SPEED = 400, DUR = 10; // 播放 1 秒 = 文章時間 400 ms
+  var NS = "http://www.w3.org/2000/svg";
+  var fig = document.querySelector(".fig");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  // ---- 30 次查價（文章時間表）----
+  var calls = [];   // {s, e, hot, item}
+  var i;
+  for (i = 1; i <= 15; i++) calls.push({s:(i-1)*50, e:i*50, item:i});
+  calls.push({s:750, e:2750, hot:true, item:16});        // 等滿 2 秒逾時
+  calls.push({s:2750, e:2800, item:16, retry:true});      // 重試一次 50 ms
+  for (i = 17; i <= 30; i++) calls.push({s:2800+(i-17)*50, e:2800+(i-16)*50, item:i});
+
+  var svg = document.getElementById("stair");
+  var rects = calls.map(function(c, k){
+    var r = document.createElementNS(NS, "rect");
+    r.setAttribute("x", c.s); r.setAttribute("y", k*8 + 1);
+    r.setAttribute("height", 6); r.setAttribute("width", 0);
+    r.setAttribute("rx", 0);
+    r.setAttribute("vector-effect", "non-scaling-stroke");
+    if (c.hot) r.setAttribute("class", "hot");
+    svg.appendChild(r);
+    return r;
+  });
+
+  // coupon-service 每完成一次查價寫一行（成功的那 30 次）
+  var bEvents = calls.filter(function(c){ return !c.hot; }).map(function(c){ return c.e; });
+  var bars = Array.prototype.slice.call(document.querySelectorAll(".track .bar")).map(function(el){
+    return {el:el, s:+el.dataset.s, e:+el.dataset.e};
+  });
+  var durEls = {};
+  Array.prototype.forEach.call(document.querySelectorAll("[data-d]"), function(el){ durEls[el.dataset.d] = el; });
+
+  var $ = function(id){ return document.getElementById(id); };
+  var linesA = $("linesA"), linesB = $("linesB"), cntA = $("cntA"), cntB = $("cntB");
+  var cursor = $("cursor"), scrub = $("scrub"), msEl = $("ms"), nowEl = $("now"), userEl = $("user");
+  var noteA = $("noteA"), noteB = $("noteB"), nCalls = $("nCalls");
+  var playBtn = $("play"), playIcon = $("playIcon");
+
+  function pct(ms){ return (ms / END * 100) + "%"; }
+  function phase(ms){
+    if (ms < 10)   return "0 ms：checkout-api 收到 POST /checkout，呼叫 coupon-service，開始等";
+    if (ms < 750)  return "coupon-service 查第 1 到第 15 件的價格，一次一件，每次約 50 ms";
+    if (ms < 2750) return "第 16 件：pricing-service 卡住沒回，等滿 2 秒 timeout=2 逾時";
+    if (ms < 2800) return "第 16 件重試一次，這次 50 ms 就回應";
+    if (ms < 3500) return "coupon-service 查第 17 到第 30 件，一次一件";
+    if (ms < 3510) return "3500 ms：checkout-api 收到折扣，日誌寫下「呼叫 coupon-service 花了 3.5 秒」";
+    if (ms < END)  return "checkout-api 呼叫 inventory、payment、寫訂單（平常就要約 300 ms）";
+    return "整個請求約 3800 ms；時間幾乎都花在 coupon-service 一件一件查價，和第 16 件的 2 秒逾時";
+  }
+  var lastB = -1, lastA = -1;
+  function renderLogs(ms){
+    var nB = 0; for (var k = 0; k < bEvents.length; k++) if (bEvents[k] <= ms) nB++;
+    if (nB !== lastB){
+      lastB = nB;
+      var html = "";
+      if (nB === 0) html = '<div class="wait">（還沒有新的日誌）</div>';
+      else for (var j = Math.max(1, nB-3); j <= nB; j++)
+        html += '<div class="' + (j === nB ? "new" : "old") + '">呼叫 pricing-service 花了 50 ms</div>';
+      linesB.innerHTML = html;
+      cntB.textContent = nB + " 行";
+    }
+    var nA = ms >= 3500 ? 1 : 0;
+    if (nA !== lastA){
+      lastA = nA;
+      linesA.innerHTML = nA ? '<div class="new">呼叫 coupon-service 花了 3.5 秒</div>'
+                            : '<div class="wait">（等 coupon-service 回應中…）</div>';
+      cntA.textContent = nA + " 行";
+    }
+  }
+  function fmtDur(s, e, ms, approx){
+    if (ms <= s) return "";
+    var d = Math.min(ms, e) - s;
+    return (ms >= e && approx ? "約 " : "") + Math.round(d) + " ms";
+  }
+
+  var cur = END;
+  function draw(ms){
+    ms = Math.max(0, Math.min(END, ms));
+    cur = ms;
+    for (var k = 0; k < rects.length; k++){
+      var c = calls[k];
+      rects[k].setAttribute("width", Math.max(0, Math.min(ms, c.e) - c.s));
+    }
+    bars.forEach(function(b){
+      var w = Math.max(0, Math.min(ms, b.e) - b.s);
+      b.el.style.left = pct(b.s); b.el.style.width = pct(w);
+    });
+    durEls.root.textContent  = fmtDur(0, 3800, ms, true);
+    durEls.call.textContent  = fmtDur(0, 3500, ms);
+    durEls.apply.textContent = fmtDur(0, 3500, ms);
+    durEls.tail.textContent  = fmtDur(3500, 3800, ms, true);
+    var done = calls.filter(function(c){ return !c.hot && c.e <= ms; }).length;
+    nCalls.textContent = done + " / 30 件";
+    cursor.style.left = pct(ms);
+    cursor.style.opacity = ms >= END ? "0" : ".85";
+    scrub.value = Math.round(ms);
+    msEl.textContent = Math.round(ms) + " ms";
+    noteA.classList.toggle("on", ms >= 3500);
+    noteB.classList.toggle("on", ms >= 2800);
+    renderLogs(ms);
+    nowEl.textContent = phase(ms);
+    userEl.innerHTML = ms >= END
+      ? "<b>使用者看到的：</b>轉圈將近 4 秒才跳出成功，沒有任何錯誤訊息"
+      : "<b>使用者看到的：</b>按下結帳後轉圈中… " + (ms/1000).toFixed(1) + " 秒";
+  }
+
+  // ---- 播放控制：只在播放中而且看得到時跑 rAF ----
+  var playing = false, visible = true, raf = 0, last = 0;
+  var KEYS = [0, 750, 2800, 3500, END];
+  function setIcon(){
+    playIcon.innerHTML = playing ? '<path d="M2.5 1.5h3v11h-3zM8.5 1.5h3v11h-3z"/>' : '<path d="M3 1.5v11l9.5-5.5z"/>';
+    playBtn.setAttribute("aria-label", playing ? "暫停" : "播放");
+  }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? (now - last) / 1000 : 0; last = now;
+    var ms = cur + dt * SPEED;
+    if (ms >= END){ draw(END); playing = false; setIcon(); return; }
+    draw(ms);
+    raf = requestAnimationFrame(tick);
+  }
+  function arm(){ if (!raf && playing && visible){ last = 0; raf = requestAnimationFrame(tick); } }
+  function stop(){ playing = false; if (raf){ cancelAnimationFrame(raf); raf = 0; } setIcon(); }
+  function play(){
+    if (reduce.matches){ // 不跑動畫：一次跳到下一個關鍵時間點
+      var next = KEYS.filter(function(k){ return k > cur + 1; })[0];
+      draw(next === undefined ? 0 : next); return;
+    }
+    if (cur >= END) draw(0);
+    playing = true; setIcon(); arm();
+  }
+  playBtn.addEventListener("click", function(){ playing ? stop() : play(); });
+  scrub.addEventListener("input", function(){ stop(); draw(+scrub.value); });
+  fig.addEventListener("keydown", function(e){
+    if (e.target === scrub) return;
+    if (e.key === "ArrowRight"){ stop(); draw(cur + 100); e.preventDefault(); }
+    else if (e.key === "ArrowLeft"){ stop(); draw(cur - 100); e.preventDefault(); }
+    else if (e.key === "Home"){ stop(); draw(0); e.preventDefault(); }
+    else if (e.key === "End"){ stop(); draw(END); e.preventDefault(); }
+    else if ((e.key === " " || e.key === "Enter") && e.target === fig){ playing ? stop() : play(); e.preventDefault(); }
+  });
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) arm(); else if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    }, {rootMargin:"120px"}).observe(fig);
+  }
+
+  // ---- 深淺切換：設定根元素 data-theme（外層網站也會設定它）----
+  $("theme").addEventListener("click", function(){
+    var root = document.documentElement, t = root.getAttribute("data-theme");
+    var dark = t ? t === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+
+  // ---- seek(t)：t 是播放秒數，0..DUR ----
+  window.DUR = DUR;
+  window.seek = function(t){ stop(); draw(Math.min(END, Math.max(0, t) * SPEED)); };
+  window.timeline = function(){ return DUR; };
+
+  draw(END); // 靜止時停在完整的瀑布圖（data-rest）
+  setIcon();
+})();
+</script>
+</body>
+</html>

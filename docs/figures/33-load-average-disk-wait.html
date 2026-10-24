@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>load average 不等於 CPU</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280; --line:#c7ccd4;
+  --panel:#f8fafc; --panel2:#e7ebf0; --run:#64748b;
+  --amber-fill:#fde68a; --amber-stroke:#b45309; --amber-ink:#111111;
+  --err:#b91c1c; --err-fill:#fee2e2; --err-ink:#7f1d1d;
+  --focus:#2563eb;
+  --sans:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,"PingFang TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e5e7eb; --muted:#b9bfca; --soft:#9aa2b0; --line:#454c5c;
+    --panel:#262a34; --panel2:#353b48; --run:#9aa7ba;
+    --amber-fill:#5b3c0c; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+    --err:#f87171; --err-fill:#451a1a; --err-ink:#fecaca;
+    --focus:#7aa2f7; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e5e7eb; --muted:#b9bfca; --soft:#9aa2b0; --line:#454c5c;
+  --panel:#262a34; --panel2:#353b48; --run:#9aa7ba;
+  --amber-fill:#5b3c0c; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+  --err:#f87171; --err-fill:#451a1a; --err-ink:#fecaca;
+  --focus:#7aa2f7; color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans)}
+.fig{margin:0;padding:8px 16px 12px;box-sizing:border-box;width:100%;outline:none}
+.fig:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;border-radius:6px}
+.fig .stage{width:100%;margin:0 auto}
+.fig .stage.narrow{max-width:480px}
+.fig svg{display:block;width:100%;height:auto}
+.fig .cap{display:flex;gap:8px;align-items:baseline;min-height:3.2em;margin:8px auto 4px;font-size:15px;line-height:1.55;max-width:960px}
+.fig .cap .step{flex:none;font-weight:700;color:var(--amber-stroke);white-space:nowrap}
+.fig .ctrl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:960px;margin:0 auto}
+.fig button{font:inherit;font-size:14px;min-height:36px;min-width:36px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.fig button:hover{border-color:var(--muted)}
+.fig button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.fig button.play{font-weight:700;min-width:88px}
+.fig button.on{background:var(--amber-fill);border-color:var(--amber-stroke);color:var(--amber-ink);font-weight:700}
+.fig input[type=range]{flex:1 1 160px;min-width:0;height:36px;margin:0;accent-color:var(--amber-stroke)}
+.fig .keys{display:flex;gap:6px;flex-wrap:wrap}
+.fig .theme{margin-left:auto}
+/* svg parts */
+.z-box{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.z-box.hot{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5}
+.z-title{fill:var(--ink);font-weight:700}
+.z-sub{fill:var(--muted)}
+.z-mono{font-family:var(--mono)}
+.v{fill:var(--ink);font-weight:700}
+.v.hot,.t.hot{fill:var(--amber-stroke)}
+.v.err,.t.err{fill:var(--err)}
+.t{fill:var(--muted)}
+.t.ink{fill:var(--amber-ink);font-weight:700}
+.core{fill:none;stroke:var(--line);stroke-width:1.5}
+.core.busy{fill:var(--panel2);stroke:var(--soft)}
+.core.new{fill:none;stroke:var(--amber-stroke);stroke-width:2;stroke-dasharray:4 3}
+.dot{stroke-width:1.5}
+.dot.run{fill:var(--run);stroke:var(--run)}
+.dot.wait{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2}
+.sw.run{fill:var(--run)}
+.sw.wait{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:1.5}
+.bar-bg{fill:var(--panel2);stroke:var(--line);stroke-width:1}
+.mem-fill{fill:var(--run);opacity:.55}
+.mem-cap{stroke:var(--ink);stroke-width:2}
+.over{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2;stroke-dasharray:5 3}
+.lb-run{fill:var(--run)}
+.lb-wait{fill:var(--amber-stroke)}
+.iops{fill:var(--run)}
+.iops.full{fill:var(--amber-stroke)}
+.flow{stroke:var(--amber-stroke);stroke-width:2.5;fill:none;stroke-dasharray:6 6}
+.flow-head{fill:var(--amber-stroke)}
+.disk{fill:var(--panel2);stroke:var(--soft);stroke-width:1.5}
+.shade{fill:var(--bg)}
+@media (prefers-reduced-motion: reduce){ .fig *{transition:none!important} }
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="load-average-disk-wait" data-dur="21" data-rest="19.5" tabindex="0"
+  aria-label="動畫：熱門演唱會開賣，熱資料裝不下記憶體，沒命中的讀取打到磁碟，IOPS 打滿，查詢排隊等磁碟，也被算進 load average，load 衝到 30 以上。值班工程師誤判成 CPU 不夠，改成 16 vCPU、記憶體維持 16 GB，重開機斷線、快取變冷；快取熱回來後回應還是 2 秒，CPU 使用率 30%，多出來的核心閒著。左右方向鍵切換步驟，空白鍵播放或暫停。">
+  <div class="stage"><svg id="ladw-svg" role="img" aria-labelledby="load-average-disk-wait-title load-average-disk-wait-desc"></svg></div>
+  <figcaption class="cap" aria-live="polite"><span class="step"></span><span class="txt"></span></figcaption>
+  <div class="ctrl">
+    <button type="button" class="prev" aria-label="上一步">◀</button>
+    <button type="button" class="play" aria-label="播放">▶ 播放</button>
+    <button type="button" class="next" aria-label="下一步">▶▶</button>
+    <input type="range" min="0" max="21" step="0.01" value="19.5" aria-label="時間軸">
+    <div class="keys" role="group" aria-label="跳到步驟"></div>
+    <button type="button" class="theme" aria-label="切換深淺色">◐</button>
+  </div>
+</figure>
+<script>
+(function(){
+  'use strict';
+  var fig = document.querySelector('.fig');
+  var svg = document.getElementById('ladw-svg');
+  var stage = fig.querySelector('.stage');
+  var DUR = +fig.dataset.dur, REST = +fig.dataset.rest;
+  var NS = 'http://www.w3.org/2000/svg';
+  var SEG = 3, MOVE = 1.0, NDOT = 33, CAP = 300; // CAP = 記憶體容量（示意單位）
+
+  // ---------- 七格狀態：數值與文字全照文章 T1–T7 表格 ----------
+  var S = [
+    {step:'T1 開賣前', cap:'平常狀態：常被讀的資料都裝得進 16 GB 記憶體，快取命中率 99.8%，磁碟讀取 1 ms，API 回應 80 ms。',
+     cores:4, need:240, fill:240, iops:0.15, flow:0.15, down:0,
+     api:'80 ms', apiC:'', sub:['平常狀態'],
+     load:'', judge:['只看 load average','這一個數字'], jHot:false,
+     hit:'99.8%', hitC:'', lat:'1 ms', latC:'', cpu:'40% 上下', cpuC:'',
+     spec:'4 vCPU／16 GB', specC:'', cpuN:'', memN:'常被讀的資料都裝得進記憶體', diskN:''},
+    {step:'T2 20:00', cap:'開賣，大家同時查座位。座位表加訂單表這些熱資料（working set）超過記憶體裝得下的量，沒命中的讀取開始打到磁碟。',
+     cores:4, need:420, fill:300, iops:0.6, flow:1, down:0,
+     api:'開始變慢', apiC:'hot', sub:['大家同時查座位'],
+     load:'', judge:['只看 load average','這一個數字'], jHot:false,
+     hit:'開始下降', hitC:'hot', lat:'開始變長', latC:'hot', cpu:'—', cpuC:'',
+     spec:'4 vCPU／16 GB', specC:'', cpuN:'', memN:'熱資料超過記憶體裝得下的量', diskN:'沒命中的讀取開始打到磁碟'},
+    {step:'T3 20:02', cap:'磁碟 IOPS 上限被打滿，每個查詢都在等磁碟。等磁碟的程序也被算進 load average，所以 load 衝到 30 以上，看起來像 CPU 很忙。',
+     cores:4, need:420, fill:300, iops:1, flow:1, down:0,
+     api:'3 秒', apiC:'err', sub:['結帳一直逾時','連線池被占滿'],
+     load:'30 以上', judge:['load 30 以上，','看起來像 CPU 很忙'], jHot:false,
+     hit:'93%', hitC:'hot', lat:'40 ms', latC:'hot', cpu:'—', cpuC:'',
+     spec:'4 vCPU／16 GB', specC:'', cpuN:'查詢都卡在等磁碟', memN:'裝不下的部分，沒命中就讀磁碟', diskN:'IOPS 上限被打滿，請求越堆越多'},
+    {step:'T4', cap:'值班工程師只看 load average，判斷 CPU 不夠，把機型改成 16 vCPU、記憶體維持 16 GB，立刻按「套用」。',
+     cores:4, need:420, fill:300, iops:1, flow:1, down:0,
+     api:'3 秒', apiC:'err', sub:['結帳一直逾時','連線池被占滿'],
+     load:'30 以上', judge:['判斷：CPU 不夠','改成 16 vCPU，','立刻按「套用」'], jHot:true,
+     hit:'93%', hitC:'hot', lat:'40 ms', latC:'hot', cpu:'—', cpuC:'',
+     spec:'4 vCPU／16 GB', specC:'', cpuN:'要改成 16 vCPU，記憶體維持 16 GB', memN:'記憶體維持 16 GB，還是裝不下', diskN:'IOPS 還是滿的'},
+    {step:'T5', cap:'改機型要重開機，資料庫斷線好幾分鐘，結帳請求全部失敗。',
+     cores:4, need:420, fill:0, iops:0, flow:0, down:1,
+     api:'全部失敗', apiC:'err', sub:['資料庫斷線','好幾分鐘'],
+     load:'停機', judge:['改機型要重開機'], jHot:false,
+     hit:'資料庫停機', hitC:'err', lat:'資料庫停機', latC:'err', cpu:'資料庫停機', cpuC:'err',
+     spec:'重開機中', specC:'err', cpuN:'', memN:'重開機，快取跟著清空', diskN:''},
+    {step:'T6 重開後的十幾分鐘', cap:'換成 16 vCPU 了，但 shared_buffers 和 page cache 都是空的，所有查詢重新從磁碟讀，比升級前更慢。',
+     cores:16, need:420, fill:50, iops:1, flow:1, down:0,
+     api:'比升級前更慢', apiC:'err', sub:[],
+     load:'', judge:['尖峰時段套用，','快取整個變冷'], jHot:false,
+     hit:'快取是空的', hitC:'hot', lat:'所有讀取都打到磁碟', latC:'hot', cpu:'—', cpuC:'',
+     spec:'16 vCPU／16 GB', specC:'hot', cpuN:'換成 16 vCPU 了', memN:'shared_buffers 和 page cache 都是空的', diskN:'所有查詢重新從磁碟讀'},
+    {step:'T7 快取熱回來後', cap:'記憶體還是 16 GB，熱資料一樣裝不下，磁碟還是瓶頸。CPU 使用率只有 30%，多出來的核心閒著，回應還是 2 秒。',
+     cores:16, need:420, fill:300, iops:1, flow:1, down:0,
+     api:'2 秒', apiC:'err', sub:['每次操作還是','要等 2 秒左右'],
+     load:'', judge:['真正用完的是','記憶體和磁碟 IOPS'], jHot:true,
+     hit:'沒有回到 99.8%', hitC:'hot', lat:'仍然偏高', latC:'hot', cpu:'30%', cpuC:'hot',
+     spec:'16 vCPU／16 GB', specC:'hot', cpuN:'CPU 使用率 30%：多出來的核心閒著', memN:'還是 16 GB，熱資料一樣裝不下', diskN:'磁碟還是瓶頸'}
+  ];
+  // 每格裡的程序點：在跑 CPU（cpu k）或排隊等磁碟（q j）；點數是示意
+  var PLAN = [ {run:2, wait:0}, {run:2, wait:8}, {run:3, wait:30}, {run:3, wait:30}, {run:0, wait:0}, {run:2, wait:30}, {run:5, wait:20} ];
+  function loc(i, d){
+    var p = PLAN[i];
+    if (d < p.run) return {k:'cpu', n:d};
+    if (d < p.run + p.wait) return {k:'q', n:d - p.run};
+    return {k:'off'};
+  }
+
+  // ---------- 兩種版面 ----------
+  var L = {
+    wide: {
+      vb:[960,540], fs:{title:18, text:16, big:28, mid:22, small:17},
+      user:{x:16,y:16,w:200,h:220, title:[32,44], lab:[32,76], val:[32,116], sub:[32,152,24]},
+      eng:{x:16,y:252,w:200,h:272, title:[32,280], mono:[32,308,'start'], bar:[32,320,168,16], big:[32,364],
+           f1:[32,392], f2:[32,416], j:{x:24,y:432,w:184,h:84}, jl:[36,456,24]},
+      host:{x:232,y:16,w:488,h:508, title:[248,44], spec:[704,44], center:[476,250]},
+      cpu:{lab:[248,80], core:function(i){ return {x:248 + i*29, y:92, s:24}; }, note:[248,144]},
+      mem:{lab:[248,184], bar:[248,196,300,28], note:[248,252]},
+      flow:{d:'M560 228 V302', head:[560,308], lab:[552,284]},
+      disk:{lab:[248,300], meter:[328,312,376,16], mlab:[704,304], icon:[248,320,56,64], qlab:[328,356],
+            q:function(j){ return {x:340 + (j%15)*24, y:380 + Math.floor(j/15)*24, r:8}; }, note:[248,448]},
+      entry:{x:236, y:400},
+      side:{x:736,y:16,w:208,h:508, title:[752,44],
+            rows:[[752,84,752,116,'快取命中率'],[752,164,752,196,'磁碟讀取延遲（iostat）'],[752,244,752,276,'CPU 使用率']], vend:false,
+            foot:[[752,332,'還該看：',''],[752,356,'vmstat 的 wa','mono'],[752,380,'CPU 閒著、在等磁碟',''],[752,404,'的時間比例',''],[752,452,'看 wa 和讀取延遲，','hot'],[752,476,'就知道是磁碟的問題','hot']]}
+    },
+    narrow: {
+      vb:[360,1096], fs:{title:17, text:15, big:26, mid:20, small:17},
+      user:{x:12,y:12,w:336,h:128, title:[24,36], lab:[24,64], val:[24,104], sub:[188,88,24]},
+      eng:{x:12,y:668,w:336,h:212, title:[24,692], mono:[336,692,'end'], bar:[24,708,200,16], big:[240,724],
+           f1:[24,756], f2:[184,756], j:{x:20,y:776,w:320,h:96}, jl:[32,800,24]},
+      host:{x:12,y:152,w:336,h:504, title:[24,178], spec:[336,178], center:[180,264]},
+      cpu:{lab:[24,210], core:function(i){ return {x:24 + (i%8)*38, y:220 + Math.floor(i/8)*36, s:28}; }, note:[24,314]},
+      mem:{lab:[24,346], bar:[24,360,200,28], note:[24,414]},
+      flow:{d:'M304 374 H330 V478', head:[330,484], lab:[322,448]},
+      disk:{lab:[24,476], meter:[24,488,312,16], mlab:[300,476], icon:null, qlab:[24,532],
+            q:function(j){ return {x:39 + (j%10)*30, y:556 + Math.floor(j/10)*26, r:9}; }, note:[24,640]},
+      entry:{x:16, y:580},
+      side:{x:12,y:892,w:336,h:192, title:[24,916],
+            rows:[[24,952,336,952,'快取命中率'],[24,984,336,984,'磁碟讀取延遲'],[24,1016,336,1016,'CPU 使用率']], vend:true,
+            foot:[[24,1048,'還該看 vmstat 的 wa（CPU 閒著等磁碟）','mono0'],[24,1072,'看 wa 和讀取延遲，就知道是磁碟的問題','hot']]}
+    }
+  };
+
+  // ---------- helpers ----------
+  function el(tag, attrs, parent, text){
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function setA(e, k, v){ e._c = e._c || {}; if (e._c[k] !== v){ e._c[k] = v; e.setAttribute(k, v); } }
+  function setT(e, v){ if (e._t !== v){ e._t = v; e.textContent = v; } }
+  function clamp(x){ return x < 0 ? 0 : x > 1 ? 1 : x; }
+  function ease(x){ x = clamp(x); return x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x + 2, 3) / 2; }
+  function lerp(a, b, p){ return a + (b - a) * p; }
+  function txt(parent, x, y, size, cls, s, anchor){
+    var a = {x:x, y:y, 'font-size':size, 'class':cls};
+    if (anchor) a['text-anchor'] = anchor;
+    return el('text', a, parent, s);
+  }
+
+  var layoutName = null, P = null;
+
+  function build(name){
+    var C = L[name]; layoutName = name; var fs = C.fs;
+    stage.classList.toggle('narrow', name === 'narrow');
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.setAttribute('viewBox', '0 0 ' + C.vb[0] + ' ' + C.vb[1]);
+    var frag = document.createDocumentFragment();
+    el('title', {id:'load-average-disk-wait-title'}, frag, 'load average 高，不代表 CPU 不夠');
+    el('desc', {id:'load-average-disk-wait-desc'}, frag, '票務平台開賣時，熱資料超過 16 GB 記憶體，沒命中的讀取打到磁碟，IOPS 打滿，查詢排隊等磁碟並被算進 load average。誤判成 CPU 不夠而改成 16 vCPU，重開機後快取變冷，熱回來後 CPU 使用率只有 30%，回應仍是 2 秒。');
+    var g = el('g', {'font-family':'var(--sans)'}, frag);
+    var R = {C:C};
+
+    // 使用者結帳
+    var u = C.user;
+    el('rect', {x:u.x, y:u.y, width:u.w, height:u.h, rx:8, 'class':'z-box'}, g);
+    txt(g, u.title[0], u.title[1], fs.title, 'z-title', '使用者結帳');
+    txt(g, u.lab[0], u.lab[1], fs.text, 'z-sub', 'API 回應時間');
+    R.api = txt(g, u.val[0], u.val[1], fs.big, 'v', '');
+    R.sub = [0,1].map(function(k){ return txt(g, u.sub[0], u.sub[1] + k*u.sub[2], fs.text, 't', ''); });
+
+    // 資料庫主機
+    var h = C.host;
+    R.hostBox = el('rect', {x:h.x, y:h.y, width:h.w, height:h.h, rx:8, 'class':'z-box'}, g);
+    txt(g, h.title[0], h.title[1], fs.title, 'z-title', '資料庫主機');
+    R.spec = txt(g, h.spec[0], h.spec[1], fs.title, 'v z-mono', '', 'end');
+    // CPU
+    txt(g, C.cpu.lab[0], C.cpu.lab[1], fs.text, 'z-sub', 'CPU 核心（灰點＝正在跑的查詢）');
+    R.cores = [];
+    for (var i = 0; i < 16; i++){
+      var c = C.cpu.core(i);
+      R.cores.push(el('rect', {x:c.x, y:c.y, width:c.s, height:c.s, rx:4, 'class':'core'}, g));
+    }
+    R.cpuN = txt(g, C.cpu.note[0], C.cpu.note[1], fs.text, 't', '');
+    // 記憶體
+    var m = C.mem, mb = m.bar;
+    txt(g, m.lab[0], m.lab[1], fs.text, 'z-sub', '記憶體（快取）');
+    el('rect', {x:mb[0], y:mb[1], width:mb[2], height:mb[3], rx:4, 'class':'bar-bg'}, g);
+    R.memFill = el('rect', {x:mb[0], y:mb[1], width:0, height:mb[3], rx:4, 'class':'mem-fill'}, g);
+    R.memIn = txt(g, mb[0] + 10, mb[1] + mb[3]/2 + fs.text*0.36, fs.text, 't', '快取裡的熱資料');
+    R.over = el('rect', {x:mb[0] + mb[2], y:mb[1], width:0, height:mb[3], rx:4, 'class':'over'}, g);
+    R.overT = txt(g, 0, mb[1] + mb[3]/2 + fs.text*0.36, fs.text, 't ink', '裝不下', 'middle');
+    el('line', {x1:mb[0] + mb[2], y1:mb[1] - 6, x2:mb[0] + mb[2], y2:mb[1] + mb[3] + 4, 'class':'mem-cap'}, g);
+    txt(g, mb[0] + mb[2], mb[1] - 12, fs.text, 'v', '16 GB', 'middle');
+    R.memN = txt(g, m.note[0], m.note[1], fs.text, 't', '');
+    // 沒命中 → 讀磁碟
+    R.flow = el('path', {d:C.flow.d, 'class':'flow'}, g);
+    R.flowHead = el('path', {d:'M' + C.flow.head[0] + ' ' + C.flow.head[1] + ' l-6 -10 h12 z', 'class':'flow-head'}, g);
+    R.flowT = txt(g, C.flow.lab[0], C.flow.lab[1], fs.text, 't hot', '沒命中 → 讀磁碟', 'end');
+    // 磁碟
+    var d = C.disk;
+    txt(g, d.lab[0], d.lab[1], fs.text, 'z-sub', '磁碟');
+    txt(g, d.mlab[0], d.mlab[1], fs.text, 'z-sub', 'IOPS ｜ 上限', 'end');
+    if (d.icon){
+      var ic = d.icon, rx = ic[2]/2, ry = 8;
+      el('path', {d:'M' + ic[0] + ' ' + (ic[1]+ry) + ' v' + (ic[3]-2*ry) + ' a' + rx + ' ' + ry + ' 0 0 0 ' + ic[2] + ' 0 v-' + (ic[3]-2*ry) + ' a' + rx + ' ' + ry + ' 0 0 0 -' + ic[2] + ' 0 z', 'class':'disk'}, g);
+      el('ellipse', {cx:ic[0]+rx, cy:ic[1]+ry, rx:rx, ry:ry, 'class':'disk'}, g);
+    }
+    var mt = d.meter;
+    el('rect', {x:mt[0], y:mt[1], width:mt[2], height:mt[3], rx:4, 'class':'bar-bg'}, g);
+    R.iops = el('rect', {x:mt[0], y:mt[1], width:0, height:mt[3], rx:4, 'class':'iops'}, g);
+    el('line', {x1:mt[0] + mt[2], y1:mt[1] - 4, x2:mt[0] + mt[2], y2:mt[1] + mt[3] + 4, 'class':'mem-cap'}, g);
+    txt(g, d.qlab[0], d.qlab[1], fs.text, 't hot', '在等磁碟的查詢（也算進 load average）');
+    R.diskN = txt(g, d.note[0], d.note[1], fs.text, 't', '');
+
+    // 值班工程師看的
+    var e = C.eng;
+    el('rect', {x:e.x, y:e.y, width:e.w, height:e.h, rx:8, 'class':'z-box'}, g);
+    txt(g, e.title[0], e.title[1], fs.title, 'z-title', '值班工程師看的');
+    txt(g, e.mono[0], e.mono[1], fs.text, 'z-sub z-mono', 'load average', e.mono[2] === 'end' ? 'end' : null);
+    el('rect', {x:e.bar[0], y:e.bar[1], width:e.bar[2], height:e.bar[3], rx:4, 'class':'bar-bg'}, g);
+    R.lbRun = el('rect', {x:e.bar[0], y:e.bar[1], width:0, height:e.bar[3], 'class':'lb-run'}, g);
+    R.lbWait = el('rect', {x:e.bar[0], y:e.bar[1], width:0, height:e.bar[3], 'class':'lb-wait'}, g);
+    R.load = txt(g, e.big[0], e.big[1], fs.mid, 'v err', '');
+    [[e.f1, '＝', 'run', '在跑 CPU 的'], [e.f2, '＋', 'wait', '在等磁碟的']].forEach(function(f){
+      txt(g, f[0][0], f[0][1], fs.text, 't', f[1]);
+      el('rect', {x:f[0][0] + 20, y:f[0][1] - 12, width:12, height:12, rx:2, 'class':'sw ' + f[2]}, g);
+      txt(g, f[0][0] + 38, f[0][1], fs.text, f[2] === 'wait' ? 't hot' : 't', f[3]);
+    });
+    R.jBox = el('rect', {x:e.j.x, y:e.j.y, width:e.j.w, height:e.j.h, rx:6, 'class':'z-box'}, g);
+    R.judge = [0,1,2].map(function(k){ return txt(g, e.jl[0], e.jl[1] + k*e.jl[2], fs.text, 't', ''); });
+
+    // 當時沒看的指標
+    var sd = C.side;
+    el('rect', {x:sd.x, y:sd.y, width:sd.w, height:sd.h, rx:8, 'class':'z-box'}, g);
+    txt(g, sd.title[0], sd.title[1], fs.title, 'z-title', '當時沒看的指標');
+    R.side = sd.rows.map(function(r){
+      txt(g, r[0], r[1], fs.text, 'z-sub', r[4]);
+      return txt(g, r[2], r[3], fs.mid, 'v', '', sd.vend ? 'end' : null);
+    });
+    sd.foot.forEach(function(f){
+      var cls = f[3] === 'mono' ? 't z-mono' : f[3] === 'hot' ? 't hot' : 't';
+      txt(g, f[0], f[1], fs.text, cls, f[2]);
+    });
+
+    // 程序點（最上層）
+    var dotG = el('g', {}, g);
+    R.dots = [];
+    for (var n = 0; n < NDOT; n++) R.dots.push(el('circle', {cx:0, cy:0, r:7, 'class':'dot run', opacity:0}, dotG));
+
+    // 重開機遮罩
+    R.shade = el('g', {opacity:0}, g);
+    el('rect', {x:h.x + 2, y:h.y + 56, width:h.w - 4, height:h.h - 60, rx:6, 'class':'shade', opacity:0.88}, R.shade);
+    txt(R.shade, h.center[0], h.center[1], fs.mid, 'v err', '重開機中', 'middle');
+    txt(R.shade, h.center[0], h.center[1] + 32, fs.text, 't', '資料庫斷線好幾分鐘', 'middle');
+
+    svg.appendChild(frag);
+    P = R;
+  }
+
+  function posOf(lc, C){
+    if (lc.k === 'cpu'){ var c = C.cpu.core(lc.n); return {x:c.x + c.s/2, y:c.y + c.s/2, r:c.s*0.3}; }
+    if (lc.k === 'q') return C.disk.q(lc.n);
+    return null;
+  }
+
+  // ---------- 畫面＝t 的純函數 ----------
+  var curT = REST;
+  function render(t){
+    curT = t;
+    var C = P.C, fs = C.fs;
+    var i = Math.min(S.length - 1, Math.floor(t / SEG));
+    var a = S[Math.max(0, i - 1)], b = S[i];
+    var p = i === 0 ? 1 : ease((t - i*SEG) / MOVE);
+    var cur = p >= 0.4 ? b : a;
+
+    // 主機規格與停機
+    setT(P.spec, cur.spec); setA(P.spec, 'class', 'v z-mono' + (cur.specC ? ' ' + cur.specC : ''));
+    var down = lerp(a.down, b.down, p);
+    setA(P.shade, 'opacity', down.toFixed(3));
+
+    // CPU 核心
+    var cores = lerp(a.cores, b.cores, p), runNow = (p >= 0.5 ? PLAN[i] : PLAN[Math.max(0, i - 1)]).run;
+    for (var k = 0; k < 16; k++){
+      var op = k < 4 ? 1 : clamp((cores - 4) / 12);
+      setA(P.cores[k], 'opacity', op.toFixed(3));
+      var busy = k < runNow && down < 0.5;
+      setA(P.cores[k], 'class', 'core' + (busy ? ' busy' : (k >= 4 ? ' new' : '')));
+    }
+
+    // 記憶體
+    var mb = C.mem.bar, u = mb[2] / CAP;
+    var fill = lerp(a.fill, b.fill, p), need = lerp(a.need, b.need, p);
+    setA(P.memFill, 'width', (fill * u).toFixed(1));
+    setA(P.memIn, 'opacity', fill > 150 ? '1' : '0');
+    var ov = Math.max(0, need - CAP) * u * (1 - down);
+    setA(P.over, 'width', ov.toFixed(1));
+    setA(P.over, 'opacity', ov > 1 ? '1' : '0');
+    setA(P.overT, 'x', (mb[0] + mb[2] + ov/2).toFixed(1));
+    setA(P.overT, 'opacity', ov > 50 ? '1' : '0');
+
+    // 讀磁碟的流
+    var flow = lerp(a.flow, b.flow, p);
+    setA(P.flow, 'opacity', flow.toFixed(3));
+    setA(P.flowHead, 'opacity', flow.toFixed(3));
+    setA(P.flowT, 'opacity', flow > 0.5 ? '1' : '0');
+    setA(P.flow, 'stroke-dashoffset', (-(t * 24) % 12).toFixed(1));
+
+    // IOPS
+    var io = lerp(a.iops, b.iops, p), mt = C.disk.meter;
+    setA(P.iops, 'width', (mt[2] * io).toFixed(1));
+    setA(P.iops, 'class', 'iops' + (io > 0.95 ? ' full' : ''));
+
+    // 程序點
+    var runC = 0, waitC = 0;
+    for (var dI = 0; dI < NDOT; dI++){
+      var la = loc(Math.max(0, i - 1), dI), lb = loc(i, dI);
+      var delay = (dI % 15) * 0.02;
+      var pd = i === 0 ? 1 : ease((t - i*SEG - delay) / (MOVE - 0.3));
+      var A = posOf(la, C), B = posOf(lb, C), dot = P.dots[dI];
+      var x, y, r, o;
+      if (A && B){ x = lerp(A.x, B.x, pd); y = lerp(A.y, B.y, pd); r = lerp(A.r, B.r, pd); o = 1; }
+      else if (B){ x = lerp(C.entry.x, B.x, pd); y = lerp(C.entry.y, B.y, pd); r = B.r; o = pd; }
+      else if (A){ x = A.x; y = A.y; r = A.r; o = 1 - pd; }
+      else { o = 0; x = C.entry.x; y = C.entry.y; r = 7; }
+      setA(dot, 'cx', x.toFixed(1)); setA(dot, 'cy', y.toFixed(1)); setA(dot, 'r', r.toFixed(1));
+      setA(dot, 'opacity', o.toFixed(3));
+      var kind = (pd >= 0.5 ? lb : la).k;
+      if (kind === 'off') kind = (lb.k === 'off' ? la : lb).k;
+      setA(dot, 'class', 'dot ' + (kind === 'q' ? 'wait' : 'run'));
+      if (o > 0){ if (kind === 'q') waitC += o; else runC += o; }
+    }
+    var e = C.eng, lu = e.bar[2] / (NDOT + 1);
+    setA(P.lbRun, 'width', (runC * lu).toFixed(1));
+    setA(P.lbWait, 'x', (e.bar[0] + runC * lu).toFixed(1));
+    setA(P.lbWait, 'width', (waitC * lu).toFixed(1));
+
+    // 文字讀數
+    var bigApi = cur.api.length <= 4;
+    setT(P.api, cur.api); setA(P.api, 'font-size', bigApi ? fs.big : fs.mid);
+    setA(P.api, 'class', 'v' + (cur.apiC ? ' ' + cur.apiC : ''));
+    P.sub.forEach(function(s, n){ setT(s, cur.sub[n] || ''); setA(s, 'class', 't' + (cur.apiC === 'err' ? ' err' : '')); });
+    setT(P.load, cur.load);
+    setA(P.jBox, 'class', 'z-box' + (cur.jHot ? ' hot' : ''));
+    P.judge.forEach(function(s, n){ setT(s, cur.judge[n] || ''); setA(s, 'class', 't' + (cur.jHot ? ' ink' : '')); });
+    [['hit','hitC'],['lat','latC'],['cpu','cpuC']].forEach(function(f, n){
+      var v = cur[f[0]], s = P.side[n];
+      setT(s, v); setA(s, 'font-size', v.length > 5 ? fs.small : fs.mid);
+      setA(s, 'class', 'v' + (cur[f[1]] ? ' ' + cur[f[1]] : ''));
+    });
+    setT(P.cpuN, cur.cpuN); setA(P.cpuN, 'class', 't' + (i >= 3 && cur.cpuN ? ' hot' : ''));
+    setT(P.memN, cur.memN); setT(P.diskN, cur.diskN);
+    setA(P.diskN, 'class', 't' + (cur.iops > 0.95 ? ' hot' : ''));
+
+    // 圖說與控制
+    var ci = Math.min(S.length - 1, Math.floor(t / SEG));
+    if (capStep._i !== ci){
+      capStep._i = ci; capStep.textContent = S[ci].step; capTxt.textContent = S[ci].cap;
+      keyBtns.forEach(function(bt, n){ bt.classList.toggle('on', n === ci); bt.setAttribute('aria-pressed', n === ci ? 'true' : 'false'); });
+    }
+    if (+range.value !== t) range.value = t.toFixed(2);
+    range.setAttribute('aria-valuetext', S[ci].step);
+  }
+
+  // ---------- 控制 ----------
+  var capStep = fig.querySelector('.cap .step'), capTxt = fig.querySelector('.cap .txt');
+  var range = fig.querySelector('input[type=range]');
+  var playBtn = fig.querySelector('.play');
+  var keysBox = fig.querySelector('.keys');
+  var KEYT = S.map(function(s, n){ return n*SEG + 1.5; });
+  var keyBtns = S.map(function(s, n){
+    var bt = document.createElement('button'); bt.type = 'button'; bt.textContent = 'T' + (n + 1);
+    bt.setAttribute('aria-label', '跳到 ' + s.step);
+    bt.addEventListener('click', function(){ seek(KEYT[n]); });
+    keysBox.appendChild(bt); return bt;
+  });
+
+  var playing = false, stopAt = DUR, visible = false, raf = 0, last = 0;
+  function setPlaying(on){
+    playing = on;
+    playBtn.textContent = on ? '❚❚ 暫停' : '▶ 播放';
+    playBtn.setAttribute('aria-label', on ? '暫停' : '播放');
+    arm();
+  }
+  function arm(){ if (playing && visible && !raf){ last = 0; raf = requestAnimationFrame(tick); } }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0; last = now;
+    var t = Math.min(stopAt, curT + dt);
+    render(t);
+    if (t >= stopAt){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function play(){ if (curT >= DUR - 0.01) render(0); stopAt = DUR; setPlaying(true); }
+  function seek(t){ t = Math.max(0, Math.min(DUR, +t || 0)); setPlaying(false); render(t); }
+  function stepTo(dir){
+    var n;
+    if (dir > 0){ for (n = 0; n < KEYT.length; n++) if (KEYT[n] > curT + 0.01) return seek(KEYT[n]); seek(KEYT[KEYT.length-1]); }
+    else { for (n = KEYT.length - 1; n >= 0; n--) if (KEYT[n] < curT - 0.01) return seek(KEYT[n]); seek(0); }
+  }
+  playBtn.addEventListener('click', function(){ playing ? setPlaying(false) : play(); });
+  fig.querySelector('.prev').addEventListener('click', function(){ stepTo(-1); });
+  fig.querySelector('.next').addEventListener('click', function(){ stepTo(1); });
+  range.addEventListener('input', function(){ seek(range.value); });
+  fig.querySelector('.theme').addEventListener('click', function(){
+    var root = document.documentElement;
+    var c = root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', c === 'dark' ? 'light' : 'dark');
+  });
+  fig.addEventListener('keydown', function(ev){
+    if (ev.target !== fig) return;
+    if (ev.key === 'ArrowRight'){ stepTo(1); ev.preventDefault(); }
+    else if (ev.key === 'ArrowLeft'){ stepTo(-1); ev.preventDefault(); }
+    else if (ev.key === ' ' || ev.key === 'Enter'){ playing ? setPlaying(false) : play(); ev.preventDefault(); }
+    else if (ev.key === 'Home'){ seek(0); ev.preventDefault(); }
+    else if (ev.key === 'End'){ seek(DUR); ev.preventDefault(); }
+  });
+
+  // ---------- 版面與可見性 ----------
+  function pick(w){ return w >= 750 ? 'wide' : 'narrow'; } // 寬版 16px × 750/960 = 12.5px
+  build(pick((fig.clientWidth || window.innerWidth) - 32));
+  render(REST);
+  if ('ResizeObserver' in window){
+    new ResizeObserver(function(entries){
+      var nm = pick(entries[0].contentRect.width);
+      if (nm !== layoutName){ build(nm); render(curT); }
+    }).observe(fig);
+  }
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var introDone = reduce;
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible && !introDone){ introDone = true; render(0); stopAt = REST; playing = true; playBtn.textContent = '❚❚ 暫停'; playBtn.setAttribute('aria-label','暫停'); }
+      arm();
+    }, {rootMargin:'120px'}).observe(fig);
+  } else { visible = true; }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:KEYT.slice()}; };
+})();
+</script>
+</body>
+</html>

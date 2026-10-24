@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>預估 vs 實際：loops 爆量</title>
+<style>
+:root{
+  --bg:#ffffff; --card:#f5f6f8; --ink:#1f2430; --muted:#556070; --rule:#d5d9e0; --rule-strong:#9aa3b2;
+  --hot-fill:#fde68a; --hot-line:#b45309; --hot-ink:#111111;
+  --good:#1d7445; --good-fill:#dcf2e4; --unk:#8a93a3;
+  --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"SFMono-Regular",Menlo,"Noto Sans TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --card:#272b35; --ink:#e7e9ee; --muted:#a9b1bf; --rule:#3b404d; --rule-strong:#6b7385;
+    --hot-fill:#5b4310; --hot-line:#f5a524; --hot-ink:#fde68a;
+    --good:#6fd69a; --good-fill:#1f3a2b; --unk:#7d8596;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --card:#272b35; --ink:#e7e9ee; --muted:#a9b1bf; --rule:#3b404d; --rule-strong:#6b7385;
+  --hot-fill:#5b4310; --hot-line:#f5a524; --hot-ink:#fde68a;
+  --good:#6fd69a; --good-fill:#1f3a2b; --unk:#7d8596;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+.fig{margin:0;padding:16px;display:grid;gap:16px;outline:none;max-width:1100px}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--hot-line);border-radius:8px}
+code,.mono{font-family:var(--mono);font-size:13px}
+
+/* step chips */
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
+.steps button{width:100%;min-height:40px;padding:4px 8px;border:1px solid var(--rule);border-radius:8px;background:var(--card);color:var(--muted);
+  font:inherit;font-size:13px;line-height:1.3;text-align:left;cursor:pointer}
+.steps button b{display:block;font-family:var(--mono);font-size:12px;font-weight:600}
+.steps button.on{border-color:var(--hot-line);background:var(--hot-fill);color:var(--hot-ink)}
+.steps button.done{color:var(--ink)}
+
+/* stage */
+.stage{display:grid;gap:16px;grid-template-columns:1fr}
+@media (min-width:720px){.stage{grid-template-columns:minmax(220px,.8fr) 1.2fr}}
+.col{display:grid;gap:8px;align-content:start}
+.colh{font-size:13px;color:var(--muted);font-weight:600}
+.blk{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:12px;display:grid;gap:6px;transition:none}
+.blk-h{font-size:13px;color:var(--muted);font-weight:600}
+.kv{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline}
+.kv b{font-weight:600}
+.down{justify-self:center;color:var(--rule-strong);font-size:16px;line-height:1}
+.hot{background:var(--hot-fill)!important;border-color:var(--hot-line)!important;color:var(--hot-ink)}
+.hot .blk-h,.hot .muted{color:var(--hot-ink)}
+.good{background:var(--good-fill)!important;border-color:var(--good)!important}
+.bar{height:8px;border-radius:4px;background:var(--rule);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--rule-strong)}
+.bar i.hotbar{background:var(--hot-line)}
+.bar i.goodbar{background:var(--good)}
+.muted{color:var(--muted)}
+
+/* plan tree */
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:4px;vertical-align:-2px;border:1px solid var(--rule-strong)}
+.legend .l-act::before{border-style:dashed}
+.tree{display:grid;gap:8px}
+.kids{position:relative;display:grid;gap:8px;padding-left:24px}
+.kids::before{content:"";position:absolute;left:8px;top:-8px;bottom:28px;border-left:1px solid var(--rule-strong)}
+.kids>.node{position:relative}
+.kids>.node::before{content:"";position:absolute;left:-16px;top:24px;width:16px;border-top:1px solid var(--rule-strong)}
+.node{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:8px 12px;display:grid;gap:6px}
+.nname{font-family:var(--mono);font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.nname small{font-family:var(--sans);font-weight:400;font-size:12px;color:var(--muted);margin-left:4px}
+.hot .nname small{color:var(--hot-ink)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--mono);font-size:12px;padding:2px 8px;border-radius:4px;border:1px solid var(--rule-strong);background:var(--bg);color:var(--ink);overflow-wrap:anywhere;max-width:100%}
+.chip .k{font-family:var(--sans);color:var(--muted);margin-right:4px}
+.chip.act{border-style:dashed;color:var(--unk)}
+.chip.act.show{border-style:solid;color:var(--ink)}
+.chip.lit{border-color:var(--hot-line);box-shadow:0 0 0 2px var(--hot-fill)}
+.chip.act.boom{background:var(--hot-fill);border-color:var(--hot-line);color:var(--hot-ink);border-style:solid}
+.chip.act.boom .k{color:var(--hot-ink)}
+.chip.ok{border-color:var(--good);color:var(--ink)}
+.dot{position:absolute;left:4px;width:9px;height:9px;border-radius:50%;background:var(--hot-line);top:24px;opacity:0;pointer-events:none}
+.verdict{font-size:13px;min-height:20px}
+
+/* meters */
+.meters{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.meter{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:12px;display:grid;gap:6px}
+.mh{font-size:13px;color:var(--muted)}
+.mv{font-family:var(--mono);font-size:24px;font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums}
+.mv small{font-family:var(--sans);font-size:13px;font-weight:400;margin-left:4px}
+.ms{font-size:12px;color:var(--muted)}
+.meter.hot .mh,.meter.hot .ms{color:var(--hot-ink)}
+
+figcaption{font-size:14px;line-height:1.6;min-height:48px;border-left:3px solid var(--hot-line);padding:2px 0 2px 12px}
+
+/* controls */
+.ctrl{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.ctrl button{min-height:36px;min-width:36px;padding:4px 12px;border:1px solid var(--rule-strong);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
+.ctrl button:focus-visible,.steps button:focus-visible{outline:2px solid var(--hot-line);outline-offset:1px}
+.ctrl input[type=range]{flex:1 1 160px;min-width:120px;accent-color:var(--hot-line);height:32px}
+.ctrl .tt{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:64px}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="estimate-vs-actual-loops" data-dur="16" data-rest="12.2" tabindex="0"
+  aria-label="動畫：匯入 41 萬筆 refunding 訂單後沒跑 ANALYZE，規劃器以為只有 1 列而選了 Nested Loop；實際外層吐出 412337 列，內層 customers 被查了 412337 次，頁面從 50 毫秒變成 12 秒。EXPLAIN 只看得到預估 rows=1，EXPLAIN ANALYZE 才看到實際 rows=412337、loops=412337；執行 ANALYZE orders 後改選 Hash Join，回到約 300 毫秒。">
+
+  <ol class="steps" id="steps" aria-label="時間軸步驟">
+    <li><button type="button" data-i="0"><b>T1 凌晨</b>匯入 300 萬筆</button></li>
+    <li><button type="button" data-i="1"><b>T2 9:00</b>規劃器挑跑法</button></li>
+    <li><button type="button" data-i="2"><b>T3</b>照計畫跑</button></li>
+    <li><button type="button" data-i="3"><b>T4</b>只跑 EXPLAIN</button></li>
+    <li><button type="button" data-i="4"><b>T5</b>EXPLAIN ANALYZE</button></li>
+    <li><button type="button" data-i="5"><b>T6</b>ANALYZE orders;</button></li>
+  </ol>
+
+  <div class="stage">
+    <div class="col">
+      <div class="colh">規劃前：規劃器手上有什麼</div>
+      <div class="blk" id="tbl">
+        <div class="blk-h">orders 表</div>
+        <div class="kv"><span>凌晨匯入</span><b class="mono" id="impN">0</b></div>
+        <div class="bar" aria-hidden="true"><i id="impBar"></i></div>
+        <div class="kv"><span>其中 <code>status = 'refunding'</code></span><b>約 41 萬筆</b></div>
+      </div>
+      <div class="down" aria-hidden="true">▼</div>
+      <div class="blk" id="stat">
+        <div class="blk-h">統計資訊（要靠 <code>ANALYZE</code> 收集）</div>
+        <div class="kv"><code>'refunding'</code><b id="statVal">沒有紀錄</b></div>
+      </div>
+      <div class="down" aria-hidden="true">▼</div>
+      <div class="blk" id="plan">
+        <div class="blk-h">規劃器</div>
+        <div class="kv"><span>以為 <code>'refunding'</code> 有</span><b id="guess">？</b></div>
+        <div class="kv"><span>所以選</span><b class="mono" id="choice">？</b></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="colh">執行計畫（工程師看得到的部分）</div>
+      <div class="legend"><span class="l-est">預估：<code>EXPLAIN</code> 就印得出來</span><span class="l-act">實際：要 <code>EXPLAIN ANALYZE</code> 真的跑一次</span></div>
+      <div class="tree">
+        <div class="node" id="nRoot">
+          <div class="nname" id="rootName">Nested Loop</div>
+          <div class="chips">
+            <span class="chip est" id="rootEst"><span class="k">預估</span>cost=0.86..17.02 rows=1</span>
+            <span class="chip act" id="rootAct"><span class="k">實際</span>？</span>
+          </div>
+        </div>
+        <div class="kids" id="kids">
+          <span class="dot" id="dot" aria-hidden="true"></span>
+          <div class="node" id="nOuter">
+            <div class="nname" id="outerName">Index Scan using idx_orders_status on orders o<small>外層</small></div>
+            <div class="chips">
+              <span class="chip est" id="outerEst"><span class="k">預估</span>rows=1</span>
+              <span class="chip act" id="outerAct"><span class="k">實際</span>？</span>
+            </div>
+          </div>
+          <div class="node" id="nInner">
+            <div class="nname" id="innerName">Index Scan using customers_pkey on customers c<small>內層</small></div>
+            <div class="chips">
+              <span class="chip est" id="innerEst"><span class="k">預估</span>rows=1</span>
+              <span class="chip act" id="innerAct"><span class="k">實際</span>？</span>
+            </div>
+          </div>
+        </div>
+        <div class="verdict" id="verdict" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="meters">
+    <div class="meter" id="mLoops">
+      <div class="mh">內層 customers 被查了幾次</div>
+      <div class="mv" id="loopsV">0<small>次</small></div>
+      <div class="bar" aria-hidden="true"><i id="loopsBar" class="hotbar"></i></div>
+      <div class="ms" id="loopsS">規劃器以為只會查 1 次</div>
+    </div>
+    <div class="meter" id="mLat">
+      <div class="mh">「待處理退款」頁面回應時間</div>
+      <div class="mv" id="latV">—</div>
+      <div class="bar" aria-hidden="true"><i id="latBar"></i></div>
+      <div class="ms" id="latS">平常約 50 毫秒</div>
+    </div>
+  </div>
+
+  <figcaption id="cap" aria-live="polite"></figcaption>
+
+  <div class="ctrl">
+    <button type="button" id="play" aria-label="播放">▶ 播放</button>
+    <input type="range" id="scrub" min="0" max="16" step="0.02" value="12.2" aria-label="時間軸">
+    <span class="tt" id="tt"></span>
+    <button type="button" id="theme" aria-label="切換深淺色">◐ 深淺色</button>
+  </div>
+</figure>
+
+<script>
+(function(){
+  "use strict";
+  var fig = document.getElementById('fig');
+  var DUR = parseFloat(fig.dataset.dur), REST = parseFloat(fig.dataset.rest);
+  window.DUR = DUR;
+  // step boundaries (seconds)
+  var B = [0, 2.5, 4.5, 9, 11, 13, DUR];
+  var LOOPS = 412337;
+  var CAP = [
+    "凌晨匯入 300 萬筆訂單，其中約 41 萬筆是從沒出現過的 'refunding'。匯入完沒有跑 ANALYZE，統計資訊裡沒有這個值。",
+    "9:00 客服打開頁面。規劃器翻統計資訊，以為 'refunding' 只有 1 列，選了 Nested Loop：外層每找到一列，就去內層查一次，覺得只會查一次。",
+    "實際上外層 orders 吐出 41 萬列，每一列都去 customers 查一次。頁面從 50 毫秒變成 12 秒，資料庫 CPU 衝到 90%。資料庫不會半路換計畫。",
+    "值班工程師只跑了 EXPLAIN：只印預估，cost 很低、rows=1，看起來沒事，於是轉去懷疑網路。「實際」那一欄 EXPLAIN 根本不會印。",
+    "資深同事在讀取副本上跑 EXPLAIN (ANALYZE, BUFFERS)：預估 1 列、實際 412337 列，內層 loops=412337。預估和實際差了好幾個數量級，問題就在這裡。",
+    "手動執行 ANALYZE orders; 統計資訊補上這個值，規劃器知道約有 40 萬列，改選 Hash Join：先把一邊建成查找表，再一次比對完。頁面回到 300 毫秒左右。"
+  ];
+  var $ = function(id){ return document.getElementById(id); };
+  var el = {};
+  ["impN","impBar","tbl","stat","statVal","plan","guess","choice","nRoot","rootName","rootEst","rootAct",
+   "nOuter","outerName","outerEst","outerAct","nInner","innerName","innerEst","innerAct","dot","verdict",
+   "mLoops","loopsV","loopsBar","loopsS","mLat","latV","latBar","latS","cap","play","scrub","tt","theme","steps"]
+   .forEach(function(k){ el[k] = $(k); });
+  var stepBtns = Array.prototype.slice.call(el.steps.querySelectorAll('button'));
+
+  function clamp(x,a,b){ return x<a?a:(x>b?b:x); }
+  function easeIO(x){ x=clamp(x,0,1); return x<.5?2*x*x:1-Math.pow(-2*x+2,2)/2; }
+  function easeIn(x){ x=clamp(x,0,1); return x*x*x; }
+  function fmt(n){ return Math.round(n).toLocaleString('en-US'); }
+  function stepOf(t){ for (var i=0;i<6;i++){ if (t < B[i+1]) return i; } return 5; }
+  function set(node, html){ if (node.__h !== html){ node.innerHTML = html; node.__h = html; } }
+  function tog(node, cls, on){ node.classList.toggle(cls, !!on); }
+  function latText(ms){ return ms >= 1000 ? (ms/1000).toFixed(1).replace(/\.0$/,'') + '<small>秒</small>' : Math.round(ms) + '<small>毫秒</small>'; }
+
+  var lastCap = -1;
+  function render(t){
+    t = clamp(t, 0, DUR);
+    var s = stepOf(t);
+    // chips
+    stepBtns.forEach(function(b,i){ tog(b,'on',i===s); tog(b,'done',i<s); b.setAttribute('aria-current', i===s ? 'step' : 'false'); });
+
+    // T1 import
+    var imp = easeIO((t - 0.2) / 2.0);
+    set(el.impN, fmt(3000000 * imp) + ' 筆');
+    el.impBar.style.width = (imp*100).toFixed(1) + '%';
+    tog(el.tbl, 'hot', s===0);
+
+    // stats
+    var fixed = s===5;
+    set(el.statVal, fixed ? '約 40 萬列' : '沒有紀錄');
+    tog(el.stat, 'hot', s===0 || s===1);
+    tog(el.stat, 'good', fixed);
+
+    // planner
+    set(el.guess, s>=1 ? (fixed ? '約 40 萬列' : '1 列') : '？');
+    set(el.choice, s>=1 ? (fixed ? 'Hash Join' : 'Nested Loop') : '？');
+    tog(el.plan, 'hot', s===1);
+    tog(el.plan, 'good', fixed);
+
+    // plan tree
+    var reveal = s===4;      // actual column shown
+    if (fixed){
+      set(el.rootName, 'Hash Join');
+      set(el.rootEst, '<span class="k">預估</span>約 40 萬列');
+      set(el.rootAct, '<span class="k">實際</span>約 41 萬列');
+      set(el.outerName, 'orders o<small>外層：逐列拿去查找表比對</small>');
+      set(el.outerEst, '<span class="k">預估</span>約 40 萬列');
+      set(el.outerAct, '<span class="k">實際</span>約 41 萬列');
+      set(el.innerName, 'customers c<small>先整張建成查找表</small>');
+      set(el.innerEst, '<span class="k">做法</span>建一次，不再逐列去查');
+      set(el.innerAct, '<span class="k">結果</span>頁面約 300 毫秒');
+    } else {
+      set(el.rootName, 'Nested Loop');
+      set(el.rootEst, '<span class="k">預估</span>cost=0.86..17.02 rows=1');
+      set(el.rootAct, reveal ? '<span class="k">實際</span>time=0.05..11873.2 rows=412337' : '<span class="k">實際</span>？');
+      set(el.outerName, 'Index Scan using idx_orders_status on orders o<small>外層</small>');
+      set(el.outerEst, '<span class="k">預估</span>rows=1');
+      set(el.outerAct, reveal ? '<span class="k">實際</span>rows=412337 loops=1' : '<span class="k">實際</span>？');
+      set(el.innerName, 'Index Scan using customers_pkey on customers c<small>內層</small>');
+      set(el.innerEst, '<span class="k">預估</span>rows=1');
+      set(el.innerAct, reveal ? '<span class="k">實際</span>rows=1 loops=412337' : '<span class="k">實際</span>？');
+    }
+    [el.rootAct, el.outerAct, el.innerAct].forEach(function(c){
+      tog(c,'show', reveal || fixed); tog(c,'boom', reveal); tog(c,'ok', fixed);
+    });
+    [el.rootEst, el.outerEst, el.innerEst].forEach(function(c){ tog(c,'lit', s===3); tog(c,'ok', fixed); });
+    tog(el.nInner, 'hot', s===2 || s===4);
+    tog(el.nRoot, 'good', fixed); tog(el.nOuter, 'good', fixed); tog(el.nInner, 'good', fixed);
+    set(el.verdict, s===3 ? '工程師：cost 很低、rows=1，計畫沒問題吧？' :
+                    s===4 ? '預估 1 列 vs 實際 412337 列：估錯了' :
+                    fixed ? '換成 Hash Join' : '');
+
+    // execution progress
+    var p = s<2 ? 0 : (s===2 ? easeIn((t - B[2]) / (B[3]-B[2]-0.4)) : 1);
+    var n = Math.round(LOOPS * p);
+    // travelling dot (outer -> inner), faster as rows pile up
+    if (s===2 && p < 1){
+      var phase = (t - B[2]) * (2 + 10*p);
+      var f = phase - Math.floor(phase);
+      el.dot.style.opacity = '1';
+      el.dot.style.top = (24 + f * 60).toFixed(1) + '%';
+    } else { el.dot.style.opacity = '0'; }
+
+    // meters
+    if (fixed){
+      set(el.loopsV, '—');
+      el.loopsBar.style.width = '0%';
+      set(el.loopsS, 'Hash Join 不再對每一列去查 customers');
+      tog(el.mLoops, 'hot', false);
+    } else {
+      set(el.loopsV, fmt(n) + '<small>次</small>');
+      el.loopsBar.style.width = (p*100).toFixed(1) + '%';
+      set(el.loopsS, s<2 ? '規劃器以為只會查 1 次' : (p<1 ? '外層每吐出一列，就查一次' : 'loops=412337，規劃器以為只會查 1 次'));
+      tog(el.mLoops, 'hot', s===2 || s===4);
+    }
+    var lat, latBarPct, latSub;
+    if (s===0){ lat = null; latSub = '還沒人用（平常約 50 毫秒）'; latBarPct = 0; }
+    else if (s===1){ lat = 50; latSub = '平常約 50 毫秒'; latBarPct = 50/12000*100; }
+    else if (s<5){ lat = 50 + (12000-50)*p; latSub = p<1 ? '越跑越久…' : '開始逾時，資料庫 CPU 90%'; latBarPct = lat/12000*100; }
+    else { var q = easeIO((t - B[5]) / 1.2); lat = 12000 + (300-12000)*q; latSub = q<1 ? '' : '回到 300 毫秒左右'; latBarPct = lat/12000*100; }
+    set(el.latV, lat===null ? '—' : latText(lat));
+    el.latBar.style.width = latBarPct.toFixed(1) + '%';
+    el.latBar.className = fixed ? 'goodbar' : (s>=2 ? 'hotbar' : '');
+    set(el.latS, latSub || '&nbsp;');
+    tog(el.mLat, 'hot', s===2);
+    tog(el.mLat, 'good', fixed && t > B[5]+1.2);
+
+    if (s !== lastCap){ el.cap.textContent = CAP[s]; lastCap = s; }
+    el.scrub.value = t.toFixed(2);
+    el.tt.textContent = t.toFixed(1) + ' / ' + DUR + ' s';
+  }
+
+  // ---- controller ----
+  var t = REST, playing = false, visible = true, raf = 0, last = 0, played = false;
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? (now - last)/1000 : 0; last = now;
+    t += dt;
+    if (t >= DUR){ t = DUR; pause(); render(t); return; }
+    render(t);
+    raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (!raf && playing && visible){ last = 0; raf = requestAnimationFrame(frame); } }
+  function play(){
+    if (!played || t >= DUR - 0.05){ t = 0; }
+    played = true; playing = true;
+    el.play.textContent = '❚❚ 暫停'; el.play.setAttribute('aria-label','暫停');
+    render(t); arm();
+  }
+  function pause(){
+    playing = false;
+    if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    el.play.textContent = '▶ 播放'; el.play.setAttribute('aria-label','播放');
+  }
+  function seek(x){ pause(); played = true; t = clamp(+x || 0, 0, DUR); render(t); }
+  window.seek = seek;
+  window.timeline = function(){ return { dur: DUR, rest: REST, steps: B.slice() }; };
+
+  el.play.addEventListener('click', function(){ playing ? pause() : play(); });
+  el.scrub.addEventListener('input', function(){ seek(parseFloat(el.scrub.value)); });
+  stepBtns.forEach(function(b,i){ b.addEventListener('click', function(){ seek(i===4 ? REST : B[i] + (i===2 ? (B[3]-B[2]) - 0.3 : 0.6)); }); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target && e.target.tagName === 'INPUT') return;
+    var s = stepOf(t);
+    if (e.key === 'ArrowRight'){ e.preventDefault(); stepBtns[Math.min(5, s+1)].click(); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); stepBtns[Math.max(0, s-1)].click(); }
+    else if ((e.key === ' ' || e.key === 'Enter') && e.target === fig){ e.preventDefault(); playing ? pause() : play(); }
+  });
+  el.theme.addEventListener('click', function(){
+    var r = document.documentElement;
+    var cur = r.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    r.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[es.length-1].isIntersecting;
+      if (visible) arm(); else if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    }, { rootMargin: '120px' }).observe(fig);
+  }
+  render(t);   // paused at the rest frame (T5); never autoplays, so reduced motion is honoured too
+})();
+</script>
+</body>
+</html>

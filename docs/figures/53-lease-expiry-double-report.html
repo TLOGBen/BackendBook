@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鎖過期後重複寄報表</title>
+<style>
+:root{
+  --paper:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280;
+  --rule:rgba(31,41,55,.12); --rule-solid:#cbd5e1; --card:#f8fafc;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-text:#92400e; --hot-band:rgba(253,230,138,.55);
+  --a:#4f6fae; --a-soft:#dbe4f5; --b:#2f8578; --b-soft:#d2ebe7; --on-bar:#ffffff;
+  --ctl-bg:#f3f4f6; --ctl-bd:#d1d5db; --focus:#2563eb; --head:#111827;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --ink:#e5e7eb; --muted:#b6bcc6; --soft:#9aa3af;
+    --rule:rgba(229,231,235,.12); --rule-solid:#4b5563; --card:#252933;
+    --hot-fill:#78350f; --hot-stroke:#fbbf24; --hot-text:#fcd34d; --hot-band:rgba(251,191,36,.22);
+    --a:#8ba6dc; --a-soft:#2d3a55; --b:#6cc5b7; --b-soft:#1f4440; --on-bar:#111827;
+    --ctl-bg:#2a2e38; --ctl-bd:#4b5563; --focus:#60a5fa; --head:#f3f4f6;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --ink:#e5e7eb; --muted:#b6bcc6; --soft:#9aa3af;
+  --rule:rgba(229,231,235,.12); --rule-solid:#4b5563; --card:#252933;
+  --hot-fill:#78350f; --hot-stroke:#fbbf24; --hot-text:#fcd34d; --hot-band:rgba(251,191,36,.22);
+  --a:#8ba6dc; --a-soft:#2d3a55; --b:#6cc5b7; --b-soft:#1f4440; --on-bar:#111827;
+  --ctl-bg:#2a2e38; --ctl-bd:#4b5563; --focus:#60a5fa; --head:#f3f4f6;
+  color-scheme:dark;
+}
+html,body{margin:0;background:var(--paper);color:var(--ink);}
+body{
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:12px 16px;box-sizing:border-box;
+}
+*,*::before,*::after{box-sizing:border-box;}
+code{font-family:ui-monospace,"Cascadia Mono",Consolas,"Noto Sans TC","Microsoft JhengHei",monospace;font-size:12px;}
+.fig{margin:0;max-width:960px;outline:none;container-type:inline-size;}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--focus);border-radius:6px;}
+
+/* ---------- Gantt ---------- */
+.gantt{display:grid;grid-template-columns:68px 1fr;column-gap:8px;}
+.lbl{font-size:13px;font-weight:700;line-height:1.25;align-self:center;color:var(--head);}
+.lbl small{display:block;font-size:12px;font-weight:400;color:var(--soft);}
+.track{position:relative;min-width:0;}
+.row{border-bottom:1px solid var(--rule);}
+.t-clock{height:26px;}
+.t-axis{height:22px;border-bottom:1px solid var(--rule-solid);}
+.t-lock,.t-a,.t-b{height:48px;}
+.t-fin{height:34px;}
+.tick{position:absolute;bottom:3px;font-size:12px;color:var(--soft);transform:translateX(-50%);white-space:nowrap;font-variant-numeric:tabular-nums;}
+.tick::after{content:"";position:absolute;left:50%;bottom:-4px;width:1px;height:4px;background:var(--rule-solid);}
+.tick.first{transform:none;} .tick.first::after{left:0;}
+.tick.last{transform:translateX(-100%);} .tick.last::after{left:auto;right:0;}
+.tick.minor{display:none;}
+@container (min-width: 520px){ .tick.minor{display:block;} }
+
+.bar{position:absolute;height:20px;top:4px;border-radius:4px;overflow:hidden;white-space:nowrap;font-size:12px;line-height:20px;padding:0 6px;width:0;}
+.lease-a{background:var(--a-soft);color:var(--ink);border:1px solid var(--a);}
+.lease-b{background:var(--b-soft);color:var(--ink);border:1px solid var(--b);padding:0;}
+.ghost-b{background:transparent;border:1.5px dashed var(--b);opacity:.8;padding:0;}
+.work-a{background:var(--a);color:var(--on-bar);font-weight:700;border-radius:4px 0 0 4px;}
+.over-a{background:var(--hot-fill);border:1.5px solid var(--hot-stroke);padding:0;border-radius:0 4px 4px 0;}
+.work-b{background:var(--b);color:var(--on-bar);font-weight:700;}
+.normal{position:absolute;top:28px;height:14px;left:0;width:20%;border:1.5px dashed var(--a);border-radius:3px;}
+.normal-lbl{position:absolute;top:28px;left:calc(20% + 4px);font-size:12px;line-height:14px;color:var(--muted);white-space:nowrap;}
+.band{position:absolute;top:0;bottom:0;background:var(--hot-band);border-left:1.5px solid var(--hot-stroke);border-right:1.5px solid var(--hot-stroke);width:0;visibility:hidden;}
+.mark{position:absolute;top:28px;font-size:12px;line-height:16px;white-space:nowrap;transform:translateX(-50%);visibility:hidden;color:var(--ink);}
+.mark.r{transform:translateX(-100%);}
+.mark.on{visibility:visible;}
+.mark b{font-weight:700;color:var(--hot-text);}
+.dot{position:absolute;top:8px;width:12px;height:12px;margin-left:-6px;border-radius:50%;border:2px solid var(--b);background:var(--paper);visibility:hidden;}
+.dot.on{visibility:visible;}
+.cut{position:absolute;top:0;height:28px;width:2px;margin-left:-1px;background:var(--hot-stroke);visibility:hidden;}
+.cut.on{visibility:visible;}
+.env{position:absolute;top:6px;font-size:12px;line-height:20px;padding:0 6px;border-radius:4px;border:1px solid var(--rule-solid);background:var(--card);white-space:nowrap;transform:translateX(-50%);visibility:hidden;}
+.env.r{transform:translateX(-100%);}
+.env.on{visibility:visible;}
+.env.now{background:var(--hot-fill);border-color:var(--hot-stroke);}
+.ph{position:absolute;top:0;bottom:-1px;width:0;border-left:2px solid var(--ink);opacity:.55;pointer-events:none;}
+.t-clock .ph{top:20px;}
+.pill{position:absolute;top:1px;font-size:12px;line-height:18px;padding:0 6px;border-radius:9px;background:var(--ink);color:var(--paper);font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.tlc{position:absolute;top:2px;width:20px;height:20px;margin-left:-10px;border-radius:50%;background:var(--hot-fill);border:1.5px solid var(--hot-stroke);font-size:12px;line-height:17px;text-align:center;font-weight:700;color:var(--ink);visibility:hidden;}
+.tlc-line{position:absolute;top:0;bottom:-1px;width:0;border-left:1.5px dashed var(--hot-stroke);visibility:hidden;}
+.tlc-on .tlc,.tlc-on .tlc-line{visibility:visible;}
+.tlc-on .ph,.tlc-on .pill{visibility:hidden;}
+
+/* ---------- status cards ---------- */
+.panel{display:grid;grid-template-areas:"x";margin-top:12px;}
+.panel > *{grid-area:x;}
+.cards,.states{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-content:start;}
+@container (min-width: 600px){ .cards{grid-template-columns:repeat(4,1fr);} .states{grid-template-columns:repeat(4,1fr);} }
+.card{border:1px solid var(--rule-solid);border-radius:8px;padding:8px;background:var(--card);min-width:0;}
+.card.now{background:var(--hot-fill);border-color:var(--hot-stroke);border-width:1.5px;}
+.c-h{font-size:12px;color:var(--soft);margin:0 0 4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.card.now .c-h{color:var(--ink);}
+.c-h i{width:10px;height:10px;border-radius:2px;display:inline-block;}
+.c-b{font-size:13px;line-height:1.45;}
+.c-b.idle{color:var(--soft);}
+.c-s{font-size:12px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums;}
+.card.now .c-s{color:var(--ink);}
+.big{font-size:28px;line-height:1.1;font-weight:700;font-variant-numeric:tabular-nums;}
+.card.now .big,.big.hot{color:var(--hot-text);}
+.states .card .c-b code{font-size:12px;}
+.st-n{font-weight:700;font-size:13px;}
+.vio{font-weight:700;color:var(--hot-text);}
+.hide{visibility:hidden;}
+
+/* ---------- caption + controls ---------- */
+.caps{display:grid;grid-template-areas:"x";margin:12px 0 8px;}
+.caps p{grid-area:x;margin:0;font-size:14px;line-height:1.55;visibility:hidden;}
+.caps p.on{visibility:visible;}
+.caps em{font-style:normal;color:var(--hot-text);font-weight:700;}
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.ctl button{
+  flex:none;height:36px;min-width:40px;border-radius:8px;border:1px solid var(--ctl-bd);
+  background:var(--ctl-bg);color:var(--ink);cursor:pointer;display:grid;place-items:center;padding:0 8px;
+  font:inherit;font-size:13px;
+}
+.ctl button:focus-visible,.ctl input:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}
+.ctl svg{width:18px;height:18px;fill:currentColor;}
+.ctl input[type=range]{flex:1 1 120px;min-width:100px;height:32px;accent-color:var(--hot-stroke);margin:0;}
+.steps{display:flex;flex-wrap:wrap;gap:4px;flex:1 1 100%;}
+.steps button{min-width:36px;height:32px;padding:0 6px;font-variant-numeric:tabular-nums;}
+.steps button[aria-current="step"]{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--ink);font-weight:700;}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin:10px 0 0;}
+.legend span{display:inline-flex;align-items:center;gap:6px;}
+.sw{width:14px;height:10px;border-radius:2px;display:inline-block;}
+.sw.lease{background:var(--a-soft);border:1px solid var(--a);}
+.sw.work{background:var(--a);}
+.sw.hot{background:var(--hot-fill);border:1.5px solid var(--hot-stroke);}
+.sw.dash{border:1.5px dashed var(--a);}
+</style>
+</head>
+<body>
+<figure class="fig" id="fig" data-fig="lease-expiry-double-report" data-dur="12.8" data-rest="11.2" tabindex="0"
+  aria-label="兩台 worker 搶 Redis 鎖寄對帳報表的經過。T1 02:00:00 worker-a 用 SET NX 拿到鎖，鎖 60 秒後過期，開始撈資料；T2 02:00:40 worker-b 的 SET NX 失敗；T3 02:01:00 worker-a 還在撈，鎖過期；T4 02:01:10 worker-b 拿到鎖，兩台同時在做；T5 02:01:15 worker-a 撈了 75 秒才寄出報表；T6 同一秒 worker-a 用 DEL 刪掉 worker-b 的鎖；T7 02:01:35 worker-b 也寄出，財務收到 2 份。TLC 把鎖過期當成隨時可能發生的一步，State 2、3、4 就找到同樣的順序，違反 OnlyOneWorking。">
+  <div class="gantt" id="gantt">
+    <div class="lbl" aria-hidden="true"></div>
+    <div class="track t-clock" id="tClock">
+      <div class="pill" id="pill">02:00:00</div>
+      <div class="ph"></div>
+      <div class="tlc" style="left:0%;margin-left:0">2</div>
+      <div class="tlc" style="left:60%">3</div>
+      <div class="tlc" style="left:70%">4</div>
+    </div>
+
+    <div class="lbl" aria-hidden="true"></div>
+    <div class="track t-axis" aria-hidden="true">
+      <span class="tick first" style="left:0%">02:00:00</span>
+      <span class="tick minor" style="left:20%">02:00:20</span>
+      <span class="tick" style="left:40%">02:00:40</span>
+      <span class="tick minor" style="left:60%">02:01:00</span>
+      <span class="tick" style="left:80%">02:01:20</span>
+      <span class="tick minor last" style="left:100%">02:01:40</span>
+    </div>
+
+    <div class="lbl row">Redis 鎖<small>60 秒過期</small></div>
+    <div class="track row t-lock">
+      <div class="bar lease-a" id="leaseA">worker-a 拿著</div>
+      <div class="bar lease-b" id="leaseB"></div>
+      <div class="bar ghost-b" id="ghostB"></div>
+      <div class="cut" id="cutExp" style="left:60%"></div>
+      <div class="cut" id="cutDel" style="left:75%"></div>
+      <div class="mark" id="mExp" style="left:60%"><b>過期</b></div>
+      <div class="mark" id="mDel" style="left:75%;transform:none;margin-left:4px"><b>DEL</b></div>
+      <div class="tlc-line" style="left:0%"></div><div class="tlc-line" style="left:60%"></div><div class="tlc-line" style="left:70%"></div>
+      <div class="ph"></div>
+    </div>
+
+    <div class="lbl row">worker-a</div>
+    <div class="track row t-a">
+      <div class="normal"></div><div class="normal-lbl">平常 20 秒就做完</div>
+      <div class="bar work-a" id="workA">撈資料</div>
+      <div class="bar over-a" id="overA"></div>
+      <div class="band" id="bandA"></div>
+      <div class="mark" id="mSentA" style="left:75%;transform:none;margin-left:4px">✉ 寄出</div>
+      <div class="tlc-line" style="left:0%"></div><div class="tlc-line" style="left:60%"></div><div class="tlc-line" style="left:70%"></div>
+      <div class="ph"></div>
+    </div>
+
+    <div class="lbl row">worker-b</div>
+    <div class="track row t-b">
+      <div class="dot" id="dotB" style="left:40%"></div>
+      <div class="mark" id="mFail" style="left:40%">SET NX 失敗</div>
+      <div class="bar work-b" id="workB">撈資料</div>
+      <div class="band" id="bandB"></div>
+      <div class="mark r" id="mSentB" style="left:100%">✉ 寄出</div>
+      <div class="tlc-line" style="left:0%"></div><div class="tlc-line" style="left:60%"></div><div class="tlc-line" style="left:70%"></div>
+      <div class="ph"></div>
+    </div>
+
+    <div class="lbl row">財務收到</div>
+    <div class="track row t-fin">
+      <div class="env r" id="env1" style="left:75%">第 1 份</div>
+      <div class="env r" id="env2" style="left:100%">第 2 份</div>
+      <div class="ph"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="cards" id="cards">
+      <div class="card" id="cA"><div class="c-h"><i style="background:var(--a)"></i>worker-a</div><div class="c-b" id="vA"></div></div>
+      <div class="card" id="cB"><div class="c-h"><i style="background:var(--b)"></i>worker-b</div><div class="c-b" id="vB"></div></div>
+      <div class="card" id="cL"><div class="c-h"><code>lock:nightly_report</code></div><div class="c-b" id="vL"></div><div class="c-s" id="vLs"></div></div>
+      <div class="card" id="cF"><div class="c-h">財務收到幾份報表</div><div class="big" id="vF">0</div></div>
+    </div>
+    <div class="states hide" id="states">
+      <div class="card"><div class="st-n">State 2 ＝ T1</div><div class="c-b">A 拿到鎖<br><code>lock = "A"</code></div><div class="c-s">A working、B idle</div></div>
+      <div class="card"><div class="st-n">State 3 ＝ T3</div><div class="c-b">鎖過期<br><code>lock = "none"</code></div><div class="c-s">A working、B idle</div></div>
+      <div class="card now"><div class="st-n">State 4 ＝ T4</div><div class="c-b">B 也拿到鎖<br><code>lock = "B"</code></div><div class="c-s">A、B 都 working</div></div>
+      <div class="card"><div class="c-b vio">違反 <code>OnlyOneWorking</code></div><div class="c-s">9 states generated, 8 distinct states found</div></div>
+    </div>
+  </div>
+
+  <div class="caps" id="caps" aria-live="polite">
+    <p>T1｜02:00:00 worker-a：今天還沒寄，<code>SET NX</code> 成功，開始撈資料。這把鎖 60 秒後（02:01:00）會自動過期。</p>
+    <p>T2｜02:00:40 worker-b 來檢查：今天還沒寄，可是 <code>SET NX</code> 失敗，這輪略過。到這裡，鎖都照設計在擋人。</p>
+    <p>T3｜02:01:00 worker-a 還在撈，<em>鎖先過期了</em>，沒有人拿著。<code>ex=60</code> 假設工作一定 60 秒內做完，可是沒有任何東西保證這件事。</p>
+    <p>T4｜02:01:10 worker-b 再來檢查：worker-a 還沒寄出，所以「今天寄過了沒」也擋不住它；<code>SET NX</code> 成功，<em>兩台同時在做</em>。</p>
+    <p>T5｜02:01:15 worker-a 撈了 75 秒（平常 20 秒）才撈完，寄出報表，記下今天寄過。財務收到第 1 份。</p>
+    <p>T6｜同一秒，worker-a 照程式直接 <code>DEL</code>，<em>刪掉的是 worker-b 的鎖</em>（本來 02:02:10 才過期）。現在沒有人拿著，第三個人也進得來。</p>
+    <p>T7｜02:01:35 worker-b 撈完，又寄一次。<em>財務收到 2 份總金額不一樣的報表</em>；兩台日誌各一行「取得鎖」，沒有任何錯誤，重跑測試還是全綠。</p>
+    <p>TLC｜測試只跑過最常見的那種順序。TLC 不管秒數，把「鎖過期」當成隨時可能發生的一步，走到 State 4 就發現 <code>OnlyOneWorking</code> 被違反：<em>State 2、3、4 正是 T1、T3、T4。</em></p>
+  </div>
+
+  <div class="ctl">
+    <button type="button" id="play" aria-label="播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="playIcon" d="M7 5v14l12-7z"/></svg></button>
+    <input type="range" id="scrub" min="0" max="12.8" step="0.01" value="11.2" aria-label="時間軸">
+    <button type="button" id="theme" aria-label="切換深淺色">◐</button>
+    <div class="steps" id="steps" role="group" aria-label="跳到某一步"></div>
+  </div>
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw lease"></i>鎖在誰手上</span>
+    <span><i class="sw work"></i>撈資料</span>
+    <span><i class="sw hot"></i>超過鎖的時間、兩台同時在做</span>
+    <span><i class="sw dash"></i>平常的長度／被 DEL 刪掉的鎖</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var STEP = 1.6, MOVE = 0.9, N = 8, DUR = N * STEP, REST = 7 * STEP;
+  var R = [0, 40, 60, 70, 75, 75, 95, 95];          // 每一步的真實秒數（02:00:00 起算）
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var $ = function(id){ return document.getElementById(id); };
+
+  var A_TXT = ['今天還沒寄，<code>SET NX</code> 成功，開始撈資料', '撈資料中', '還在撈', '還在撈',
+               '撈完，寄出報表，記下今天寄過', '<code>DEL</code> 把 worker-b 的鎖刪掉', ''];
+  var B_TXT = ['', '今天還沒寄，<code>SET NX</code> 失敗，這輪略過', '', '今天還沒寄，<code>SET NX</code> 成功，開始撈資料',
+               '撈資料中', '撈資料中', '撈完，寄出報表'];
+  var L_TXT = ['worker-a，02:01:00 過期', 'worker-a', '過期了，沒有人拿著', 'worker-b，02:02:10 過期',
+               'worker-b', '沒有人拿著', '沒有人拿著'];
+  var NOW = [['cA','cL'], ['cB'], ['cL'], ['cB','cL'], ['cA','cF'], ['cA','cL'], ['cB','cF']];
+
+  var caps = Array.prototype.slice.call(document.querySelectorAll('#caps p'));
+  var fig = $('fig'), scrub = $('scrub'), playBtn = $('play'), playIcon = $('playIcon');
+  var stepBtns = [];
+  for (var s = 1; s <= N; s++){
+    (function(s){
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = s === N ? 'TLC' : 'T' + s;
+      b.setAttribute('aria-label', s === N ? '跳到 TLC 的反例' : '跳到 T' + s);
+      b.addEventListener('click', function(){ seek(s * STEP); });
+      $('steps').appendChild(b); stepBtns.push(b);
+    })(s);
+  }
+  var phs = Array.prototype.slice.call(document.querySelectorAll('.ph'));
+
+  function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
+  function ease(x){ return x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
+  function stepAt(t){ return t <= 0 ? 1 : Math.min(N, Math.floor((t - 1e-6) / STEP) + 1); }
+  function span(el, from, to){
+    var w = Math.max(0, to - from);
+    el.style.left = from + '%'; el.style.width = w + '%';
+    el.style.visibility = w > 0 ? 'visible' : 'hidden';
+  }
+  function on(el, v){ el.classList.toggle('on', !!v); }
+  function clockText(sec){
+    var s = Math.round(sec), m = Math.floor(s / 60), r = s % 60;
+    return '02:0' + m + ':' + (r < 10 ? '0' : '') + r;
+  }
+
+  var T = REST, lastK = -1;
+  function render(t){
+    var k = stepAt(t);
+    var local = t - (k - 1) * STEP;
+    var e = reduce ? 1 : ease(clamp(local / MOVE, 0, 1));
+    var prev = k > 1 ? R[k - 2] : 0;
+    var ph = prev + (R[k - 1] - prev) * e;            // 播放頭的真實秒數，0–100 對應 0–100%
+
+    // Redis 鎖
+    span($('leaseA'), 0, Math.min(ph, 60));
+    span($('leaseB'), 70, k >= 6 ? 75 : clamp(ph, 70, 100));
+    span($('ghostB'), 75, k >= 6 ? 100 : 75);
+    on($('cutExp'), ph >= 60); on($('mExp'), ph >= 60);
+    on($('cutDel'), k >= 6);   on($('mDel'), k >= 6);
+    // worker-a
+    span($('workA'), 0, Math.min(ph, 60));
+    span($('overA'), 60, clamp(ph, 60, 75));
+    $('workA').textContent = '撈資料 ' + Math.round(Math.min(ph, 75)) + ' 秒';
+    on($('mSentA'), k >= 5);
+    // worker-b
+    on($('dotB'), ph >= 40); on($('mFail'), ph >= 40);
+    span($('workB'), 70, clamp(ph, 70, 95));
+    on($('mSentB'), k >= 7);
+    // 兩台同時在做
+    span($('bandA'), 70, clamp(ph, 70, 75));
+    span($('bandB'), 70, clamp(ph, 70, 75));
+    // 財務
+    on($('env1'), k >= 5); on($('env2'), k >= 7);
+    $('env1').classList.toggle('now', k === 5);
+    $('env2').classList.toggle('now', k === 7);
+    // 播放頭
+    phs.forEach(function(p){ p.style.left = ph + '%'; });
+    var pill = $('pill'), tx = -50;
+    if (ph < 10) tx = -ph * 5; else if (ph > 90) tx = -50 - (ph - 90) * 5;
+    pill.style.left = ph + '%'; pill.style.transform = 'translateX(' + tx + '%)';
+    pill.textContent = clockText(ph);
+    fig.classList.toggle('tlc-on', k === N);
+
+    // 狀態卡
+    var i = Math.min(k, 7) - 1;
+    var holder = k >= 6 ? '' : (ph >= 70 ? 'b' : (ph < 60 ? 'a' : ''));
+    $('vLs').textContent = holder === 'a' ? '還有 ' + Math.round(60 - ph) + ' 秒過期'
+                         : holder === 'b' ? '還有 ' + Math.round(130 - ph) + ' 秒過期' : '';
+    $('vF').textContent = (k >= 5 ? 1 : 0) + (k >= 7 ? 1 : 0);
+    if (k !== lastK){
+      $('vA').innerHTML = A_TXT[i] || '這一步沒有動作';
+      $('vB').innerHTML = B_TXT[i] || '這一步沒有動作';
+      $('vA').classList.toggle('idle', !A_TXT[i]);
+      $('vB').classList.toggle('idle', !B_TXT[i]);
+      $('vL').innerHTML = L_TXT[i];
+      ['cA','cB','cL','cF'].forEach(function(id){ $(id).classList.toggle('now', k < N && NOW[i].indexOf(id) >= 0); });
+      $('cards').classList.toggle('hide', k === N);
+      $('states').classList.toggle('hide', k !== N);
+      caps.forEach(function(p, j){ on(p, j === k - 1); });
+      stepBtns.forEach(function(b, j){
+        if (j + 1 === k) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+      });
+      lastK = k;
+    }
+    scrub.value = String(t);
+  }
+
+  var playing = false, raf = 0, last = 0, visible = true;
+  function setIcon(){
+    playIcon.setAttribute('d', playing ? 'M6 5h4v14H6zM14 5h4v14h-4z' : 'M7 5v14l12-7z');
+    playBtn.setAttribute('aria-label', playing ? '暫停' : '播放');
+  }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    T = Math.min(DUR, T + dt);
+    render(T);
+    if (T >= DUR){ playing = false; setIcon(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (!raf && playing && visible){ last = performance.now(); raf = requestAnimationFrame(frame); } }
+  function play(){ if (T >= DUR || T >= REST - 1e-6 && T <= REST + 1e-6) T = 0; playing = true; setIcon(); render(T); arm(); }
+  function pause(){ playing = false; setIcon(); if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function seek(t){ pause(); T = clamp(+t || 0, 0, DUR); render(T); }
+
+  playBtn.addEventListener('click', function(){ playing ? pause() : play(); });
+  scrub.addEventListener('input', function(){ seek(parseFloat(scrub.value)); });
+  $('theme').addEventListener('click', function(){
+    var r = document.documentElement, cur = r.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    r.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== e.currentTarget) return;
+    var k = stepAt(T);
+    if (e.key === 'ArrowRight'){ e.preventDefault(); seek(Math.min(N, k + 1) * STEP); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(Math.max(1, k - 1) * STEP); }
+    else if (e.key === ' '){ e.preventDefault(); playing ? pause() : play(); }
+  });
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) arm(); else if (raf){ cancelAnimationFrame(raf); raf = 0; }
+    }, {rootMargin: '120px'}).observe(fig);
+  }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur: DUR, rest: REST, steps: N, step: STEP}; };
+  render(T); setIcon();
+})();
+</script>
+</body>
+</html>

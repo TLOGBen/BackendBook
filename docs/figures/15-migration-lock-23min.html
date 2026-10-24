@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migration 鎖表事故</title>
+<style>
+:root{
+  --bg:#ffffff; --panel:#f8fafc; --ink:#1f2937; --muted:#6b7280; --line:#cbd5e1; --line-strong:#94a3b8;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#78350f;
+  --order:#2563eb; --order-soft:#dbeafe; --prod:#0f766e; --prod-soft:#ccfbf1;
+  --bad:#dc2626; --ok:#15803d; --btn:#f1f5f9; --btn-hover:#e2e8f0; --focus:#2563eb;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"SFMono-Regular",Menlo,"Noto Sans Mono CJK TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111827; --panel:#1f2937; --ink:#e5e7eb; --muted:#9ca3af; --line:#475569; --line-strong:#64748b;
+    --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+    --order:#60a5fa; --order-soft:#1e3a5f; --prod:#2dd4bf; --prod-soft:#134e4a;
+    --bad:#f87171; --ok:#4ade80; --btn:#1f2937; --btn-hover:#334155; --focus:#60a5fa;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111827; --panel:#1f2937; --ink:#e5e7eb; --muted:#9ca3af; --line:#475569; --line-strong:#64748b;
+  --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a;
+  --order:#60a5fa; --order-soft:#1e3a5f; --prod:#2dd4bf; --prod-soft:#134e4a;
+  --bad:#f87171; --ok:#4ade80; --btn:#1f2937; --btn-hover:#334155; --focus:#60a5fa;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);padding:12px 16px 16px;-webkit-text-size-adjust:100%}
+.fig{margin:0 auto;max-width:760px;outline:none}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--focus);border-radius:8px}
+.stage{width:100%}
+.stage svg{display:block;width:100%;height:auto;overflow:visible}
+.stage text{font-family:var(--font);fill:var(--ink)}
+.stage .mono{font-family:var(--mono)}
+.stage .muted{fill:var(--muted)}
+.stage .hd{font-size:12px;font-weight:600;fill:var(--muted)}
+.cap{margin-top:10px;min-height:3.2em;font-size:15px;line-height:1.6}
+.cap b{display:inline-block;min-width:2.2em;padding:0 6px;margin-right:6px;border-radius:4px;background:var(--hot-fill);color:var(--hot-ink);border:1px solid var(--hot-stroke);font-size:13px;text-align:center}
+.cap code,.ro code{font-family:var(--mono);font-size:.92em}
+.ro{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.ro div{flex:1 1 200px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px;line-height:1.5}
+.ro span{display:block;color:var(--muted);font-size:12px}
+.ro strong{font-size:15px}
+.ro .hot{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.ro .hot span{color:var(--hot-ink)}
+.ro .bad strong{color:var(--bad)}
+.ctl{display:flex;align-items:center;gap:6px;margin-top:12px}
+.ctl button,.steps button{font:inherit;color:var(--ink);background:var(--btn);border:1px solid var(--line);border-radius:6px;min-height:36px;cursor:pointer}
+.ctl button{min-width:36px;padding:0 10px;font-size:14px}
+.ctl button:hover,.steps button:hover{background:var(--btn-hover)}
+.ctl button:focus-visible,.steps button:focus-visible,.ctl input:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.ctl input[type=range]{flex:1;min-width:60px;height:36px;accent-color:var(--hot-stroke);margin:0}
+.steps{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:6px}
+.steps button{padding:3px 2px;font-size:12px;line-height:1.3;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.steps button b{font-size:13px}
+.steps button[aria-current="step"]{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.lg{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:10px;font-size:12px;color:var(--muted)}
+.lg i{display:inline-block;vertical-align:-1px;margin-right:5px}
+.lg .d{width:10px;height:10px;border-radius:50%}
+.lg .sq{width:12px;height:12px;border-radius:2px;border:1.5px solid var(--hot-stroke);background:var(--hot-fill)}
+.lg .x{font-style:normal;color:var(--bad);font-weight:700;margin-right:5px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="migration-lock-23min" data-dur="20" data-rest="13" tabindex="0"
+  aria-label="動畫：同一個 Alembic 交易裡，add_column 拿到 orders 表的 ACCESS EXCLUSIVE 鎖，接著 UPDATE 6000 萬列；鎖要等交易提交才放，查訂單的請求占著連線等鎖，連線池塞滿後連查看商品也拿不到連線而失敗，23 分鐘後提交放鎖才恢復。">
+  <div class="stage" id="stage"></div>
+  <div class="cap" id="cap" aria-live="polite"></div>
+  <div class="ro">
+    <div id="roP99"><span>API p99 延遲</span><strong id="vP99">80 ms</strong></div>
+    <div id="roLock"><span><code>pg_stat_activity</code> 裡 <code>wait_event_type = Lock</code></span><strong id="vLock">0 條</strong></div>
+  </div>
+  <div class="ctl">
+    <button type="button" id="bPrev" aria-label="上一步">◀</button>
+    <button type="button" id="bPlay" aria-label="播放">▶ 播放</button>
+    <button type="button" id="bNext" aria-label="下一步">▶▶</button>
+    <input type="range" id="scrub" min="0" max="20" step="0.01" value="13" aria-label="時間軸">
+    <button type="button" id="bTheme" aria-label="切換深淺色">◐</button>
+  </div>
+  <div class="steps" id="steps" role="group" aria-label="跳到步驟"></div>
+  <div class="lg" aria-hidden="true">
+    <span><i class="d" style="background:var(--order)"></i>查訂單的請求</span>
+    <span><i class="d" style="background:var(--prod)"></i>查看商品的請求</span>
+    <span><i class="sq"></i>占著連線在等鎖</span>
+    <span><i class="x">×</i>拿不到連線而失敗</span>
+  </div>
+</figure>
+<script>
+(function(){
+"use strict";
+var DUR=20, REST=13;
+var BEGIN_T=0.6, ADD_T0=4.0, ADD_T1=4.6, LOCK_T=4.0, UPD_T0=5.7, UPD_T1=15.8, COMMIT_T=16.0, UNLOCK_T=16.0;
+var NSLOT=16, TRAVEL=0.7, INTO=0.25, SERVE=0.5, QWAIT=1.0;
+var STEPS=[
+  {id:"T1",t0:0,  sub:"開始",   at:2.2, cap:"部署腳本跑 <code>alembic upgrade head</code>，開啟一個交易；API 照常讀寫訂單。"},
+  {id:"T2",t0:3.5,sub:"拿到鎖", at:5.0, cap:"<code>add_column</code> 拿到 <code>ACCESS EXCLUSIVE</code>，欄位很快加好，但交易還沒結束，鎖不放。"},
+  {id:"T3",t0:5.5,sub:"跑 UPDATE",at:8.0, cap:"同一個交易接著跑 <code>UPDATE</code>，要改 6000 萬列；查訂單的請求讀不到 <code>orders</code>，開始等鎖。"},
+  {id:"T4",t0:9.5,sub:"幾秒後", at:13,  cap:"等鎖的請求越積越多，每個都占著一條連線；連線用完後，連不碰訂單的「查看商品」也拿不到連線而失敗。"},
+  {id:"T5",t0:15.5,sub:"23 分鐘後",at:18.5,cap:"<code>UPDATE</code> 跑完，交易提交，鎖放開；排隊的請求一起放行，恢復正常。"}
+];
+
+/* ---------- deterministic simulation (computed once) ---------- */
+var reqs=[], t, i;
+for(t=0.2;t<19.2;t+=0.36) reqs.push({k:"o",spawn:t});
+for(t=0.45;t<19.2;t+=0.55) reqs.push({k:"p",spawn:t});
+reqs.forEach(function(r){r.arrive=r.spawn+TRAVEL;});
+reqs.sort(function(a,b){return a.arrive-b.arrive;});
+var busy=[]; for(i=0;i<NSLOT;i++) busy.push(-1);
+var rank=0;
+reqs.forEach(function(r){
+  var a=r.arrive, slot=-1, take=a;
+  for(var s=0;s<NSLOT;s++){ if(busy[s]<=a){slot=s;break;} }
+  if(slot<0){
+    var e=Infinity, es=-1;
+    for(s=0;s<NSLOT;s++){ if(busy[s]<e){e=busy[s];es=s;} }
+    if(e<=a+QWAIT){slot=es;take=e;} else {r.fail=a+QWAIT; return;}
+  }
+  r.slot=slot; r.take=take; r.db=take+INTO;
+  if(r.k==="o" && r.db>=LOCK_T && r.db<UNLOCK_T){ r.lockWait=true; r.release=UNLOCK_T+0.3+0.05*(rank++); }
+  else r.release=r.db+SERVE;
+  busy[slot]=r.release;
+});
+var firstFail=Infinity, lastFail=-Infinity;
+reqs.forEach(function(r){ if(r.fail!==undefined){ firstFail=Math.min(firstFail,r.fail); lastFail=Math.max(lastFail,r.fail);} });
+
+/* ---------- helpers ---------- */
+var NS="http://www.w3.org/2000/svg";
+function el(tag,attrs,parent,text){
+  var n=document.createElementNS(NS,tag);
+  for(var k in attrs) n.setAttribute(k,attrs[k]);
+  if(text!==undefined) n.textContent=text;
+  if(parent) parent.appendChild(n);
+  return n;
+}
+function clamp(x,a,b){return x<a?a:(x>b?b:x);}
+function ease(x){x=clamp(x,0,1);return x<.5?2*x*x:1-Math.pow(-2*x+2,2)/2;}
+function lerp(a,b,u){return a+(b-a)*u;}
+
+/* ---------- layout + build ---------- */
+var stage=document.getElementById("stage");
+var svg=null, L=null, dyn=null, curT=REST, lastW=0;
+
+function layout(W){
+  var narrow=W<480, gap=narrow?8:16;
+  var A=Math.round(W*0.24), B=Math.round(W*0.34), C=W-A-B-2*gap;
+  var xB=A+gap, xC=xB+B+gap;
+  var cell=clamp(Math.floor(B/4),22,34), gW=cell*4;
+  var M=92, gTop=M+24, gH=cell*4, gx=xB+Math.round((B-gW)/2);
+  var y1=gTop+Math.round(gH*0.2), y2=gTop+Math.round(gH*0.8);
+  var chipW=Math.min(A-6,120), tW=Math.min(C-16,200), tx=xC+Math.round((C-tW)/2);
+  var barX0=0, barX1=W-2;
+  var bw=barX1-barX0, addX0=barX0+46, addX1=addX0+Math.max(Math.round(bw*0.24),84), comX=barX1-8, updX1=comX-10;
+  var H=Math.max(gTop+gH+8, y2+46);
+  return {W:W,H:H,narrow:narrow,gap:gap,A:A,B:B,C:C,xB:xB,xC:xC,cell:cell,gW:gW,gH:gH,M:M,gTop:gTop,gx:gx,y1:y1,y2:y2,
+    chipW:chipW,tW:tW,tx:tx,barX0:barX0,barX1:barX1,addX0:addX0,addX1:addX1,updX1:updX1,comX:comX,
+    dotR:narrow?4.5:5.5, qx:Math.round((chipW+gx)/2)};
+}
+
+function build(W){
+  L=layout(W);
+  stage.textContent="";
+  svg=el("svg",{viewBox:"0 0 "+L.W+" "+L.H,width:L.W,height:L.H,role:"img","aria-labelledby":"mlt-title mlt-desc"},stage);
+  el("title",{id:"mlt-title"},svg,"migration 交易把 orders 表鎖住 23 分鐘");
+  el("desc",{id:"mlt-desc"},svg,"上方是 migration 的交易長條與鎖帶，下方是 API 請求經過連線池進 PostgreSQL。");
+  var d={};
+  /* --- migration transaction bar --- */
+  el("text",{x:L.barX0,y:14,"font-size":12,"font-weight":600,class:"muted"},svg,L.narrow?"migration：同一個交易":"migration（部署腳本執行）：全部包在同一個交易裡");
+  d.beginTxt=el("text",{x:L.barX0,y:41,"font-size":12,class:"mono"},svg,"BEGIN");
+  el("rect",{x:L.addX0,y:24,width:L.addX1-L.addX0,height:24,rx:4,fill:"var(--panel)",stroke:"var(--line)"},svg);
+  el("rect",{x:L.addX1,y:24,width:L.updX1-L.addX1,height:24,rx:4,fill:"var(--panel)",stroke:"var(--line)"},svg);
+  d.addFill=el("rect",{x:L.addX0,y:24,width:0,height:24,rx:4,fill:"var(--line-strong)",opacity:.45},svg);
+  d.updFill=el("rect",{x:L.addX1,y:24,width:0,height:24,rx:4,fill:"var(--line-strong)",opacity:.45},svg);
+  el("text",{x:(L.addX0+L.addX1)/2,y:40,"font-size":12,"text-anchor":"middle",class:"mono"},svg,"add_column");
+  el("text",{x:(L.addX1+L.updX1)/2,y:40,"font-size":12,"text-anchor":"middle"},svg,"UPDATE 6000 萬列");
+  d.comLine=el("line",{x1:L.comX,y1:20,x2:L.comX,y2:52,stroke:"var(--line-strong)","stroke-width":2,"stroke-dasharray":"3 3"},svg);
+  d.comTxt=el("text",{x:L.barX1,y:14,"font-size":12,"text-anchor":"end",class:"mono muted"},svg,"COMMIT");
+  d.band=el("rect",{x:L.addX0,y:56,width:0,height:22,rx:4,fill:"var(--hot-fill)",stroke:"var(--hot-stroke)","stroke-width":1.5},svg);
+  d.bandTxt=el("text",{x:L.addX0+8,y:71,"font-size":12,"font-weight":600,fill:"var(--hot-ink)"},svg,"");
+  /* --- column headers --- */
+  el("text",{x:0,y:L.M+12,class:"hd"},svg,"API 請求");
+  el("text",{x:L.xB+L.B/2,y:L.M+12,class:"hd","text-anchor":"middle"},svg,"連線池（示意）");
+  el("text",{x:L.xC+L.C/2,y:L.M+12,class:"hd","text-anchor":"middle"},svg,"PostgreSQL");
+  /* --- connectors (behind boxes) --- */
+  el("line",{x1:L.chipW,y1:L.y1,x2:L.gx,y2:L.y1,stroke:"var(--line)","stroke-width":1.5},svg);
+  el("line",{x1:L.chipW,y1:L.y2,x2:L.gx,y2:L.y2,stroke:"var(--line)","stroke-width":1.5},svg);
+  d.c1=el("line",{x1:L.gx+L.gW,y1:L.y1,x2:L.tx,y2:L.y1,stroke:"var(--line)","stroke-width":2},svg);
+  d.c2=el("line",{x1:L.gx+L.gW,y1:L.y2,x2:L.tx,y2:L.y2,stroke:"var(--line)","stroke-width":2},svg);
+  /* --- DB container --- */
+  el("rect",{x:L.xC+0.5,y:L.gTop-6.5,width:L.C-1,height:L.gH+13,rx:8,fill:"none",stroke:"var(--line)","stroke-dasharray":"4 3"},svg);
+  d.tO=el("rect",{x:L.tx+0.5,y:L.y1-17.5,width:L.tW-1,height:35,rx:6,fill:"var(--bg)",stroke:"var(--line-strong)","stroke-width":1.5},svg);
+  var tfs=L.narrow?12:13;
+  el("text",{x:L.tx+L.tW/2,y:L.y1+4.5,"font-size":tfs,"font-weight":600,"text-anchor":"middle"},svg,"orders 表");
+  el("rect",{x:L.tx+0.5,y:L.y2-17.5,width:L.tW-1,height:35,rx:6,fill:"var(--bg)",stroke:"var(--line-strong)","stroke-width":1.5},svg);
+  el("text",{x:L.tx+L.tW/2,y:L.y2+4.5,"font-size":tfs,"font-weight":600,"text-anchor":"middle"},svg,"其他表");
+  d.tag=el("text",{x:L.tx+L.tW/2,y:L.y1+33,"font-size":12,"font-weight":600,"text-anchor":"middle",fill:"var(--hot-ink)"},svg,"讀寫全停");
+  /* padlock on the orders box corner */
+  var lk=el("g",{transform:"translate("+(L.tx+L.tW-8)+","+(L.y1-20)+")"},svg);
+  d.lkBody=el("rect",{x:-8,y:-2,width:16,height:12,rx:2,fill:"var(--panel)",stroke:"var(--line-strong)","stroke-width":1.5},lk);
+  d.lkShackle=el("path",{d:"M-4.5,-2 V-6 a4.5,4.5 0 0 1 9,0 V-2",fill:"none",stroke:"var(--line-strong)","stroke-width":2},lk);
+  /* --- chips --- */
+  el("rect",{x:0.5,y:L.y1-15.5,width:L.chipW-1,height:31,rx:6,fill:"var(--order-soft)",stroke:"var(--order)","stroke-width":1.5},svg);
+  el("text",{x:L.chipW/2,y:L.y1+4.5,"font-size":13,"font-weight":600,"text-anchor":"middle"},svg,"查訂單");
+  el("rect",{x:0.5,y:L.y2-15.5,width:L.chipW-1,height:31,rx:6,fill:"var(--prod-soft)",stroke:"var(--prod)","stroke-width":1.5},svg);
+  el("text",{x:L.chipW/2,y:L.y2+4.5,"font-size":13,"font-weight":600,"text-anchor":"middle"},svg,"查看商品");
+  d.failTxt=el("text",{x:0,y:L.y2+36,"font-size":12,"font-weight":600,fill:"var(--bad)"},svg,"拿不到連線 → 失敗");
+  /* --- pool slots --- */
+  d.slots=[];
+  for(var s=0;s<NSLOT;s++){
+    var cx=L.gx+(s%4)*L.cell, cy=L.gTop+Math.floor(s/4)*L.cell;
+    d.slots.push(el("rect",{x:cx+2.5,y:cy+2.5,width:L.cell-5,height:L.cell-5,rx:3,fill:"var(--bg)",stroke:"var(--line)","stroke-width":1.2},svg));
+  }
+  /* --- request dots --- */
+  d.dots=reqs.map(function(r){
+    var g=el("g",{display:"none"},svg);
+    var c=el("circle",{r:L.dotR,fill:r.k==="o"?"var(--order)":"var(--prod)"},g);
+    var x=null;
+    if(r.fail!==undefined) x=el("path",{d:"M-5,-5 L5,5 M5,-5 L-5,5",stroke:"var(--bad)","stroke-width":2.5,"stroke-linecap":"round",visibility:"hidden"},g);
+    return {g:g,c:c,x:x};
+  });
+  dyn=d;
+}
+
+function slotXY(s){return [L.gx+(s%4)*L.cell+L.cell/2, L.gTop+Math.floor(s/4)*L.cell+L.cell/2];}
+
+/* ---------- draw frame t ---------- */
+function draw(t){
+  if(!dyn) return;
+  var d=dyn;
+  /* transaction bar */
+  d.beginTxt.setAttribute("opacity", t>=BEGIN_T?1:0.3);
+  d.addFill.setAttribute("width", (L.addX1-L.addX0)*clamp((t-ADD_T0)/(ADD_T1-ADD_T0),0,1));
+  var up=clamp((t-UPD_T0)/(UPD_T1-UPD_T0),0,1);
+  d.updFill.setAttribute("width", (L.updX1-L.addX1)*up);
+  var committed=t>=COMMIT_T;
+  d.comLine.setAttribute("stroke", committed?"var(--ok)":"var(--line-strong)");
+  d.comLine.setAttribute("stroke-dasharray", committed?"none":"3 3");
+  d.comTxt.setAttribute("class", committed?"mono":"mono muted");
+  d.comTxt.setAttribute("font-weight", committed?700:400);
+  var locked=t>=LOCK_T && t<UNLOCK_T;
+  if(t<LOCK_T){ d.band.setAttribute("visibility","hidden"); d.bandTxt.textContent=""; }
+  else{
+    d.band.setAttribute("visibility","visible");
+    var head = t<ADD_T1 ? lerp(L.addX0,L.addX1,clamp((t-ADD_T0)/(ADD_T1-ADD_T0),0,1)) : (t<UPD_T0 ? L.addX1 : (committed? L.comX : lerp(L.addX1,L.updX1,up)));
+    d.band.setAttribute("width", Math.max(4, head-L.addX0));
+    d.band.setAttribute("fill", locked?"var(--hot-fill)":"none");
+    d.band.setAttribute("stroke", locked?"var(--hot-stroke)":"var(--line-strong)");
+    d.band.setAttribute("stroke-dasharray", locked?"none":"4 3");
+    var bw=head-L.addX0;
+    d.bandTxt.setAttribute("fill", locked?"var(--hot-ink)":"var(--muted)");
+    d.bandTxt.textContent = !locked ? "提交，鎖放開" : (bw>230 ? "ACCESS EXCLUSIVE 鎖：交易沒結束就不放" : (bw>150 ? "ACCESS EXCLUSIVE 鎖" : (bw>58?"拿著鎖":"")));
+  }
+  /* orders table + lock */
+  d.tO.setAttribute("fill", locked?"var(--hot-fill)":"var(--bg)");
+  d.tO.setAttribute("stroke", locked?"var(--hot-stroke)":"var(--line-strong)");
+  d.tag.setAttribute("visibility", locked?"visible":"hidden");
+  d.lkBody.setAttribute("fill", locked?"var(--hot-fill)":"var(--panel)");
+  d.lkBody.setAttribute("stroke", locked?"var(--hot-stroke)":"var(--line-strong)");
+  d.lkShackle.setAttribute("stroke", locked?"var(--hot-stroke)":"var(--line-strong)");
+  d.lkShackle.setAttribute("transform", locked?"":"translate(0,-3)");
+
+  /* requests */
+  var slotState=[]; for(var s=0;s<NSLOT;s++) slotState.push(0);
+  var waiting=0, failing=false, qcount={o:0,p:0};
+  for(var i=0;i<reqs.length;i++){
+    var r=reqs[i], o=d.dots[i], g=o.g;
+    var yRow = r.k==="o"?L.y1:L.y2, end = r.fail!==undefined ? r.fail+0.9 : r.release+0.35;
+    if(t<r.spawn || t>=end){ g.setAttribute("display","none"); continue; }
+    g.setAttribute("display","inline");
+    var x,y,op=1,sc=1;
+    if(t<r.arrive){ var u=ease((t-r.spawn)/TRAVEL); x=lerp(L.chipW-2,L.qx,u); y=yRow; }
+    else if(r.fail!==undefined){
+      if(t<r.fail){ var q=qcount[r.k]++; x=L.qx; y=yRow+[0,-9,9,-18,18][q%5]; }
+      else { var v=(t-r.fail)/0.9; x=L.qx; y=yRow+v*14; op=1-v; failing=true; }
+      if(o.x) o.x.setAttribute("visibility", t>=r.fail?"visible":"hidden");
+      o.c.setAttribute("visibility", t>=r.fail?"hidden":"visible");
+    }
+    else if(t<r.take){ var q2=qcount[r.k]++; x=L.qx; y=yRow+[0,-9,9,-18,18][q2%5]; }
+    else {
+      var p=slotXY(r.slot);
+      if(t<r.take+INTO){ var u2=ease((t-r.take)/INTO); x=lerp(L.qx,p[0],u2); y=lerp(yRow,p[1],u2); }
+      else { x=p[0]; y=p[1]; }
+      if(t<r.release){
+        var lw = r.lockWait && t>=r.db;
+        slotState[r.slot] = lw?2:(r.k==="o"?1:3);
+        if(lw) waiting++;
+      } else { var v2=(t-r.release)/0.35; op=1-v2; sc=1+v2*0.6; }
+    }
+    g.setAttribute("transform","translate("+x.toFixed(1)+","+y.toFixed(1)+") scale("+sc.toFixed(2)+")");
+    g.setAttribute("opacity",op.toFixed(2));
+  }
+  for(s=0;s<NSLOT;s++){
+    var st=slotState[s], rc=d.slots[s];
+    rc.setAttribute("fill", st===2?"var(--hot-fill)":(st===1?"var(--order-soft)":(st===3?"var(--prod-soft)":"var(--bg)")));
+    rc.setAttribute("stroke", st===2?"var(--hot-stroke)":"var(--line)");
+    rc.setAttribute("stroke-width", st===2?1.8:1.2);
+  }
+  var full = slotState.every(function(v){return v!==0;});
+  d.c1.setAttribute("stroke", waiting>0?"var(--hot-stroke)":"var(--line)");
+  d.c1.setAttribute("stroke-dasharray", waiting>0?"6 4":"none");
+  d.c1.setAttribute("stroke-dashoffset", (t*-24).toFixed(1));
+  var anyFailVisible = failing || reqs.some(function(r){return r.fail!==undefined && t>=r.arrive && t<r.fail+0.9;});
+  d.failTxt.setAttribute("visibility", anyFailVisible?"visible":"hidden");
+
+  /* readouts */
+  var vP=document.getElementById("vP99"), rP=document.getElementById("roP99");
+  var timeout = t>=firstFail-0.6 && t<UNLOCK_T+0.8;
+  vP.textContent = timeout ? "逾時" : (waiting>0 ? "上升中" : "80 ms");
+  rP.className = timeout ? "bad" : "";
+  var vL=document.getElementById("vLock"), rL=document.getElementById("roLock");
+  vL.textContent = waiting>0 ? (waiting+" 條在等鎖"+(full?"，連線池滿了":"")) : "0 條";
+  rL.className = waiting>0 ? "hot" : "";
+  /* caption + steps */
+  var k=stepAt(t);
+  if(k!==curStep){
+    curStep=k;
+    document.getElementById("cap").innerHTML="<b>"+STEPS[k].id+"</b>"+STEPS[k].cap;
+    stepBtns.forEach(function(b,j){ if(j===k) b.setAttribute("aria-current","step"); else b.removeAttribute("aria-current"); });
+  }
+  scrub.value=t.toFixed(2);
+}
+function stepAt(t){ var k=0; for(var j=0;j<STEPS.length;j++) if(t>=STEPS[j].t0) k=j; return k; }
+
+/* ---------- controls ---------- */
+var curStep=-1, playing=false, played=false, visible=true, raf=0, lastTs=0;
+var scrub=document.getElementById("scrub"), bPlay=document.getElementById("bPlay");
+var stepsBox=document.getElementById("steps");
+var stepBtns=STEPS.map(function(s,j){
+  var b=document.createElement("button"); b.type="button";
+  b.innerHTML="<b>"+s.id+"</b>"+s.sub;
+  b.setAttribute("aria-label",s.id+" "+s.sub);
+  b.addEventListener("click",function(){ pause(); seek(s.at); });
+  stepsBox.appendChild(b); return b;
+});
+function setPlayLabel(){ bPlay.textContent = playing?"❚❚ 暫停":"▶ 播放"; bPlay.setAttribute("aria-label", playing?"暫停":"播放"); }
+function seek(t){ curT=clamp(+t||0,0,DUR); draw(curT); }
+function pause(){ playing=false; cancelAnimationFrame(raf); raf=0; setPlayLabel(); }
+function play(){
+  if(!played || curT>=DUR-0.05){ curT=0; }
+  played=true; playing=true; setPlayLabel(); arm();
+}
+function arm(){ if(playing && visible && !raf){ lastTs=0; raf=requestAnimationFrame(tick); } }
+function tick(ts){
+  raf=0;
+  if(!playing || !visible) return;
+  if(lastTs) curT=Math.min(DUR, curT+Math.min(0.1,(ts-lastTs)/1000));
+  lastTs=ts; draw(curT);
+  if(curT>=DUR){ pause(); return; }
+  raf=requestAnimationFrame(tick);
+}
+bPlay.addEventListener("click",function(){ playing?pause():play(); });
+document.getElementById("bPrev").addEventListener("click",function(){ pause(); var k=stepAt(curT); var at=STEPS[k].at; if(curT<=at+0.01 && k>0) k--; seek(STEPS[k].at); });
+document.getElementById("bNext").addEventListener("click",function(){ pause(); var k=stepAt(curT); if(curT>=STEPS[k].at-0.01) k=Math.min(STEPS.length-1,k+1); seek(STEPS[k].at); });
+scrub.addEventListener("input",function(){ pause(); played=true; seek(scrub.value); });
+document.getElementById("bTheme").addEventListener("click",function(){
+  var root=document.documentElement, cur=root.getAttribute("data-theme");
+  var dark = cur ? cur==="dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.setAttribute("data-theme", dark?"light":"dark");
+});
+var fig=document.querySelector(".fig");
+fig.addEventListener("keydown",function(e){
+  if(e.target!==fig) return;
+  if(e.key==="ArrowRight"){ e.preventDefault(); document.getElementById("bNext").click(); }
+  else if(e.key==="ArrowLeft"){ e.preventDefault(); document.getElementById("bPrev").click(); }
+  else if(e.key===" "||e.key==="Enter"){ e.preventDefault(); bPlay.click(); }
+});
+if("IntersectionObserver" in window){
+  new IntersectionObserver(function(es){ visible=es[0].isIntersecting; if(visible) arm(); },{rootMargin:"120px"}).observe(fig);
+}
+/* resize: read width once per change */
+function onWidth(w){
+  w=Math.max(288,Math.min(760,Math.floor(w)));
+  if(w===lastW) return; lastW=w; build(w); curStep=-1; draw(curT);
+}
+if("ResizeObserver" in window){
+  new ResizeObserver(function(es){ onWidth(es[0].contentRect.width); }).observe(stage);
+} else { window.addEventListener("resize",function(){ onWidth(stage.clientWidth); }); }
+onWidth(stage.clientWidth||320);
+setPlayLabel();
+window.seek=function(t){ pause(); seek(t); };
+window.DUR=DUR;
+window.timeline=function(){ return {dur:DUR,rest:REST,steps:STEPS.map(function(s){return {id:s.id,t:s.t0};})}; };
+})();
+</script>
+</body>
+</html>

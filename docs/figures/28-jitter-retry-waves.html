@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>重試浪潮與抖動</title>
+<style>
+:root{
+  --paper:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280;
+  --rule:rgba(31,41,55,.14); --rule-solid:#cbd5e1;
+  --ok:#475569; --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-text:#92400e;
+  --head:#1f2937; --ctl-bg:#f3f4f6; --ctl-bd:#d1d5db; --focus:#2563eb;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --ink:#e5e7eb; --muted:#b6bcc6; --soft:#9aa3af;
+    --rule:rgba(229,231,235,.14); --rule-solid:#4b5563;
+    --ok:#94a3b8; --hot-fill:#92400e; --hot-stroke:#fbbf24; --hot-text:#fcd34d;
+    --head:#e5e7eb; --ctl-bg:#2a2e38; --ctl-bd:#4b5563; --focus:#60a5fa;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --ink:#e5e7eb; --muted:#b6bcc6; --soft:#9aa3af;
+  --rule:rgba(229,231,235,.14); --rule-solid:#4b5563;
+  --ok:#94a3b8; --hot-fill:#92400e; --hot-stroke:#fbbf24; --hot-text:#fcd34d;
+  --head:#e5e7eb; --ctl-bg:#2a2e38; --ctl-bd:#4b5563; --focus:#60a5fa;
+  color-scheme:dark;
+}
+html,body{margin:0;background:var(--paper);color:var(--ink);}
+body{
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:12px 16px;box-sizing:border-box;
+}
+.fig{margin:0;max-width:960px;outline:none;}
+.fig:focus-visible{box-shadow:0 0 0 2px var(--focus);border-radius:6px;}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted);margin:0 0 8px;}
+.legend span{display:inline-flex;align-items:center;gap:6px;}
+.sw{width:12px;height:12px;border-radius:2px;display:inline-block;box-sizing:border-box;}
+.sw.ok{background:var(--ok);}
+.sw.hot{background:var(--hot-fill);border:1.5px solid var(--hot-stroke);}
+.sw.cap{width:16px;height:0;border-top:2px dashed var(--ink);border-radius:0;}
+.lane{margin:0 0 12px;}
+.lane-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 12px;min-height:24px;}
+.lane-name{font-size:14px;font-weight:700;color:var(--head);}
+.lane-name code{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12px;font-weight:500;color:var(--muted);}
+.count{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.count b{color:var(--ink);font-weight:700;}
+.count .done{color:var(--hot-text);font-weight:700;margin-left:6px;}
+svg.chart{display:block;width:100%;overflow:visible;}
+svg text{font-family:inherit;}
+.tick{font-size:12px;fill:var(--soft);font-variant-numeric:tabular-nums;}
+.caplbl{font-size:12px;fill:var(--ink);paint-order:stroke;stroke:var(--paper);stroke-width:4px;stroke-linejoin:round;}
+.cliplbl{font-size:12px;font-weight:700;fill:var(--hot-text);paint-order:stroke;stroke:var(--paper);stroke-width:4px;}
+.caption{font-size:14px;line-height:1.55;min-height:44px;margin:4px 0 8px;color:var(--ink);}
+.caption em{font-style:normal;color:var(--hot-text);font-weight:700;}
+.ctl{display:flex;align-items:center;gap:8px;}
+.ctl button{
+  flex:none;width:40px;height:40px;border-radius:8px;border:1px solid var(--ctl-bd);
+  background:var(--ctl-bg);color:var(--ink);cursor:pointer;display:grid;place-items:center;padding:0;
+}
+.ctl button:focus-visible,.ctl input:focus-visible{outline:2px solid var(--focus);outline-offset:2px;}
+.ctl svg{width:18px;height:18px;fill:currentColor;}
+.ctl input[type=range]{flex:1;min-width:0;height:32px;accent-color:var(--hot-stroke);margin:0;}
+.ctl .time{flex:none;width:64px;text-align:right;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="jitter-waves" data-dur="8" data-rest="8" tabindex="0"
+  aria-label="1000 個用戶端同時失敗後的重試流量對照：沒有抖動時，請求每隔一段時間全部一起回來，伺服器每 100 毫秒只放得進 50 個，其餘又一起失敗，波與波之間伺服器空著；加上 Full Jitter 後，請求散開成一條往下的斜坡，5.8 秒內全部成功。">
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw ok"></i>成功（在容量內）</span>
+    <span><i class="sw hot"></i>超過容量，失敗、要再重試</span>
+    <span><i class="sw cap"></i>伺服器容量：每 100ms 50 個</span>
+  </div>
+
+  <div class="lane" id="lane-none">
+    <div class="lane-head">
+      <span class="lane-name">沒有抖動 <code>min(cap, base·2^attempt)</code></span>
+      <span class="count" id="cnt-none"></span>
+    </div>
+    <svg class="chart" id="svg-none" role="img" aria-labelledby="jitter-waves-none-title jitter-waves-none-desc">
+      <title id="jitter-waves-none-title">沒有抖動的重試流量</title>
+      <desc id="jitter-waves-none-desc">每 100 毫秒收到的請求數：0、0.1、0.3、0.7、1.5、3.1、6.3 秒各有一根尖刺，其他時間是 0。</desc>
+    </svg>
+  </div>
+
+  <div class="lane" id="lane-full">
+    <div class="lane-head">
+      <span class="lane-name">Full Jitter <code>random(0, min(cap, base·2^attempt))</code></span>
+      <span class="count" id="cnt-full"></span>
+    </div>
+    <svg class="chart" id="svg-full" role="img" aria-labelledby="jitter-waves-full-title jitter-waves-full-desc">
+      <title id="jitter-waves-full-title">Full Jitter 的重試流量</title>
+      <desc id="jitter-waves-full-desc">每 100 毫秒收到的請求數從第一格的 2,189 一路往下，約 1 秒後落到容量以內，5.8 秒全部成功。</desc>
+    </svg>
+  </div>
+
+  <div class="caption" id="caption" aria-live="polite"></div>
+
+  <div class="ctl">
+    <button type="button" id="play" aria-label="播放"><svg viewBox="0 0 24 24" id="play-ico"><path d="M7 4.5v15l12-7.5z"/></svg></button>
+    <input type="range" id="scrub" min="0" max="8" step="0.1" value="8" aria-label="時間（秒）">
+    <span class="time" id="time">8.0 秒</span>
+    <button type="button" id="theme" aria-label="切換深淺色"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2v16a8 8 0 0 1 0-16z"/></svg></button>
+  </div>
+</figure>
+
+<script>
+(function(){
+  // 資料：文章「實驗一」jitter_sim.py 同一模型（seed 42）的逐格結果，每格 100ms，0～8 秒。
+  var DATA = {
+    none:{calls:10500,done:132.7,
+      load:[1000,950,0,900,0,0,0,850,0,0,0,0,0,0,0,800,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,750,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,700,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      ok:[50,50,0,50,0,0,0,50,0,0,0,0,0,0,0,50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},
+    full:{calls:5005,done:5.8,
+      load:[2189,603,466,278,257,203,121,106,119,101,112,48,49,40,23,32,27,38,33,20,24,24,15,16,14,6,5,1,7,2,6,2,1,6,0,5,2,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      ok:[50,50,50,50,50,50,50,50,50,50,50,48,49,40,23,32,27,38,33,20,24,24,15,16,14,6,5,1,7,2,6,2,1,6,0,5,2,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+  };
+  var SLOTS = 80, YMAX = 1000, CAP = 50, CLIENTS = 1000;
+  var DUR = 8, REST = 8, RATE = 0.6;
+  var NS = 'http://www.w3.org/2000/svg';
+  var fig = document.querySelector('.fig');
+  var root = document.documentElement;
+  var lanes = ['none','full'];
+  var parts = {};
+  var W = 0, H = 0, PL = 40, PR = 8, PT = 8, PB = 24;
+  var t = REST, playing = false, visible = true, raf = 0, last = 0;
+
+  function el(name, attrs, parent){
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function fmt(n){ return n.toLocaleString('en-US'); }
+
+  // 建骨架：每條車道 80 根成功柱、80 根失敗柱，之後只改屬性。
+  lanes.forEach(function(id){
+    var svg = document.getElementById('svg-'+id);
+    var g = {svg:svg};
+    g.grid = el('g', {}, svg);
+    g.bars = el('g', {}, svg);
+    g.ok = []; g.hot = [];
+    for (var s=0; s<SLOTS; s++){
+      g.hot.push(el('rect', {style:'fill:var(--hot-fill);stroke:var(--hot-stroke);stroke-width:1'}, g.bars));
+      g.ok.push(el('rect', {style:'fill:var(--ok)'}, g.bars));
+    }
+    g.cap = el('line', {style:'stroke:var(--ink);stroke-width:1.5;stroke-dasharray:5 4'}, svg);
+    g.capLbl = el('text', {'class':'caplbl', 'text-anchor':'end'}, svg);
+    g.capLbl.textContent = '容量 50';
+    g.clip = el('text', {'class':'cliplbl'}, svg);
+    g.head = el('line', {style:'stroke:var(--hot-stroke);stroke-width:2'}, svg);
+    parts[id] = g;
+  });
+
+  function layout(){
+    var w = Math.round(fig.clientWidth);
+    if (!w || w === W) return;
+    W = w; H = W < 480 ? 120 : 148;
+    var pw = W - PL - PR, ph = H - PT - PB, sw = pw / SLOTS, bw = Math.max(1, sw - (sw > 4 ? 1 : 0.5));
+    lanes.forEach(function(id){
+      var g = parts[id], svg = g.svg;
+      svg.setAttribute('viewBox', '0 0 '+W+' '+H);
+      svg.setAttribute('height', H);
+      while (g.grid.firstChild) g.grid.removeChild(g.grid.firstChild);
+      var base = PT + ph;
+      [0,500,1000].forEach(function(v){
+        var y = base - v/YMAX*ph;
+        el('line', {x1:PL, x2:W-PR, y1:y+.5, y2:y+.5, style: v===0 ? 'stroke:var(--rule-solid)' : 'stroke:var(--rule)'}, g.grid);
+        var tx = el('text', {x:PL-6, y:y+4, 'text-anchor':'end', 'class':'tick'}, g.grid);
+        tx.textContent = fmt(v);
+      });
+      for (var sec=0; sec<=8; sec++){
+        var x = PL + sec*10*sw;
+        el('line', {x1:x, x2:x, y1:base, y2:base+4, style:'stroke:var(--rule-solid)'}, g.grid);
+        var lx = el('text', {x:x, y:base+18, 'text-anchor': sec===8 ? 'end' : 'middle', 'class':'tick'}, g.grid);
+        lx.textContent = sec===8 ? '8 秒' : String(sec);
+      }
+      for (var s=0; s<SLOTS; s++){
+        var bx = PL + s*sw + (sw-bw)/2;
+        g.ok[s].setAttribute('x', bx.toFixed(2)); g.ok[s].setAttribute('width', bw.toFixed(2));
+        g.hot[s].setAttribute('x', bx.toFixed(2)); g.hot[s].setAttribute('width', bw.toFixed(2));
+      }
+      var cy = base - CAP/YMAX*ph;
+      g.cap.setAttribute('x1', PL); g.cap.setAttribute('x2', W-PR);
+      g.cap.setAttribute('y1', cy); g.cap.setAttribute('y2', cy);
+      g.capLbl.setAttribute('x', W-PR); g.capLbl.setAttribute('y', cy-5);
+      g.clip.setAttribute('x', PL + sw + 6); g.clip.setAttribute('y', PT + 12);
+      g.head.setAttribute('y1', PT-4); g.head.setAttribute('y2', base);
+      g.geo = {pw:pw, ph:ph, sw:sw, base:base};
+    });
+    paint();
+    postHeight();
+  }
+
+  function shown(tt){ return Math.min(SLOTS, Math.floor(tt*10 + 1e-6) + 1); }
+
+  function paint(){
+    if (!W) return;
+    var n = shown(t);
+    lanes.forEach(function(id){
+      var g = parts[id], d = DATA[id], geo = g.geo, ok = 0, calls = 0;
+      for (var s=0; s<SLOTS; s++){
+        var vis = s < n, L = vis ? d.load[s] : 0, O = vis ? d.ok[s] : 0;
+        var oh = O/YMAX*geo.ph, hh = (Math.min(L, YMAX) - O)/YMAX*geo.ph;
+        g.ok[s].setAttribute('y', (geo.base - oh).toFixed(2));
+        g.ok[s].setAttribute('height', oh.toFixed(2));
+        g.hot[s].setAttribute('y', (geo.base - oh - hh).toFixed(2));
+        g.hot[s].setAttribute('height', Math.max(0, hh).toFixed(2));
+        g.hot[s].setAttribute('visibility', hh > 0 ? 'visible' : 'hidden');
+        if (vis){ ok += O; calls += L; }
+      }
+      var clipped = d.load[0] > YMAX;
+      g.clip.textContent = clipped ? '↑ ' + fmt(d.load[0]) : '';
+      var hx = PL + Math.min(t, DUR)*10*geo.sw;
+      g.head.setAttribute('x1', hx); g.head.setAttribute('x2', hx);
+      var c = document.getElementById('cnt-'+id);
+      var doneTag = (ok >= CLIENTS) ? '<span class="done">✓ ' + d.done + ' 秒全部完成</span>' : '';
+      c.innerHTML = '已成功 <b>' + fmt(ok) + '</b>／1,000　累計呼叫 <b>' + fmt(calls) + '</b> 次' + doneTag;
+      g.okCount = ok;
+    });
+    document.getElementById('caption').innerHTML = captionAt(n - 1);
+    var sc = document.getElementById('scrub');
+    sc.value = t.toFixed(1);
+    document.getElementById('time').textContent = t.toFixed(1) + ' 秒';
+  }
+
+  var WAVES = [0,1,3,7,15,31,63];
+  function captionAt(k){
+    var nl = DATA.none.load;
+    if (k === 0) return 't = 0：<em>1,000 個用戶端同時失敗</em>。伺服器這一格只放得進 50 個，其他全部要重試。';
+    if (k >= 57){
+      var left = CLIENTS - parts.none.okCount;
+      return 'Full Jitter 在 <em>5.8 秒全部完成</em>，共 5,005 次呼叫；沒有抖動這邊還有 ' + fmt(left) + ' 個在等，要到 <em>132.7 秒</em>、打了 10,500 次才做完。';
+    }
+    if (nl[k] > 0) return '沒有抖動：剩下的 <em>' + fmt(nl[k]) + ' 個在同一格一起回來</em>，只有 50 個成功，' + fmt(nl[k]-50) + ' 個又一起去睡、一起等下一輪。';
+    var next = 127;
+    for (var i=0; i<WAVES.length; i++) if (WAVES[i] > k){ next = WAVES[i]; break; }
+    return '沒有抖動：大家都在睡，<em>伺服器有空卻沒人來</em>，下一波在 ' + (next/10).toFixed(1) + ' 秒。Full Jitter：同一批人散在不同時間回來。';
+  }
+
+  function seek(tt){ t = Math.max(0, Math.min(DUR, tt)); stop(); paint(); }
+  function setPlayIcon(){
+    var b = document.getElementById('play');
+    b.setAttribute('aria-label', playing ? '暫停' : '播放');
+    document.getElementById('play-ico').innerHTML = playing
+      ? '<path d="M6 4.5h4v15H6zM14 4.5h4v15h-4z"/>' : '<path d="M7 4.5v15l12-7.5z"/>';
+  }
+  function frame(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = Math.min(0.1, (now - last)/1000); last = now;
+    t += dt * RATE;
+    if (t >= DUR){ t = DUR; playing = false; setPlayIcon(); paint(); return; }
+    paint();
+    raf = requestAnimationFrame(frame);
+  }
+  function arm(){ if (playing && visible && !raf){ last = performance.now(); raf = requestAnimationFrame(frame); } }
+  function play(){ if (t >= DUR - 1e-6) t = 0; playing = true; setPlayIcon(); arm(); }
+  function stop(){ playing = false; if (raf){ cancelAnimationFrame(raf); raf = 0; } setPlayIcon(); }
+
+  document.getElementById('play').addEventListener('click', function(){ playing ? stop() : play(); });
+  document.getElementById('scrub').addEventListener('input', function(e){ seek(parseFloat(e.target.value)); });
+  document.getElementById('theme').addEventListener('click', function(){
+    var cur = root.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    if (e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); playing ? stop() : play(); }
+    else if (e.key === 'ArrowRight'){ e.preventDefault(); seek(t + 0.1); }
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(t - 0.1); }
+    else if (e.key === 'Home'){ e.preventDefault(); seek(0); }
+    else if (e.key === 'End'){ e.preventDefault(); seek(DUR); }
+  });
+
+  var lastH = 0;
+  function postHeight(){
+    var h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    if (h !== lastH && window.parent !== window){ lastH = h; window.parent.postMessage({type:'figure-height', fig:'jitter-waves', height:h}, '*'); }
+  }
+  var rq = 0;
+  new ResizeObserver(function(){ if (!rq) rq = requestAnimationFrame(function(){ rq = 0; layout(); }); }).observe(fig);
+  new IntersectionObserver(function(es){
+    visible = es[0].isIntersecting;
+    if (visible) arm();
+    if (visible && autoplayPending){ autoplayPending = false; t = 0; play(); }
+  }, {rootMargin:'120px'}).observe(fig);
+
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var autoplayPending = !reduce;
+
+  window.DUR = DUR;
+  window.seek = function(tt){ autoplayPending = false; seek(tt); };
+  window.timeline = function(){ return {dur:DUR, rest:REST}; };
+
+  layout();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ W = 0; layout(); });
+})();
+</script>
+</body>
+</html>

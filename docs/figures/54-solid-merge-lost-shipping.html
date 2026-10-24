@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>合併後少扣 60 元</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f6f7f9;
+    --ink: #1f2430;
+    --muted: #4f5a6e;
+    --soft: #6a7486;
+    --rule: #d5d9e0;
+    --rule-faint: #e6e9ee;
+    --main: #2e5aa8;
+    --lane-a: #6b4fa0;
+    --lane-b: #2f7d62;
+    --ok: #2f7d62;
+    --amber-fill: #fde68a;
+    --amber-line: #b45309;
+    --amber-ink: #7c2d12;
+    --bar-order: #8fa3c4;
+    --bar-charge: #2e5aa8;
+    --code-bg: #eef1f5;
+    --focus: #2e5aa8;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1e2029;
+      --panel: #262935;
+      --ink: #e8eaf0;
+      --muted: #b4bac6;
+      --soft: #9aa1b0;
+      --rule: #4a4f60;
+      --rule-faint: #343846;
+      --main: #7fa6e6;
+      --lane-a: #b39ae0;
+      --lane-b: #6cc4a0;
+      --ok: #6cc4a0;
+      --amber-fill: #4a3410;
+      --amber-line: #f59e0b;
+      --amber-ink: #fcd34d;
+      --bar-order: #5d6b86;
+      --bar-charge: #7fa6e6;
+      --code-bg: #2d3140;
+      --focus: #7fa6e6;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1e2029;
+    --panel: #262935;
+    --ink: #e8eaf0;
+    --muted: #b4bac6;
+    --soft: #9aa1b0;
+    --rule: #4a4f60;
+    --rule-faint: #343846;
+    --main: #7fa6e6;
+    --lane-a: #b39ae0;
+    --lane-b: #6cc4a0;
+    --ok: #6cc4a0;
+    --amber-fill: #4a3410;
+    --amber-line: #f59e0b;
+    --amber-ink: #fcd34d;
+    --bar-order: #5d6b86;
+    --bar-charge: #7fa6e6;
+    --code-bg: #2d3140;
+    --focus: #7fa6e6;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: 8px 16px 12px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .mls { max-width: 760px; margin: 0 auto; outline: none; }
+  .mls:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: 6px; }
+  .mls code, .mls .mono {
+    font-family: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Noto Sans Mono CJK TC", monospace;
+  }
+
+  /* controls */
+  .mls-ctrl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .mls-btn {
+    min-height: 36px; min-width: 36px; padding: 0 12px;
+    border: 1px solid var(--rule); border-radius: 8px;
+    background: var(--panel); color: var(--ink);
+    font: inherit; font-size: 14px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .mls-btn:hover { border-color: var(--muted); }
+  .mls-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .mls-btn:disabled { opacity: .45; cursor: default; }
+  .mls-btn.play { min-width: 76px; font-weight: 600; }
+  .mls-step {
+    margin-left: auto; font-weight: 600; font-size: 14px; color: var(--ink);
+    white-space: nowrap;
+  }
+  .mls-step b { color: var(--main); font-weight: 700; }
+  .mls-theme { padding: 0 8px; font-size: 13px; color: var(--muted); }
+
+  /* graph */
+  .mls-graph { position: relative; margin-top: 8px; }
+  .mls-graph svg { display: block; width: 100%; height: 136px; overflow: visible; touch-action: pan-y; cursor: pointer; }
+  .mls-range {
+    display: block; height: 32px; margin: 0; padding: 0;
+    accent-color: var(--main); cursor: pointer; background: transparent;
+  }
+  .mls-range:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* caption */
+  .mls-cap {
+    margin: 4px 0 0; padding: 8px 12px;
+    border-left: 4px solid var(--main);
+    background: var(--panel); border-radius: 0 8px 8px 0;
+    font-size: 14px; min-height: 76px;
+  }
+  .mls-cap.hot { border-left-color: var(--amber-line); }
+  .mls-cap code { font-size: 13px; background: var(--code-bg); padding: 0 4px; border-radius: 4px; overflow-wrap: anywhere; }
+
+  /* method card */
+  .mls-card {
+    margin-top: 12px; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden;
+  }
+  .mls-card-h {
+    padding: 6px 12px; font-size: 13px; color: var(--muted);
+    border-bottom: 1px solid var(--rule); background: var(--panel);
+    overflow-wrap: anywhere;
+  }
+  .mls-card-h code { color: var(--ink); font-size: 13px; }
+  .mls-row {
+    display: grid; grid-template-columns: 76px 1fr; gap: 4px 12px;
+    padding: 8px 12px; align-items: start;
+    border-left: 4px solid transparent;
+  }
+  .mls-row + .mls-row { border-top: 1px dashed var(--rule); }
+  .mls-row.hot { background: var(--amber-fill); border-left-color: var(--amber-line); }
+  .mls-row.hot .mls-k, .mls-row.hot .mls-note { color: var(--amber-ink); }
+  .mls-k { font-size: 13px; font-weight: 600; color: var(--muted); padding-top: 2px; }
+  .mls-code {
+    display: block; font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
+    background: var(--code-bg); padding: 4px 8px; border-radius: 4px; color: var(--ink);
+  }
+  .mls-row.hot .mls-code { background: transparent; border: 1px solid var(--amber-line); }
+  .mls-note { grid-column: 2; font-size: 13px; color: var(--muted); }
+  .mls-note strong { color: inherit; }
+  .mls-tag {
+    display: inline-block; font-size: 12px; line-height: 18px; padding: 0 6px; margin-left: 4px;
+    border-radius: 9px; border: 1px solid currentColor; vertical-align: 1px; white-space: nowrap;
+  }
+  .mls-same { color: var(--ok); }
+  .mls-chg { color: var(--amber-ink); }
+
+  /* bars */
+  .mls-bars { margin-top: 12px; display: grid; gap: 8px; }
+  .mls-bar-l { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
+  .mls-bar-l b { color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mls-track { position: relative; height: 16px; border-radius: 4px; background: var(--rule-faint); overflow: hidden; }
+  .mls-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px 0 0 4px; }
+  .mls-fill.order { background: var(--bar-order); }
+  .mls-fill.charge { background: var(--bar-charge); }
+  .mls-gap {
+    position: absolute; top: 0; bottom: 0;
+    background: repeating-linear-gradient(135deg, var(--amber-fill) 0 4px, transparent 4px 7px), var(--amber-fill);
+    border: 2px solid var(--amber-line); border-radius: 0 4px 4px 0;
+  }
+  .mls-gapline {
+    font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  }
+  .mls-gapline .hotv { color: var(--amber-ink); font-weight: 700; background: var(--amber-fill); border: 1px solid var(--amber-line); border-radius: 4px; padding: 0 6px; }
+  .mls-gapline .zero { font-weight: 700; color: var(--ok); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  @media (max-width: 420px) {
+    body { font-size: 13px; }
+    .mls-row { grid-template-columns: 1fr; }
+    .mls-note { grid-column: 1; }
+    .mls-step { width: 100%; margin-left: 0; order: -1; }
+  }
+</style>
+</head>
+<body>
+<figure class="fig mls" id="mls" data-fig="merge-lost-shipping" data-dur="7" data-rest="3.5" tabindex="0"
+  aria-label="時間軸動畫：工程師 A 把運費從 subtotal 拆出去、工程師 B 把扣款換成 NewPay 的 subtotal 乘 100，兩個分支在 T3、T4 先後合併進 main 後，800 元的訂單存 860 元卻只扣 800 元，測試沒抓到，直到財務對帳才發現每筆少收 60 元。">
+
+  <div class="mls-ctrl" role="group" aria-label="時間軸控制">
+    <span class="mls-step" aria-hidden="true"><b data-k="tnum">T4</b>　<span data-k="tname">A 合併（衝突）</span></span>
+    <button type="button" class="mls-btn" data-act="prev" aria-label="上一格">‹</button>
+    <button type="button" class="mls-btn play" data-act="play" aria-label="播放" aria-pressed="false">▶ 播放</button>
+    <button type="button" class="mls-btn" data-act="next" aria-label="下一格">›</button>
+    <button type="button" class="mls-btn mls-theme" data-act="theme" aria-label="切換深淺色">◐</button>
+  </div>
+
+  <div class="mls-graph">
+    <svg data-k="svg" role="img" aria-labelledby="merge-lost-shipping-title merge-lost-shipping-desc">
+      <title id="merge-lost-shipping-title">工程師 A、B 的分支與 main 的合併順序</title>
+      <desc id="merge-lost-shipping-desc">A 在 T1 開分支、T4 合併；B 在 T2 開分支、T3 先合併；T5 測試、T6 上線、T7 財務對帳都在 main 上。</desc>
+      <defs><clipPath id="mls-clip"><rect data-k="clip" x="0" y="0" width="0" height="140"></rect></clipPath></defs>
+      <g data-k="lanes"></g>
+      <g data-k="faint"></g>
+      <g data-k="strong" clip-path="url(#mls-clip)"></g>
+      <g data-k="dots"></g>
+      <g data-k="ticks"></g>
+      <g data-k="hits"></g>
+    </svg>
+    <input class="mls-range" data-k="range" type="range" min="1" max="7" step="1" value="4" aria-label="拖曳選擇時間點 T1 到 T7">
+  </div>
+
+  <figcaption class="mls-cap hot" data-k="cap" aria-live="polite"></figcaption>
+
+  <div class="mls-card">
+    <div class="mls-card-h">main 分支上的 <code>OrderController.createOrder()</code>（800 元訂單：2 本書 × 400 元）</div>
+    <div class="mls-row" data-k="rowShip">
+      <div class="mls-k">運費那一行</div>
+      <code class="mls-code" data-k="shipCode"></code>
+      <div class="mls-note" data-k="shipNote"></div>
+    </div>
+    <div class="mls-row" data-k="rowCharge">
+      <div class="mls-k">扣款那一行</div>
+      <code class="mls-code" data-k="chargeCode"></code>
+      <div class="mls-note" data-k="chargeNote"></div>
+    </div>
+  </div>
+
+  <div class="mls-bars">
+    <div>
+      <div class="mls-bar-l"><span>訂單／確認信上的總金額</span><b data-k="orderV">860 元</b></div>
+      <div class="mls-track"><div class="mls-fill order" data-k="orderBar"></div></div>
+    </div>
+    <div>
+      <div class="mls-bar-l"><span>信用卡實際被扣</span><b data-k="chargeV">800 元</b></div>
+      <div class="mls-track"><div class="mls-fill charge" data-k="chargeBar"></div><div class="mls-gap" data-k="gapBar"></div></div>
+    </div>
+    <div class="mls-gapline"><span>兩個金額的差</span><span data-k="gapV"></span></div>
+  </div>
+  <p class="sr" data-k="sr" role="status" aria-live="polite"></p>
+</figure>
+
+<script>
+(() => {
+  const fig = document.getElementById('mls');
+  const $ = (k) => fig.querySelector(`[data-k="${k}"]`);
+  const NS = 'http://www.w3.org/2000/svg';
+  const DUR = 7, REST = 3.5, STEP_SEC = 2.6;
+
+  // 每一格的事實，全部照文章 T1~T7
+  const S = [
+    { name: 'A 開分支', lane: 'a',
+      cap: '工程師 A 開分支：運費拆成自己的變數 <code>shipping</code>，A 的分支裡 <code>subtotal</code> 不再含運費，扣款改用 <code>total</code>。main 還沒變，800 元的訂單扣 860 元。' },
+    { name: 'B 開分支', lane: 'b',
+      cap: '工程師 B 開分支：換成 NewPay，金額單位是「分」，扣款改成 <code>subtotal * 100</code>。B 寫這一行的時候，<code>subtotal</code> 還含運費。main 還是扣 860 元。' },
+    { name: 'B 合併', lane: 'm',
+      cap: 'B 先合併進 main：扣款那一行變成 NewPay，扣 86000 分，也就是 860 元，金額還是對的。' },
+    { name: 'A 合併（衝突）', lane: 'm', hot: true,
+      cap: 'A 合併時扣款那一行衝突，A 選了 B 的版本。那一行一個字都沒變，可是 A 在同一個方法上面改掉了 <code>subtotal</code> 的意思：現在只扣 80000 分，也就是 800 元。' },
+    { name: '跑測試', lane: 'm',
+      cap: '跑測試：唯一的案例是 1200 元訂單，免運，<code>subtotal</code> 和 <code>total</code> 剛好一樣，所以通過。800 元的訂單沒有人測。' },
+    { name: '上線', lane: 'm',
+      cap: '上線：確認信寫「總金額 860 元」，信用卡只扣 800 元。程式沒有出錯，日誌裡什麼錯誤都看不到。' },
+    { name: '財務對帳', lane: 'm',
+      cap: '財務對帳：每筆未滿 1000 元的訂單都少收 60 元。補一個 800 元訂單的測試，才看到 <code>expected: &lt;[860]&gt; but was: &lt;[800]&gt;</code>。' }
+  ];
+  const SHIP_OLD = 'if (subtotal < 1000) subtotal += 60;';
+  const SHIP_NEW = 'long shipping = subtotal >= 1000 ? 0 : 60;\nlong total = subtotal + shipping;';
+  const PAY_OLD = 'payGo.charge(token, subtotal)';
+  const PAY_NEW = 'newPay.charge(token, subtotal * 100)';
+  const ORDER = 860;
+  const chargeAt = (s) => s >= 4 ? 800 : 860;
+  const SCALE = 900;
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  let t = REST, playing = false, played = false, visible = true;
+  let raf = 0, last = 0;
+  let geo = null;
+  // tweened values: graph progress (in columns), charge bar ratio, gap ratio
+  const cur = { prog: 0, charge: 0, gap: 0 };
+  const tgt = { prog: 0, charge: 0, gap: 0 };
+
+  const stepOf = (tt) => Math.max(1, Math.min(7, Math.floor(tt) + 1));
+
+  // ---------- graph ----------
+  function el(name, attrs, parent) {
+    const n = document.createElementNS(NS, name);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function tokens() {
+    const cs = getComputedStyle(document.documentElement);
+    const g = (n) => cs.getPropertyValue(n).trim();
+    return { ink: g('--ink'), muted: g('--muted'), soft: g('--soft'), rule: g('--rule'), bg: g('--bg'),
+      main: g('--main'), a: g('--lane-a'), b: g('--lane-b'), amberFill: g('--amber-fill'), amberLine: g('--amber-line') };
+  }
+  function layout() {
+    const svg = $('svg');
+    const W = Math.max(280, svg.clientWidth || 280);
+    const L = 72;
+    const colW = (W - L) / 7;
+    const x = (i) => L + colW * (i - 0.5);
+    geo = { W, L, colW, x, y: { a: 24, m: 64, b: 104 } };
+    svg.setAttribute('viewBox', `0 0 ${W} 136`);
+    const r = $('range');
+    r.style.marginLeft = (x(1) - 8) + 'px';
+    r.style.width = (x(7) - x(1) + 16) + 'px';
+    build();
+  }
+  function build() {
+    if (!geo) return;
+    const C = tokens();
+    const { W, L, colW, x, y } = geo;
+    ['lanes', 'faint', 'strong', 'ticks', 'hits'].forEach((k) => { $(k).textContent = ''; });
+    const lanes = $('lanes');
+    const lab = [['工程師 A', y.a, C.a], ['main', y.m, C.main], ['工程師 B', y.b, C.b]];
+    lab.forEach(([txt, yy, col]) => {
+      const tx = el('text', { x: 0, y: yy + 4, fill: col, 'font-size': 13, 'font-weight': 600 }, lanes);
+      tx.textContent = txt;
+    });
+    const r = 8;
+    const xa = x(1) - colW * 0.42, xb = x(2) - colW * 0.42, x3 = x(3), x4 = x(4);
+    const paths = [
+      { d: `M${L} ${y.m} H${W}`, c: C.main, w: 3 },
+      { d: `M${xa} ${y.m} V${y.a + r} Q${xa} ${y.a} ${xa + r} ${y.a} H${x4 - r} Q${x4} ${y.a} ${x4} ${y.a + r} V${y.m}`, c: C.a, w: 2.5 },
+      { d: `M${xb} ${y.m} V${y.b - r} Q${xb} ${y.b} ${xb + r} ${y.b} H${x3 - r} Q${x3} ${y.b} ${x3} ${y.b - r} V${y.m}`, c: C.b, w: 2.5 }
+    ];
+    paths.forEach((p) => {
+      el('path', { d: p.d, fill: 'none', stroke: C.rule, 'stroke-width': 2, 'stroke-dasharray': '4 4' }, $('faint'));
+      el('path', { d: p.d, fill: 'none', stroke: p.c, 'stroke-width': p.w, 'stroke-linejoin': 'round' }, $('strong'));
+    });
+    for (let i = 1; i <= 7; i++) {
+      const tk = el('text', { x: x(i), y: 132, 'text-anchor': 'middle', 'font-size': 12, fill: C.muted, 'data-i': i,
+        'font-family': 'ui-monospace, Consolas, monospace' }, $('ticks'));
+      tk.textContent = 'T' + i;
+      const hit = el('rect', { x: L + colW * (i - 1), y: 0, width: colW, height: 136, fill: 'transparent', 'data-i': i }, $('hits'));
+      const ht = el('title', {}, hit); ht.textContent = 'T' + i + ' ' + S[i - 1].name;
+    }
+    $('clip').setAttribute('height', 140);
+    paintDots();
+    paintClip();
+  }
+  function dotPos(i) {
+    const { x, y } = geo;
+    const lane = S[i - 1].lane;
+    return { cx: x(i), cy: lane === 'a' ? y.a : lane === 'b' ? y.b : y.m };
+  }
+  function paintDots() {
+    if (!geo) return;
+    const C = tokens();
+    const g = $('dots'); g.textContent = '';
+    const s = stepOf(t);
+    for (let i = 1; i <= 7; i++) {
+      const { cx, cy } = dotPos(i);
+      const hot = S[i - 1].hot && i <= s;
+      const laneCol = S[i - 1].lane === 'a' ? C.a : S[i - 1].lane === 'b' ? C.b : C.main;
+      if (i === s) el('circle', { cx, cy, r: 11, fill: 'none', stroke: hot ? C.amberLine : laneCol, 'stroke-width': 2, opacity: 0.55 }, g);
+      el('circle', { cx, cy, r: i === s ? 7 : 5,
+        fill: i <= s ? (hot ? C.amberFill : laneCol) : C.bg,
+        stroke: i <= s ? (hot ? C.amberLine : laneCol) : C.rule, 'stroke-width': 2 }, g);
+    }
+    $('ticks').querySelectorAll('text').forEach((tk) => {
+      const i = Number(tk.dataset.i);
+      tk.setAttribute('fill', i === s ? (S[i - 1].hot ? C.amberLine : C.ink) : C.muted);
+      tk.setAttribute('font-weight', i === s ? 700 : 400);
+    });
+  }
+  function paintClip() {
+    if (!geo) return;
+    const { L, colW } = geo;
+    $('clip').setAttribute('width', Math.max(0, L + colW * cur.prog));
+  }
+
+  // ---------- panel ----------
+  let lastStep = 0;
+  function paintPanel(s) {
+    const st = S[s - 1];
+    $('tnum').textContent = 'T' + s;
+    $('tname').textContent = st.name;
+    const cap = $('cap');
+    cap.innerHTML = '<strong>T' + s + '　' + st.name + '</strong>　' + st.cap;
+    cap.classList.toggle('hot', s >= 4);
+
+    const shipChanged = s >= 4;
+    $('shipCode').textContent = shipChanged ? SHIP_NEW : SHIP_OLD;
+    $('rowShip').classList.toggle('hot', shipChanged);
+    $('shipNote').innerHTML = shipChanged
+      ? '<strong>subtotal = 800</strong>，已經<strong>不含運費</strong><span class="mls-tag mls-chg">T4 被 A 改掉意思</span>'
+      : '<strong>subtotal = 860</strong>，運費直接加進 subtotal（含運費）';
+
+    const payNew = s >= 3;
+    $('chargeCode').textContent = payNew ? PAY_NEW : PAY_OLD;
+    $('chargeNote').innerHTML = !payNew
+      ? '扣 subtotal 元 → <strong>860 元</strong>'
+      : s === 3
+        ? '860 × 100 = 86000 分 → <strong>860 元</strong><span class="mls-tag mls-chg" style="color:var(--main)">T3 B 改的</span>'
+        : '800 × 100 = 80000 分 → <strong>800 元</strong><span class="mls-tag mls-same">這一行沒變</span>';
+
+    const ch = chargeAt(s);
+    $('orderV').textContent = ORDER + ' 元';
+    $('chargeV').textContent = (s >= 3 ? (ch * 100) + ' 分 = ' : '') + ch + ' 元';
+    const gap = ORDER - ch;
+    $('gapV').innerHTML = gap > 0
+      ? '<span class="hotv">少收 ' + gap + ' 元</span>' + (s >= 7 ? '　每筆未滿 1000 元的訂單都一樣' : s >= 5 ? '　沒有任何錯誤訊息' : '')
+      : '<span class="zero">0 元</span>';
+    if (s !== lastStep) {
+      $('sr').textContent = 'T' + s + '，' + st.name + '。訂單 ' + ORDER + ' 元，實際扣 ' + ch + ' 元。';
+      lastStep = s;
+    }
+    $('range').value = String(s);
+    fig.querySelector('[data-act="prev"]').disabled = s <= 1;
+    fig.querySelector('[data-act="next"]').disabled = s >= 7 && !playing;
+  }
+  function paintBars() {
+    $('orderBar').style.width = (ORDER / SCALE * 100) + '%';
+    $('chargeBar').style.width = (cur.charge * 100) + '%';
+    const g = $('gapBar');
+    g.style.left = (cur.charge * 100) + '%';
+    g.style.width = (cur.gap * 100) + '%';
+    g.style.display = cur.gap > 0.002 ? 'block' : 'none';
+  }
+
+  // ---------- state ----------
+  function targets(s) {
+    tgt.prog = s;
+    tgt.charge = chargeAt(s) / SCALE;
+    tgt.gap = (ORDER - chargeAt(s)) / SCALE;
+  }
+  function snap() { cur.prog = tgt.prog; cur.charge = tgt.charge; cur.gap = tgt.gap; }
+  function settled() {
+    return Math.abs(cur.prog - tgt.prog) < 0.002 && Math.abs(cur.charge - tgt.charge) < 0.0005 && Math.abs(cur.gap - tgt.gap) < 0.0005;
+  }
+  function draw(instant) {
+    const s = stepOf(t);
+    targets(s);
+    if (instant || reduce.matches) snap();
+    paintPanel(s);
+    paintDots();
+    paintClip();
+    paintBars();
+    kick();
+  }
+  function frame(now) {
+    raf = 0;
+    const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    last = now;
+    if (!visible) { last = 0; return; }
+    if (playing) {
+      const before = stepOf(t);
+      t += dt / STEP_SEC;
+      if (t >= DUR - 0.5) { t = DUR - 0.5; setPlaying(false); }
+      if (stepOf(t) !== before) { targets(stepOf(t)); paintPanel(stepOf(t)); paintDots(); }
+    }
+    // critically-damped-ish approach, by mass: progress light, bars heavier
+    const k1 = 1 - Math.exp(-dt * 9), k2 = 1 - Math.exp(-dt * 6);
+    cur.prog += (tgt.prog - cur.prog) * k1;
+    cur.charge += (tgt.charge - cur.charge) * k2;
+    cur.gap += (tgt.gap - cur.gap) * k2;
+    if (settled()) snap();
+    paintClip(); paintBars();
+    if (playing || !settled()) raf = requestAnimationFrame(frame);
+    else last = 0;
+  }
+  function kick() { if (!raf && visible && (playing || !settled())) { last = 0; raf = requestAnimationFrame(frame); } }
+
+  function setPlaying(p) {
+    playing = p;
+    const b = fig.querySelector('[data-act="play"]');
+    b.setAttribute('aria-pressed', String(p));
+    b.setAttribute('aria-label', p ? '暫停' : '播放');
+    b.textContent = p ? '❚❚ 暫停' : '▶ 播放';
+    paintPanel(stepOf(t));
+  }
+  function goStep(s) { setPlaying(false); t = Math.max(1, Math.min(7, s)) - 0.5; draw(false); }
+  function play() {
+    if (playing) { setPlaying(false); return; }
+    if (!played || stepOf(t) >= 7) { t = 0; snap0(); }
+    played = true;
+    // 每格停一會兒：從格首開始
+    t = Math.floor(t) + 0.0001;
+    setPlaying(true);
+    draw(false);
+  }
+  function snap0() { targets(1); cur.prog = 0; cur.charge = tgt.charge; cur.gap = 0; }
+
+  window.DUR = DUR;
+  window.timeline = () => ({ dur: DUR, rest: REST, steps: 7 });
+  window.seek = (tt) => { setPlaying(false); t = Math.max(0, Math.min(DUR - 0.001, Number(tt) || 0)); draw(true); };
+
+  // ---------- input ----------
+  fig.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (b) {
+      const a = b.dataset.act;
+      if (a === 'prev') goStep(stepOf(t) - 1);
+      if (a === 'next') goStep(stepOf(t) + 1);
+      if (a === 'play') play();
+      if (a === 'theme') {
+        const root = document.documentElement;
+        const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+        root.dataset.theme = dark ? 'light' : 'dark';
+      }
+      return;
+    }
+  });
+  const svg = $('svg');
+  let dragging = false;
+  const colFromEvent = (e) => {
+    if (!geo) return null;
+    const box = svg.getBoundingClientRect();
+    const px = (e.clientX - box.left) * (geo.W / box.width);
+    return Math.max(1, Math.min(7, Math.floor((px - geo.L) / geo.colW) + 1));
+  };
+  svg.addEventListener('pointerdown', (e) => {
+    const c = colFromEvent(e); if (c == null) return;
+    dragging = true; svg.setPointerCapture(e.pointerId); goStep(c);
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const c = colFromEvent(e); if (c != null && c !== stepOf(t)) goStep(c);
+  });
+  const endDrag = () => { dragging = false; };
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
+  $('range').addEventListener('input', (e) => goStep(Number(e.target.value)));
+  fig.addEventListener('keydown', (e) => {
+    if (e.target.matches('input')) return;
+    const s = stepOf(t);
+    const map = { ArrowLeft: s - 1, ArrowRight: s + 1, Home: 1, End: 7 };
+    if (e.key in map) { e.preventDefault(); goStep(map[e.key]); return; }
+    if (e.code === 'Space' && !e.target.closest('button')) { e.preventDefault(); play(); }
+  });
+
+  // ---------- redraw triggers ----------
+  let lastW = 0;
+  new ResizeObserver((ents) => {
+    const w = Math.round(ents[0].contentRect.width);
+    if (w && w !== lastW) { lastW = w; layout(); draw(true); }
+  }).observe($('svg'));
+  new MutationObserver(() => { build(); draw(true); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { build(); draw(true); });
+  reduce.addEventListener('change', () => { if (reduce.matches) { setPlaying(false); t = REST; draw(true); } });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { layout(); draw(true); });
+  new IntersectionObserver((ents) => {
+    visible = ents[0].isIntersecting;
+    if (visible) kick(); else if (playing) setPlaying(false);
+  }, { rootMargin: '120px' }).observe(fig);
+  document.addEventListener('visibilitychange', () => { if (document.hidden && playing) setPlaying(false); });
+
+  // mount: rest frame T4, paused（含 reduced motion）
+  layout();
+  t = REST;
+  draw(true);
+})();
+</script>
+</body>
+</html>

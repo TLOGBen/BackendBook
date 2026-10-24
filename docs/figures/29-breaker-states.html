@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>斷路器三態切換</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1f2937; --muted:#4b5563; --soft:#6b7280; --line:#c7ccd4;
+  --panel:#f8fafc; --panel2:#eef1f5;
+  --amber-fill:#fde68a; --amber-stroke:#b45309; --amber-ink:#111111;
+  --err:#b91c1c; --err-fill:#fee2e2;
+  --ok:#15803d; --ok-fill:#dcfce7;
+  --dot:#374151; --on-dot:#ffffff;
+  --focus:#2563eb;
+  --sans:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,"PingFang TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1e2129; --ink:#e5e7eb; --muted:#b9bfca; --soft:#9aa2b0; --line:#454c5c;
+    --panel:#262a34; --panel2:#2f3440;
+    --amber-fill:#5b3c0c; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+    --err:#f87171; --err-fill:#451a1a;
+    --ok:#4ade80; --ok-fill:#14361f;
+    --dot:#d1d5db; --on-dot:#111827;
+    --focus:#7aa2f7; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1e2129; --ink:#e5e7eb; --muted:#b9bfca; --soft:#9aa2b0; --line:#454c5c;
+  --panel:#262a34; --panel2:#2f3440;
+  --amber-fill:#5b3c0c; --amber-stroke:#f59e0b; --amber-ink:#fde68a;
+  --err:#f87171; --err-fill:#451a1a;
+  --ok:#4ade80; --ok-fill:#14361f;
+  --dot:#d1d5db; --on-dot:#111827;
+  --focus:#7aa2f7; color-scheme:dark;
+}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans)}
+.fig{margin:0;padding:8px 16px 12px;box-sizing:border-box;width:100%;outline:none}
+.fig:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;border-radius:6px}
+.fig .stage{width:100%;margin:0 auto;max-width:960px}
+.fig .stage.narrow{max-width:480px}
+.fig svg{display:block;width:100%;height:auto}
+.fig .cap{display:flex;gap:8px;align-items:baseline;min-height:3.2em;margin:8px auto 4px;font-size:15px;line-height:1.55;max-width:960px}
+.fig .cap .step{flex:none;font-weight:700;color:var(--amber-stroke);white-space:nowrap}
+.fig .ctrl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:960px;margin:0 auto}
+.fig button{font:inherit;font-size:14px;min-height:36px;min-width:36px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.fig button:hover{border-color:var(--muted)}
+.fig button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.fig button.play{font-weight:700;min-width:88px}
+.fig button.on{background:var(--amber-fill);border-color:var(--amber-stroke);color:var(--amber-ink);font-weight:700}
+.fig input[type=range]{flex:1 1 160px;min-width:0;height:36px;margin:0;accent-color:var(--amber-stroke)}
+.fig .keys{display:flex;gap:6px;flex-wrap:wrap}
+.fig .theme{margin-left:auto}
+/* svg parts */
+.box{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.box.cb{stroke:var(--ink);stroke-width:2}
+.box.bad{stroke:var(--err);stroke-width:2.5}
+.box.fb{fill:var(--panel)}
+.t-name{fill:var(--ink);font-weight:700}
+.t-sub{fill:var(--muted)}
+.t-st{fill:var(--muted)}
+.t-st.bad{fill:var(--err);font-weight:700}
+.t-st.good{fill:var(--ok);font-weight:700}
+.t-state{fill:var(--ink);font-weight:700}
+.t-val{fill:var(--ink);font-weight:700}
+.wire{stroke:var(--soft);stroke-width:2;fill:none}
+.wire.fbw{stroke-dasharray:6 5}
+.arrow{fill:var(--soft)}
+.term{fill:var(--bg);stroke:var(--ink);stroke-width:2}
+.blade{stroke:var(--ink);stroke-width:5;stroke-linecap:round}
+.bar-bg{fill:var(--panel2);stroke:var(--line);stroke-width:1}
+.bar{fill:var(--err)}
+.bar.timer{fill:var(--amber-stroke)}
+.tick{stroke:var(--ink);stroke-width:2}
+.pill{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.pill.now{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2.5}
+.pill-t{fill:var(--muted);font-weight:700}
+.pill-t.now{fill:var(--amber-ink)}
+.tr{stroke:var(--soft);stroke-width:2;fill:none}
+.tr.now{stroke:var(--amber-stroke);stroke-width:3.5}
+.tr-a{fill:var(--soft)}
+.tr-a.now{fill:var(--amber-stroke)}
+.tr-l{fill:var(--muted)}
+.tr-l.now{fill:var(--amber-stroke);font-weight:700}
+.mask{fill:var(--bg)}
+.row{fill:none;stroke:none}
+.row.now{fill:var(--amber-fill);stroke:var(--amber-stroke);stroke-width:2}
+.row-t{fill:var(--muted)}
+.row-t.now{fill:var(--amber-ink);font-weight:700}
+.dot circle.core{fill:var(--dot);stroke:var(--bg);stroke-width:2}
+.dot.ok circle.core{fill:var(--ok)}
+.dot.bad circle.core{fill:var(--err)}
+.dot.fb circle.core{fill:var(--amber-stroke)}
+.dot.probe circle.core{stroke:var(--amber-stroke);stroke-width:3}
+.dot path.glyph{fill:none;stroke:var(--on-dot);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.dot .ring{fill:none;stroke:var(--err);stroke-width:3}
+.dot .lbl{fill:var(--amber-stroke);font-weight:700}
+.lg-t{fill:var(--muted)}
+@media (prefers-reduced-motion: reduce){ .fig *{transition:none!important} }
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="breaker-states" data-dur="21" data-rest="10.5" tabindex="0"
+  aria-label="動畫：推薦服務從正常、壞掉到恢復的過程中，斷路器怎麼在 Closed、Open、Half-Open 三個狀態之間切換，以及每個狀態下新請求往哪裡走：Closed 送去下游，Open 不碰下游、直接拿 Redis 快取的熱門商品，Half-Open 只放少量試探請求。左右方向鍵切換步驟，空白鍵播放或暫停。">
+  <div class="stage"><svg id="bs-svg" role="img" aria-labelledby="breaker-states-title breaker-states-desc"></svg></div>
+  <figcaption class="cap" aria-live="polite"><span class="step"></span><span class="txt"></span></figcaption>
+  <div class="ctrl">
+    <button type="button" class="prev" aria-label="上一步">◀</button>
+    <button type="button" class="play" aria-label="播放">▶ 播放</button>
+    <button type="button" class="next" aria-label="下一步">▶▶</button>
+    <input type="range" min="0" max="21" step="0.01" value="10.5" aria-label="時間軸">
+    <div class="keys" role="group" aria-label="跳到步驟"></div>
+    <button type="button" class="theme" aria-label="切換深淺色">◐</button>
+  </div>
+</figure>
+<script>
+(function(){
+  'use strict';
+  var fig = document.querySelector('.fig');
+  var svg = document.getElementById('bs-svg');
+  var stage = fig.querySelector('.stage');
+  var DUR = +fig.dataset.dur, REST = +fig.dataset.rest;
+  var NS = 'http://www.w3.org/2000/svg';
+
+  // ---------- 事件時間（動畫秒數；真實的「30 秒」寫在圖說和計時上） ----------
+  var T_BREAK = 3.0, T_HEAL = 17.0;          // 推薦服務壞掉、恢復
+  var T_TRIP = 6.7;                          // 失敗率超過門檻：Closed → Open
+  var T_HALF1 = 12.0, T_PROBE1 = 12.2;       // Open 滿 30 秒 → Half-Open，派試探
+  var T_REOPEN = 14.2;                       // 試探失敗 → Open
+  var T_HALF2 = 17.5, T_PROBE2 = 17.6;       // 再等 30 秒 → Half-Open
+  var T_CLOSE = 18.4;                        // 試探結果夠好 → Closed
+  var TRAVEL = 0.6, WAIT = 1.4, HOLD = 0.5, FADE = 0.25;
+
+  var KEYS = [
+    {t:1.5,  from:0,    step:'T1', cap:'推薦服務正常。斷路器在 Closed（通）：請求照常送出，結果記進統計。'},
+    {t:4.8,  from:3.0,  step:'T2', cap:'推薦服務開始逾時。斷路器還是 Closed，請求照常送出，要等到逾時才算失敗。'},
+    {t:7.0,  from:6.2,  step:'T3', cap:'視窗內失敗率超過門檻，斷路器打開：Closed → Open。'},
+    {t:10.5, from:8.2,  step:'T4', cap:'Open（斷）：不送去推薦服務，馬上丟「不放行」例外（CallNotPermittedException），呼叫端改回 Redis 快取的熱門商品，幾乎 0 ms。'},
+    {t:12.9, from:12.0, step:'T5（Open 滿 30 秒）', cap:'進入 Half-Open：只放少量試探請求去推薦服務，其他請求照樣快速拒絕、拿降級結果。'},
+    {t:14.8, from:14.2, step:'T6', cap:'推薦服務還在壞，試探失敗：Half-Open → Open，再斷開等 30 秒。'},
+    {t:19.6, from:17.0, step:'T7（再等 30 秒）', cap:'推薦服務已恢復。Open → Half-Open，試探結果夠好 → Closed，恢復照常送出。'}
+  ];
+
+  // 狀態變化：[時間, 狀態]
+  var STATES = [[0,'closed'],[T_TRIP,'open'],[T_HALF1,'half'],[T_REOPEN,'open'],[T_HALF2,'half'],[T_CLOSE,'closed']];
+  function stateAt(t){ var s = 'closed'; for (var i = 0; i < STATES.length; i++) if (t >= STATES[i][0]) s = STATES[i][1]; return s; }
+  // 正在發生的轉換線：[開始, 結束, id]
+  var TRANS = [[T_TRIP,T_TRIP+1.4,'co'],[T_HALF1,T_HALF1+1.2,'oh'],[T_REOPEN,T_REOPEN+1.4,'ho'],[T_HALF2,T_HALF2+0.9,'oh'],[T_CLOSE,T_CLOSE+1.4,'hc']];
+  function transAt(t){ for (var i = 0; i < TRANS.length; i++) if (t >= TRANS[i][0] && t < TRANS[i][1]) return TRANS[i][2]; return null; }
+  function broken(t){ return t >= T_BREAK && t < T_HEAL; }
+
+  // ---------- 請求（全部事先排好，畫面是 t 的純函式） ----------
+  var REQS = [], nTimeout = 0;
+  for (var s = 0.2; s < DUR - 0.3; s += 0.75){
+    var st = stateAt(s), r = {s:+s.toFixed(2)};
+    if (st === 'closed'){
+      if (broken(s + TRAVEL)){ r.kind = 'timeout'; r.slot = nTimeout++ % 3; r.end = r.s + TRAVEL + WAIT; }
+      else { r.kind = 'ok'; r.end = r.s + TRAVEL; }
+    } else { r.kind = 'fb'; r.end = r.s + TRAVEL; }
+    REQS.push(r);
+  }
+  REQS.push({s:T_PROBE1, kind:'timeout', probe:true, slot:2, end:T_PROBE1 + TRAVEL + WAIT});
+  REQS.push({s:T_PROBE2, kind:'ok', probe:true, end:T_PROBE2 + TRAVEL});
+  // 失敗率：最近 5 個在 Closed 時完成的結果
+  var RESULTS = REQS.filter(function(q){ return !q.probe && q.kind !== 'fb' && q.end < T_TRIP + 0.01; })
+                    .map(function(q){ return {t:q.end, fail:q.kind === 'timeout'}; })
+                    .sort(function(a, b){ return a.t - b.t; });
+  var THRESH = 0.6;
+  function rateAt(t){
+    if (t >= T_CLOSE) return 0;
+    var done = RESULTS.filter(function(x){ return x.t <= t; }).slice(-5);
+    if (!done.length) return 0;
+    return done.filter(function(x){ return x.fail; }).length / done.length;
+  }
+
+  // ---------- 兩套版面 ----------
+  var L = {
+    wide: {
+      vb:[960,568], fs:{name:22, text:19, small:16, val:24, pill:19}, r:9, sign:-1, blade:[128,0], open:22, half:10,
+      start:[204,124], pivot:[368,124], term:[496,124], door:[704,124], fbVia:[], redis:[368,272],
+      waitAt:function(k){ return [686 - k*20, 124]; },
+      boxes:{caller:[24,64,180,120], cb:[288,24,320,200], down:[704,64,232,120], redis:[288,272,320,104], read:[704,272,232,104]},
+      text:{
+        caller:[[44,108,'呼叫端','name'],[44,144,'商品頁 API','sub']],
+        cbName:[308,60], cbState:[588,60],
+        down:[[724,104,'推薦服務','name'],[724,128,'（下游）','sub']], downSt:[724,164],
+        redis:[[308,308,'Redis 快取：熱門商品','name'],[308,344,'降級結果','sub']],
+        readT:[724,300,'新請求等多久'], readV:[724,336], readL:[724,364,'start'],
+        cbSt:[392,172], bar:[392,184,196,10], barL:[392,212]
+      },
+      wires:[
+        {d:'M204 124 H284', a:[288,124,'r']},
+        {d:'M288 124 H368'},
+        {d:'M496 124 H700', a:[704,124,'r']},
+        {d:'M368 124 V268', a:[368,272,'d'], fb:true}
+      ],
+      pills:[[60,432,200,48,'Closed（通）'],[380,432,200,48,'Open（斷）'],[700,432,200,48,'Half-Open（試探）']],
+      trs:{
+        co:{d:'M260 456 H372', a:[380,456,'r'], l:[320,440,'失敗率超過門檻']},
+        oh:{d:'M580 456 H692', a:[700,456,'r'], l:[640,484,'等待時間到']},
+        ho:{d:'M780 432 V408 H520 V424', a:[520,432,'d'], l:[650,413,'試探仍然失敗'], mask:true},
+        hc:{d:'M800 480 V512 H160 V488', a:[160,480,'u'], l:[480,517,'試探結果夠好'], mask:true}
+      },
+      rows:null,
+      legend:{y:552, x:24}
+    },
+    narrow: {
+      vb:[360,752], fs:{name:17, text:15, small:15, val:20, pill:15}, r:8, sign:1, blade:[0,96], open:24, half:11,
+      start:[120,68], pivot:[120,148], term:[120,244], door:[120,328], fbVia:[[292,148]], redis:[292,328],
+      waitAt:function(k){ return [140 + k*18, 314]; },
+      boxes:{caller:[12,12,336,56], cb:[12,96,336,200], down:[12,328,200,88], redis:[228,328,120,88], read:[12,432,336,72]},
+      text:{
+        caller:[[24,46,'呼叫端（商品頁 API）','name']],
+        cbName:[24,124], cbState:[336,124],
+        down:[[24,356,'推薦服務（下游）','name']], downSt:[24,388],
+        redis:[[240,356,'Redis 快取','name'],[240,380,'熱門商品','sub'],[240,404,'降級結果','sub']],
+        readT:[24,458,'新請求等多久'], readV:[24,490], readL:[336,490,'end'],
+        cbSt:[144,196], bar:[144,208,136,10], barL:[144,240]
+      },
+      wires:[
+        {d:'M120 68 V92', a:[120,96,'d']},
+        {d:'M120 96 V148'},
+        {d:'M120 244 V324', a:[120,328,'d']},
+        {d:'M120 148 H292 V324', a:[292,328,'d'], fb:true}
+      ],
+      pills:[[12,520,104,40,'Closed'],[128,520,104,40,'Open'],[244,520,104,40,'Half-Open']],
+      trs:null,
+      rows:[['co','Closed → Open：失敗率超過門檻'],['oh','Open → Half-Open：等待時間到'],['hc','Half-Open → Closed：試探結果夠好'],['ho','Half-Open → Open：試探仍然失敗']],
+      rowY:572, rowH:28, rowGap:32,
+      legend:{y:722, x:12}
+    }
+  };
+
+  // ---------- helpers ----------
+  function el(tag, attrs, parent, text){
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function setA(e, k, v){ e._c = e._c || {}; if (e._c[k] !== v){ e._c[k] = v; e.setAttribute(k, v); } }
+  function setT(e, v){ if (e._t !== v){ e._t = v; e.textContent = v; } }
+  function clamp(x){ return x < 0 ? 0 : x > 1 ? 1 : x; }
+  function ease(x){ x = clamp(x); return x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x + 2, 3) / 2; }
+  function arrowPath(x, y, dir){
+    if (dir === 'r') return 'M'+x+' '+y+' l-10 -6 v12 z';
+    if (dir === 'd') return 'M'+x+' '+y+' l-6 -10 h12 z';
+    return 'M'+x+' '+y+' l-6 10 h12 z';
+  }
+  function along(pts, p){ // 折線上 p∈[0,1] 的位置（等速）
+    var segs = [], total = 0, i;
+    for (i = 1; i < pts.length; i++){ var d = Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]); segs.push(d); total += d; }
+    var want = clamp(p) * total;
+    for (i = 0; i < segs.length; i++){
+      if (want <= segs[i] || i === segs.length - 1){
+        var f = segs[i] ? Math.min(1, want / segs[i]) : 1;
+        return [pts[i][0] + (pts[i+1][0]-pts[i][0]) * f, pts[i][1] + (pts[i+1][1]-pts[i][1]) * f];
+      }
+      want -= segs[i];
+    }
+    return pts[pts.length-1];
+  }
+  var OK_GLYPH = 'M-4 0 L-1 3 L4 -3', BAD_GLYPH = 'M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5', FB_GLYPH = 'M-4 0 H4';
+
+  var layoutName = null, P = null;
+
+  function build(name){
+    var C = L[name]; layoutName = name;
+    stage.classList.toggle('narrow', name === 'narrow');
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.setAttribute('viewBox', '0 0 ' + C.vb[0] + ' ' + C.vb[1]);
+    var frag = document.createDocumentFragment();
+    el('title', {id:'breaker-states-title'}, frag, '斷路器的三個狀態怎麼切換');
+    el('desc', {id:'breaker-states-desc'}, frag, '推薦服務壞掉時，斷路器先在 Closed 照常送出、等到逾時才算失敗；失敗率超過門檻就切到 Open，不呼叫推薦服務、直接回 Redis 快取的熱門商品；等 30 秒進 Half-Open 派少量試探；試探失敗回 Open，推薦服務恢復後試探成功回 Closed。');
+    var fs = C.fs, T = C.text;
+    var g = el('g', {'font-family':'var(--sans)'}, frag);
+    function box(b, cls){ return el('rect', {x:b[0], y:b[1], width:b[2], height:b[3], rx:8, 'class':'box' + (cls ? ' ' + cls : '')}, g); }
+    function txt(a, cls, size, anchor){ return el('text', {x:a[0], y:a[1], 'font-size':size, 'text-anchor':anchor || 'start', 'class':cls}, g, a[2] != null ? a[2] : ''); }
+    // wires first
+    C.wires.forEach(function(w){
+      el('path', {d:w.d, 'class':'wire' + (w.fb ? ' fbw' : '')}, g);
+      if (w.a) el('path', {d:arrowPath(w.a[0], w.a[1], w.a[2]), 'class':'arrow'}, g);
+    });
+    // boxes
+    box(C.boxes.caller);
+    var cbBox = box(C.boxes.cb, 'cb');
+    var downBox = box(C.boxes.down);
+    box(C.boxes.redis, 'fb');
+    box(C.boxes.read);
+    T.caller.forEach(function(a){ txt(a, a[3] === 'name' ? 't-name' : 't-sub', a[3] === 'name' ? fs.name : fs.text); });
+    T.down.forEach(function(a){ txt(a, a[3] === 'name' ? 't-name' : 't-sub', a[3] === 'name' ? fs.name : fs.text); });
+    T.redis.forEach(function(a){ txt(a, a[3] === 'name' ? 't-name' : 't-sub', a[3] === 'name' ? fs.name : fs.text); });
+    var downSt = txt(T.downSt, 't-st', fs.text);
+    txt([T.cbName[0], T.cbName[1], '斷路器'], 't-name', fs.name);
+    var cbState = txt(T.cbState, 't-state', fs.name, 'end');
+    var cbSt = txt(T.cbSt, 't-st', fs.text);
+    var b = T.bar;
+    var barBg = el('rect', {x:b[0], y:b[1], width:b[2], height:b[3], rx:3, 'class':'bar-bg'}, g);
+    var bar = el('rect', {x:b[0], y:b[1], width:0, height:b[3], rx:3, 'class':'bar'}, g);
+    var tickX = b[0] + b[2] * THRESH;
+    var tick = el('path', {d:'M' + tickX + ' ' + (b[1] - 4) + ' V' + (b[1] + b[3] + 4), 'class':'tick'}, g);
+    var barL = txt(T.barL, 't-sub', fs.small);
+    // switch
+    el('circle', {cx:C.term[0], cy:C.term[1], r:6, 'class':'term'}, g);
+    var blade = el('line', {x1:C.pivot[0], y1:C.pivot[1], x2:C.term[0], y2:C.term[1], 'class':'blade'}, g);
+    el('circle', {cx:C.pivot[0], cy:C.pivot[1], r:7, 'class':'term'}, g);
+    // readout
+    txt(T.readT, 't-sub', fs.small);
+    var readV = txt(T.readV, 't-val', fs.val);
+    var readL = txt([T.readL[0], T.readL[1]], 't-st', fs.small, T.readL[2]);
+    // states
+    var pills = C.pills.map(function(p){
+      var r = el('rect', {x:p[0], y:p[1], width:p[2], height:p[3], rx:p[3]/2, 'class':'pill'}, g);
+      var t = el('text', {x:p[0] + p[2]/2, y:p[1] + p[3]/2 + fs.pill*0.36, 'font-size':fs.pill, 'text-anchor':'middle', 'class':'pill-t'}, g, p[4]);
+      return {r:r, t:t};
+    });
+    var trs = {};
+    if (C.trs){
+      Object.keys(C.trs).forEach(function(id){
+        var d = C.trs[id];
+        var path = el('path', {d:d.d, 'class':'tr'}, g);
+        var arr = el('path', {d:arrowPath(d.a[0], d.a[1], d.a[2]), 'class':'tr-a'}, g);
+        if (d.mask){
+          var w = d.l[2].length * fs.small + 12;
+          el('rect', {x:d.l[0] - w/2, y:d.l[1] - fs.small + 1, width:w, height:fs.small + 6, 'class':'mask'}, g);
+        }
+        var lab = el('text', {x:d.l[0], y:d.l[1], 'font-size':fs.small, 'text-anchor':'middle', 'class':'tr-l'}, g, d.l[2]);
+        trs[id] = {path:path, arr:arr, lab:lab};
+      });
+    } else {
+      C.rows.forEach(function(rw, i){
+        var y = C.rowY + i * C.rowGap;
+        var r = el('rect', {x:12, y:y, width:336, height:C.rowH, rx:6, 'class':'row'}, g);
+        var t = el('text', {x:24, y:y + C.rowH/2 + fs.small*0.36, 'font-size':fs.small, 'class':'row-t'}, g, rw[1]);
+        trs[rw[0]] = {row:r, lab:t};
+      });
+    }
+    // legend
+    var lg = el('g', {transform:'translate(' + C.legend.x + ' ' + C.legend.y + ')'}, g);
+    var lx = 0, LGS = [['', '請求'], ['ok', '拿到推薦'], ['bad', '逾時，算失敗'], ['fb', '降級結果']];
+    LGS.forEach(function(it, n){
+      var ly = 0;
+      if (name === 'narrow'){ ly = n < 2 ? 0 : 24; if (n === 2) lx = 0; }
+      var d = el('g', {'class':'dot ' + it[0], transform:'translate(' + (lx + C.r) + ' ' + (ly - fs.small*0.36) + ')'}, lg);
+      el('circle', {r:C.r, 'class':'core'}, d);
+      if (it[0]) el('path', {d:it[0] === 'ok' ? OK_GLYPH : it[0] === 'bad' ? BAD_GLYPH : FB_GLYPH, 'class':'glyph'}, d);
+      el('text', {x:lx + C.r*2 + 6, y:ly, 'font-size':fs.small, 'class':'lg-t'}, lg, it[1]);
+      lx += C.r*2 + 6 + it[1].length * fs.small + (name === 'wide' ? 28 : 12);
+    });
+    // dots on top
+    var dotG = el('g', {}, g);
+    var dots = REQS.map(function(q){
+      var d = el('g', {'class':'dot', opacity:0}, dotG);
+      var ring = el('circle', {r:C.r + 5, 'class':'ring', 'stroke-dasharray':'0 999', transform:'rotate(-90)'}, d);
+      el('circle', {r:C.r, 'class':'core'}, d);
+      var glyph = el('path', {d:'', 'class':'glyph'}, d);
+      var lbl = q.probe ? el('text', {x:0, y:-(C.r + 10), 'font-size':fs.small, 'text-anchor':'middle', 'class':'lbl'}, d, '試探') : null;
+      return {g:d, ring:ring, glyph:glyph, lbl:lbl};
+    });
+    svg.appendChild(frag);
+    P = {C:C, cbBox:cbBox, downBox:downBox, downSt:downSt, cbState:cbState, cbSt:cbSt, barBg:barBg, bar:bar, tick:tick, barL:barL,
+         blade:blade, readV:readV, readL:readL, pills:pills, trs:trs, dots:dots};
+  }
+
+  // ---------- 開關角度：狀態變化後 0.35 秒內轉過去 ----------
+  function angleOf(st, C){ return st === 'open' ? C.open : st === 'half' ? C.half : 0; }
+  function bladeAngle(t, C){
+    var prev = 0, cur = 0, at = 0;
+    for (var i = 0; i < STATES.length; i++){ if (t >= STATES[i][0]){ prev = cur; cur = angleOf(STATES[i][1], C); at = STATES[i][0]; } }
+    return prev + (cur - prev) * ease((t - at) / 0.35);
+  }
+
+  var curT = REST;
+  function render(t){
+    curT = t;
+    var C = P.C, st = stateAt(t), tr = transAt(t), bad = broken(t);
+    // 開關
+    var a = bladeAngle(t, C) * Math.PI / 180 * C.sign, v = C.blade;
+    var x2 = C.pivot[0] + v[0]*Math.cos(a) - v[1]*Math.sin(a), y2 = C.pivot[1] + v[0]*Math.sin(a) + v[1]*Math.cos(a);
+    setA(P.blade, 'x2', x2.toFixed(1)); setA(P.blade, 'y2', y2.toFixed(1));
+    // 斷路器文字
+    setT(P.cbState, st === 'closed' ? 'Closed：通' : st === 'open' ? 'Open：斷' : 'Half-Open：試探中');
+    var stText, stCls = 't-st';
+    if (st === 'closed' && t < T_TRIP){ var rt = rateAt(t); stText = rt > 0 ? '失敗率上升中' : '照常送出'; if (rt > 0) stCls = 't-st bad'; }
+    else if (tr === 'co'){ stText = '超過門檻，斷開'; stCls = 't-st bad'; }
+    else if (st === 'open' && tr === 'ho'){ stText = '試探失敗，再斷開'; stCls = 't-st bad'; }
+    else if (st === 'open'){ stText = '不呼叫下游'; }
+    else if (st === 'half'){ stText = '只放少量試探'; }
+    else if (tr === 'hc'){ stText = '試探成功，接通'; stCls = 't-st good'; }
+    else { stText = '照常送出'; }
+    setT(P.cbSt, stText); setA(P.cbSt, 'class', stCls);
+    // 長條：Closed 看失敗率，Open 看等待時間
+    var bw = C.text.bar[2];
+    if (st === 'open'){
+      var o0 = t < T_HALF1 ? T_TRIP : T_REOPEN, o1 = t < T_HALF1 ? T_HALF1 : T_HALF2;
+      var f = clamp((t - o0) / (o1 - o0));
+      setA(P.bar, 'class', 'bar timer'); setA(P.bar, 'width', (bw * f).toFixed(1));
+      setA(P.tick, 'opacity', '0'); setA(P.barBg, 'opacity', '1');
+      setT(P.barL, 'Open 已等 ' + Math.floor(f * 30 + 1e-6) + ' / 30 秒');
+    } else if (st === 'closed'){
+      var r = rateAt(t);
+      setA(P.bar, 'class', 'bar'); setA(P.bar, 'width', (bw * r).toFixed(1));
+      setA(P.tick, 'opacity', '1'); setA(P.barBg, 'opacity', '1');
+      setT(P.barL, '失敗率（直線是門檻）');
+    } else {
+      setA(P.bar, 'width', '0'); setA(P.tick, 'opacity', '0'); setA(P.barBg, 'opacity', '0');
+      setT(P.barL, '試探結果決定下一步');
+    }
+    // 推薦服務
+    setT(P.downSt, bad ? '壞了：遲遲不回' : t >= T_HEAL ? '已恢復' : '正常');
+    setA(P.downSt, 'class', 't-st' + (bad ? ' bad' : t >= T_HEAL ? ' good' : ''));
+    setA(P.downBox, 'class', 'box' + (bad ? ' bad' : ''));
+    // readout
+    var val, lab;
+    if (st === 'open' || st === 'half'){ val = '≈ 0 ms'; lab = st === 'open' ? '不碰下游，拿熱門商品' : '其他請求拿熱門商品'; }
+    else if (bad){ val = '等到逾時'; lab = '例：500 ms，才算失敗'; }
+    else { val = '很快'; lab = '拿到推薦結果'; }
+    setT(P.readV, val); setT(P.readL, lab);
+    // 狀態燈與轉換線
+    var idx = st === 'closed' ? 0 : st === 'open' ? 1 : 2;
+    P.pills.forEach(function(p, i){ setA(p.r, 'class', 'pill' + (i === idx ? ' now' : '')); setA(p.t, 'class', 'pill-t' + (i === idx ? ' now' : '')); });
+    Object.keys(P.trs).forEach(function(id){
+      var o = P.trs[id], on = id === tr;
+      if (o.path){ setA(o.path, 'class', 'tr' + (on ? ' now' : '')); setA(o.arr, 'class', 'tr-a' + (on ? ' now' : '')); }
+      if (o.row) setA(o.row, 'class', 'row' + (on ? ' now' : ''));
+      setA(o.lab, 'class', (o.row ? 'row-t' : 'tr-l') + (on ? ' now' : ''));
+    });
+    // 請求點
+    REQS.forEach(function(q, i){
+      var d = P.dots[i], end = q.end;
+      if (t < q.s || t > end + HOLD + FADE){ setA(d.g, 'opacity', '0'); return; }
+      var pos, cls = 'dot' + (q.probe ? ' probe' : ''), glyph = '', ring = 0;
+      if (q.kind === 'fb'){
+        var pts = [C.start, C.pivot].concat(C.fbVia, [C.redis]);
+        pos = along(pts, (t - q.s) / TRAVEL);
+        if (t >= end){ cls += ' fb'; glyph = FB_GLYPH; }
+      } else {
+        var path = [C.start, C.pivot, C.term, q.kind === 'timeout' ? C.waitAt(q.slot) : C.door];
+        pos = along(path, (t - q.s) / TRAVEL);
+        if (q.kind === 'timeout'){
+          if (t >= end){ cls += ' bad'; glyph = BAD_GLYPH; }
+          else if (t >= q.s + TRAVEL) ring = (t - q.s - TRAVEL) / WAIT;
+        } else if (t >= end){ cls += ' ok'; glyph = OK_GLYPH; }
+      }
+      var op = t > end + HOLD ? 1 - (t - end - HOLD) / FADE : 1;
+      setA(d.g, 'opacity', clamp(op).toFixed(3));
+      setA(d.g, 'transform', 'translate(' + pos[0].toFixed(1) + ' ' + pos[1].toFixed(1) + ')');
+      setA(d.g, 'class', cls);
+      setA(d.glyph, 'd', glyph);
+      var circ = 2 * Math.PI * (C.r + 5);
+      setA(d.ring, 'stroke-dasharray', (circ * ring).toFixed(1) + ' 999');
+    });
+    // 圖說與控制
+    var ci = 0; for (var m = 0; m < KEYS.length; m++) if (t >= KEYS[m].from) ci = m;
+    if (capStep._i !== ci){
+      capStep._i = ci; capStep.textContent = KEYS[ci].step; capTxt.textContent = KEYS[ci].cap;
+      keyBtns.forEach(function(b, n){ b.classList.toggle('on', n === ci); b.setAttribute('aria-pressed', n === ci ? 'true' : 'false'); });
+    }
+    if (+range.value !== t) range.value = t.toFixed(2);
+    range.setAttribute('aria-valuetext', KEYS[ci].step);
+  }
+
+  // ---------- controls ----------
+  var capStep = fig.querySelector('.cap .step'), capTxt = fig.querySelector('.cap .txt');
+  var range = fig.querySelector('input[type=range]');
+  var playBtn = fig.querySelector('.play');
+  var keysBox = fig.querySelector('.keys');
+  var keyBtns = KEYS.map(function(k, i){
+    var b = document.createElement('button'); b.type = 'button'; b.textContent = 'T' + (i + 1);
+    b.setAttribute('aria-label', '跳到 ' + k.step);
+    b.addEventListener('click', function(){ seek(k.t); });
+    keysBox.appendChild(b); return b;
+  });
+
+  var playing = false, visible = false, raf = 0, last = 0;
+  function setPlaying(on){
+    playing = on;
+    playBtn.textContent = on ? '❚❚ 暫停' : '▶ 播放';
+    playBtn.setAttribute('aria-label', on ? '暫停' : '播放');
+    arm();
+  }
+  function arm(){ if (playing && visible && !raf){ last = 0; raf = requestAnimationFrame(tick); } }
+  function tick(now){
+    raf = 0;
+    if (!playing || !visible) return;
+    var dt = last ? Math.min(0.1, (now - last) / 1000) : 0; last = now;
+    var t = Math.min(DUR, curT + dt);
+    render(t);
+    if (t >= DUR){ setPlaying(false); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function play(){ if (curT >= DUR - 0.01) render(0); setPlaying(true); }
+  function seek(t){ t = Math.max(0, Math.min(DUR, +t || 0)); setPlaying(false); render(t); }
+  function stepTo(dir){
+    var i;
+    if (dir > 0){ for (i = 0; i < KEYS.length; i++) if (KEYS[i].t > curT + 0.01) return seek(KEYS[i].t); seek(KEYS[KEYS.length-1].t); }
+    else { for (i = KEYS.length - 1; i >= 0; i--) if (KEYS[i].t < curT - 0.01) return seek(KEYS[i].t); seek(0); }
+  }
+  playBtn.addEventListener('click', function(){ playing ? setPlaying(false) : play(); });
+  fig.querySelector('.prev').addEventListener('click', function(){ stepTo(-1); });
+  fig.querySelector('.next').addEventListener('click', function(){ stepTo(1); });
+  range.addEventListener('input', function(){ seek(range.value); });
+  fig.querySelector('.theme').addEventListener('click', function(){
+    var root = document.documentElement;
+    var cur = root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+  fig.addEventListener('keydown', function(e){
+    if (e.target !== fig) return;
+    if (e.key === 'ArrowRight'){ stepTo(1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft'){ stepTo(-1); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter'){ playing ? setPlaying(false) : play(); e.preventDefault(); }
+    else if (e.key === 'Home'){ seek(0); e.preventDefault(); }
+    else if (e.key === 'End'){ seek(DUR); e.preventDefault(); }
+  });
+
+  // ---------- layout + visibility（不自動播放：停在 T4） ----------
+  function pick(w){ return w >= 750 ? 'wide' : 'narrow'; }
+  build(pick((fig.clientWidth || window.innerWidth) - 32));
+  render(REST);
+  if ('ResizeObserver' in window){
+    new ResizeObserver(function(entries){
+      var n = pick(entries[0].contentRect.width);
+      if (n !== layoutName){ build(n); render(curT); }
+    }).observe(fig);
+  }
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ visible = es[0].isIntersecting; arm(); }, {rootMargin:'120px'}).observe(fig);
+  } else { visible = true; }
+
+  window.DUR = DUR;
+  window.seek = seek;
+  window.timeline = function(){ return {dur:DUR, rest:REST, keys:KEYS.map(function(k){ return k.t; })}; };
+})();
+</script>
+</body>
+</html>

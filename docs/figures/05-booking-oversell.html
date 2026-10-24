@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>課程超賣時間軸</title>
+<style>
+:root{
+  --paper:#ffffff; --panel:#f4f5f8; --ink:#1f2430; --muted:#4f5d75; --soft:#5a6580;
+  --rule:rgba(31,36,48,.18); --rule-strong:#b9bec9; --seat:#8a93a6;
+  --hot-fill:#fde68a; --hot-stroke:#b45309; --hot-ink:#111111; --hot-text:#b45309;
+  --sans:system-ui,-apple-system,"Segoe UI","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --mono:ui-monospace,"SF Mono",Consolas,"Cascadia Mono",Menlo,"PingFang TC","Microsoft JhengHei",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1e2129; --panel:#282c37; --ink:#e8eaf0; --muted:#b4bccb; --soft:#9aa4b8;
+    --rule:rgba(232,234,240,.22); --rule-strong:rgba(232,234,240,.34); --seat:#7f889b;
+    --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fbbf24;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1e2129; --panel:#282c37; --ink:#e8eaf0; --muted:#b4bccb; --soft:#9aa4b8;
+  --rule:rgba(232,234,240,.22); --rule-strong:rgba(232,234,240,.34); --seat:#7f889b;
+  --hot-fill:#4a3510; --hot-stroke:#f59e0b; --hot-ink:#fde68a; --hot-text:#fbbf24;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-text-size-adjust:100%}
+.fig{margin:0 auto;padding:16px;max-width:1120px;outline:none}
+.fig:focus-visible{box-shadow:inset 0 0 0 2px var(--muted);border-radius:8px}
+.code{font-family:var(--mono)}
+.n{display:none}
+
+/* stage */
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:24px;align-items:start}
+.lanes{display:grid;grid-template-columns:56px repeat(4,minmax(0,1fr));gap:8px;align-items:stretch}
+.hd{font-size:13px;font-weight:600;color:var(--muted);text-align:center;align-self:end;padding-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:clip}
+.hd .k{display:inline-block;margin-right:4px}
+.lane{display:flex;flex-direction:column;align-items:center;justify-content:center;height:60px;border-right:1px solid var(--rule);padding-right:4px}
+.lane small{font-size:12px;color:var(--soft);line-height:1.2}
+.lane b{font-size:18px;line-height:1.2}
+.cell{position:relative;height:60px;min-width:0;border-radius:8px;border:1px dashed var(--rule);display:flex;align-items:center;justify-content:center;text-align:center;padding:4px}
+.cell .in{display:flex;flex-direction:column;align-items:center;gap:2px;will-change:opacity,transform}
+.cell .main{font-size:14px;font-weight:650;line-height:1.2;white-space:nowrap}
+.cell .main.big{font-size:20px}
+.cell .sub{font-size:12px;color:var(--soft);line-height:1.2;white-space:nowrap}
+.cell.on{border:1.5px solid var(--rule-strong);background:var(--panel)}
+.cell.hot.on{background:var(--hot-fill);border-color:var(--hot-stroke);color:var(--hot-ink)}
+.cell.hot.on .sub{color:var(--hot-ink)}
+.cell.ins.on{border:1.5px dashed var(--muted);background:transparent}
+.cell.ins.on.done{border-style:solid;border-color:var(--rule-strong);background:var(--panel)}
+.cell.now::after{content:"";position:absolute;inset:-5px;border-radius:11px;border:2px solid var(--ink);pointer-events:none}
+
+/* meter */
+.meter{background:var(--panel);border-radius:8px;padding:12px 16px 14px}
+.m-title{font-size:13px;font-weight:600;color:var(--muted)}
+.m-row{display:flex;align-items:baseline;gap:8px;margin-top:4px}
+.m-num{font-size:44px;font-weight:750;line-height:1;font-variant-numeric:tabular-nums;min-width:1.3em}
+.m-num.over{color:var(--hot-text)}
+.m-cap{font-size:14px;color:var(--soft)}
+.seats{display:block;width:100%;height:auto;margin-top:10px}
+.seat{fill:var(--seat)}
+.seat.empty{fill:none;stroke:var(--seat);stroke-width:1}
+.seat.new{fill:var(--ink)}
+.seat.extra{fill:var(--hot-fill);stroke:var(--hot-stroke);stroke-width:1.5}
+.capline{stroke:var(--hot-stroke);stroke-width:2;stroke-dasharray:3 2}
+.seat-legend{display:flex;justify-content:space-between;font-size:12px;color:var(--soft);margin-top:4px}
+.badge{display:inline-block;margin-top:10px;padding:4px 10px;border-radius:6px;font-size:14px;font-weight:700;background:var(--hot-fill);color:var(--hot-ink);border:1.5px solid var(--hot-stroke)}
+.log{margin-top:10px;font-size:13px;line-height:1.5;color:var(--ink)}
+.log .code{font-size:12px;color:var(--soft)}
+
+/* readout + controls */
+.readout{margin-top:16px;font-size:15px;line-height:1.6;min-height:3.2em;color:var(--ink)}
+.readout .hl{color:var(--hot-text);font-weight:700}
+.controls{margin-top:12px;display:flex;align-items:center;gap:8px}
+.btn{height:36px;min-width:36px;padding:0 12px;border-radius:8px;border:1px solid var(--rule-strong);background:var(--paper);color:var(--ink);font:600 14px var(--sans);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover{background:var(--panel)}
+.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.btn.icon{padding:0;width:36px}
+.scrub{flex:1;min-width:0;height:32px;accent-color:var(--ink);margin:0}
+.stepno{font-size:12px;color:var(--soft);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:4.5em;text-align:right}
+.legend{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--soft)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:20px;height:12px;border-radius:3px}
+.sw.dash{border:1.5px dashed var(--muted)}
+.sw.hot{background:var(--hot-fill);border:1.5px solid var(--hot-stroke)}
+.sw.now{border:2px solid var(--ink)}
+
+@media (max-width:719px){
+  .w{display:none}.n{display:inline}
+  .stage{grid-template-columns:minmax(0,1fr);gap:16px}
+  .meter{order:-1;padding:10px 12px 12px}
+  .m-num{font-size:34px}
+  .lanes{grid-template-columns:40px repeat(4,minmax(0,1fr));gap:4px}
+  .hd{font-size:12px}
+  .hd .k{display:none}
+  .lane{height:56px;padding-right:2px}
+  .lane b{font-size:16px}
+  .cell{height:56px;padding:2px;border-radius:6px}
+  .cell .main{font-size:13px}
+  .cell .main.big{font-size:18px}
+  .readout{font-size:14px;min-height:6.6em}
+  .controls{flex-wrap:wrap}
+  .scrub{order:5;flex-basis:100%}
+  .stepno{margin-left:auto}
+}
+</style>
+</head>
+<body>
+<figure class="fig" data-fig="booking-oversell" data-dur="17.6" data-rest="17.6" tabindex="0"
+  aria-label="動畫：PostgreSQL 預設的 Read Committed 下，上限 20 人的課已有 19 筆預約；4 個預約交易都用 SELECT count(*) 讀到 19、都判斷還有位子、各自 INSERT 不同的列，全部 COMMIT 成功，最後已提交 23 筆，比上限多 3 人，而且沒有任何錯誤。">
+  <div class="stage">
+    <div class="lanes" id="lanes">
+      <div></div>
+      <div class="hd"><span class="k">①</span><span class="w code">SELECT count(*)</span><span class="n">數筆數</span></div>
+      <div class="hd"><span class="k">②</span><span class="w">筆數 ≥ 20？</span><span class="n">≥ 20？</span></div>
+      <div class="hd"><span class="k">③</span><span class="code">INSERT</span></div>
+      <div class="hd"><span class="k">④</span><span class="code">COMMIT</span></div>
+    </div>
+
+    <div class="meter">
+      <div class="m-title">已提交的預約筆數</div>
+      <div class="m-row"><span class="m-num" id="num">19</span><span class="m-cap">／上限 20</span></div>
+      <svg class="seats" id="seats" viewBox="0 0 236 26" role="img" aria-labelledby="booking-oversell-title booking-oversell-desc">
+        <title id="booking-oversell-title">教室座位</title>
+        <desc id="booking-oversell-desc">20 個位子的座位條，上限線右邊是超賣出去、教室裡沒有的位子。</desc>
+      </svg>
+      <div class="seat-legend"><span>教室 20 個位子</span><span>超出上限</span></div>
+      <div id="badge" class="badge" style="opacity:0">多 0 人</div>
+      <div id="log" class="log" style="opacity:0">23 人都收到「預約成功」<br><span class="code">日誌：23 次成功，0 個錯誤</span></div>
+    </div>
+  </div>
+
+  <div class="readout" id="readout" aria-live="polite"></div>
+
+  <div class="controls">
+    <button class="btn" id="play" type="button" aria-label="播放">▶ <span id="playtxt">播放</span></button>
+    <button class="btn icon" id="prev" type="button" aria-label="上一步">‹</button>
+    <button class="btn icon" id="next" type="button" aria-label="下一步">›</button>
+    <input class="scrub" id="scrub" type="range" min="0" max="17.6" step="0.05" value="17.6" aria-label="時間軸">
+    <span class="stepno" id="stepno">11 / 11</span>
+    <button class="btn icon" id="theme" type="button" aria-label="切換深淺色">◐</button>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw dash"></i>虛線：已 INSERT、還沒提交，別人看不到</span>
+    <span><i class="sw hot"></i>出問題的地方</span>
+    <span><i class="sw now"></i>現在這一步</span>
+  </div>
+</figure>
+
+<script>
+(function(){
+  var STEP = 1.6, N = 11, DUR = 17.6, CAP = 20, BASE = 19;
+  var L = ['A','B','C','D'];
+  var READ = [1.6, 3.2, 4.8, 5.25];
+  var JUDGE = [6.4, 6.55, 6.7, 6.85];
+  var INS = [8.0, 8.15, 8.3, 8.45];
+  var COMMIT = [9.6, 11.2, 12.8, 14.4];
+  var END = 16.0;
+  var TEXT = [
+    '開放那一刻已提交 <b>19</b> 筆，上限 20。4 個預約請求同時進來，各開一筆交易（PostgreSQL 預設的 Read Committed：每句 SQL 只看得到別人已提交的資料）。',
+    '交易 A 用 <span class="code">SELECT count(*)</span> 數，讀到 <b>19</b>。',
+    '交易 B 也數，同樣讀到 <b>19</b>。',
+    '交易 C、D 也讀到 <b>19</b>。這時還沒有人提交，大家看到的都是 19。',
+    '4 個交易各自判斷「筆數 ≥ 20？」：<span class="hl">手上都是 19，都認為還有位子</span>。',
+    '各自 <span class="code">INSERT</span> 一筆預約，插的是<b>不同的列</b>。還沒提交，別人看不到，所以誰手上的 19 都不會變。',
+    '交易 A <span class="code">COMMIT</span> 成功：已提交 <b>20</b> 筆，剛好額滿。',
+    '交易 B <span class="code">COMMIT</span> 也成功：<span class="hl">21 筆</span>。B 的判斷用的是當初讀到的 19。',
+    '交易 C <span class="code">COMMIT</span> 成功：<span class="hl">22 筆</span>。',
+    '交易 D <span class="code">COMMIT</span> 成功：<span class="hl">23 筆，比上限多 3 人</span>。',
+    '23 個人都收到「預約成功」，日誌沒有任何錯誤。每個交易插的是不同的列，資料庫沒有理由擋下任何一個。改成 Repeatable Read 也一樣擋不住：這叫 <b>write skew（寫入偏斜）</b>。'
+  ];
+
+  var root = document.documentElement;
+  var fig = document.querySelector('.fig');
+  var lanes = document.getElementById('lanes');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var $ = function(id){ return document.getElementById(id); };
+  var numEl = $('num'), badge = $('badge'), logEl = $('log'), readout = $('readout');
+  var scrub = $('scrub'), stepno = $('stepno'), playBtn = $('play'), playTxt = $('playtxt');
+
+  function mk(tag, cls, html){ var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+
+  // build lanes
+  var cells = []; // {el, inner, te, kind, lane}
+  L.forEach(function(name, i){
+    var lab = mk('div', 'lane', '<small>交易</small><b>' + name + '</b>');
+    lanes.appendChild(lab);
+    var defs = [
+      ['read', READ[i], '<span class="sub">讀到</span><span class="main big">19</span>'],
+      ['judge hot', JUDGE[i], '<span class="main">19 &lt; 20</span><span class="sub">有位子</span>'],
+      ['ins', INS[i], '<span class="main">+1 列</span><span class="sub" data-sub>未提交</span>'],
+      ['commit', COMMIT[i], '<span class="main">✓</span><span class="sub">成功</span>']
+    ];
+    defs.forEach(function(d){
+      var c = mk('div', 'cell ' + d[0]);
+      var inner = mk('div', 'in', d[2]);
+      inner.style.opacity = '0';
+      c.appendChild(inner);
+      lanes.appendChild(c);
+      cells.push({el: c, inner: inner, te: d[1], kind: d[0], lane: i, sub: inner.querySelector('[data-sub]'), cache: {}});
+    });
+  });
+
+  // build seats
+  var NS = 'http://www.w3.org/2000/svg';
+  var seatsSvg = $('seats');
+  var cap = document.createElementNS(NS, 'line');
+  cap.setAttribute('class', 'capline'); cap.setAttribute('x1', '202'); cap.setAttribute('x2', '202'); cap.setAttribute('y1', '1'); cap.setAttribute('y2', '25');
+  var seats = [];
+  for (var s = 0; s < 23; s++){
+    var r = document.createElementNS(NS, 'rect');
+    var x = s * 10 + (s >= CAP ? 6 : 0);
+    r.setAttribute('x', String(x)); r.setAttribute('y', '5'); r.setAttribute('width', '8'); r.setAttribute('height', '16'); r.setAttribute('rx', '2');
+    r.setAttribute('class', 'seat');
+    seatsSvg.appendChild(r);
+    seats.push({el: r, cls: '', op: ''});
+  }
+  seatsSvg.appendChild(cap);
+
+  function clamp(v, a, b){ return v < a ? a : (v > b ? b : v); }
+  function ease(x){ x = clamp(x, 0, 1); return 1 - Math.pow(1 - x, 3); }
+  function fade(){ return reduce.matches ? 0.0001 : 0.35; }
+  function prog(t, te){ return ease((t - te) / fade()); }
+  function stepOf(t){ return Math.min(N - 1, Math.floor(t / STEP + 1e-6)); }
+  function setS(c, el, k, v){ if (c[k] !== v){ c[k] = v; el.style[k] = v; } }
+  function setCls(o, el, k, on){ var key = 'c_' + k; if (o[key] !== on){ o[key] = on; el.classList.toggle(k, on); } }
+
+  var t = DUR, playing = false, visible = true, raf = 0, last = 0;
+  var lastText = -1, cacheNum = null, cacheBadge = {}, cacheLog = {};
+
+  function render(){
+    var st = stepOf(t);
+    cells.forEach(function(c){
+      var p = prog(t, c.te);
+      setS(c.cache, c.inner, 'opacity', p.toFixed(3));
+      setS(c.cache, c.inner, 'transform', 'translateY(' + ((1 - p) * 6).toFixed(2) + 'px)');
+      setCls(c.cache, c.el, 'on', t >= c.te);
+      setCls(c.cache, c.el, 'now', st < N - 1 && t >= c.te && stepOf(c.te) === st);
+      if (c.sub){
+        var done = t >= COMMIT[c.lane];
+        setCls(c.cache, c.el, 'done', done);
+        var txt = done ? '已提交' : '未提交';
+        if (c.cache.subTxt !== txt){ c.cache.subTxt = txt; c.sub.textContent = txt; }
+      }
+    });
+    var commits = 0;
+    COMMIT.forEach(function(te){ if (t >= te) commits++; });
+    var count = BASE + commits;
+    if (cacheNum !== count){ cacheNum = count; numEl.textContent = String(count); numEl.classList.toggle('over', count > CAP); }
+    for (var i = 0; i < seats.length; i++){
+      var cls, op = '1';
+      if (i < BASE) cls = 'seat';
+      else {
+        var k = i - BASE, te = COMMIT[k];
+        if (i < CAP){ cls = t >= te ? 'seat new' : 'seat empty'; }
+        else { cls = 'seat extra'; op = prog(t, te).toFixed(3); }
+      }
+      if (seats[i].cls !== cls){ seats[i].cls = cls; seats[i].el.setAttribute('class', cls); }
+      if (seats[i].op !== op){ seats[i].op = op; seats[i].el.style.opacity = op; }
+    }
+    var over = count - CAP;
+    if (over > 0){
+      setS(cacheBadge, badge, 'opacity', (commits >= 2 ? Math.max(prog(t, COMMIT[1]), 0) : 0).toFixed(3));
+      var bt = '多 ' + over + ' 人';
+      if (cacheBadge.txt !== bt){ cacheBadge.txt = bt; badge.textContent = bt; }
+    } else setS(cacheBadge, badge, 'opacity', '0');
+    setS(cacheLog, logEl, 'opacity', prog(t, END).toFixed(3));
+    if (lastText !== st){ lastText = st; readout.innerHTML = TEXT[st]; stepno.textContent = (st + 1) + ' / ' + N; }
+    var sv = t.toFixed(2);
+    if (scrub.value !== sv) scrub.value = sv;
+  }
+
+  function updatePlay(){
+    playTxt.textContent = playing ? '暫停' : '播放';
+    playBtn.firstChild.nodeValue = playing ? '❚❚ ' : '▶ ';
+    playBtn.setAttribute('aria-label', playing ? '暫停' : '播放');
+  }
+  function tick(now){
+    if (!playing || !visible){ raf = 0; return; }
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    t = Math.min(DUR, t + dt);
+    render();
+    if (t >= DUR){ playing = false; raf = 0; updatePlay(); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function startLoop(){ if (raf || !playing || !visible) return; last = performance.now(); raf = requestAnimationFrame(tick); }
+  function stopLoop(){ if (raf){ cancelAnimationFrame(raf); raf = 0; } }
+  function play(){ if (t >= DUR - 0.01) t = 0; playing = true; updatePlay(); render(); startLoop(); }
+  function pause(){ playing = false; stopLoop(); updatePlay(); }
+  function seek(x){ pause(); t = clamp(Number(x) || 0, 0, DUR); render(); }
+  function gotoStep(k){ k = clamp(k, 0, N - 1); seek(k === N - 1 ? DUR : k * STEP + 1.2); }
+
+  playBtn.addEventListener('click', function(){ playing ? pause() : play(); });
+  $('prev').addEventListener('click', function(){ gotoStep(stepOf(t) - 1); });
+  $('next').addEventListener('click', function(){ gotoStep(stepOf(t) + 1); });
+  scrub.addEventListener('input', function(){ seek(parseFloat(scrub.value)); });
+  fig.addEventListener('keydown', function(e){
+    if (e.target === scrub) return;
+    if (e.key === 'ArrowRight'){ gotoStep(stepOf(t) + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft'){ gotoStep(stepOf(t) - 1); e.preventDefault(); }
+    else if (e.key === 'Home'){ gotoStep(0); e.preventDefault(); }
+    else if (e.key === 'End'){ seek(DUR); e.preventDefault(); }
+    else if ((e.key === ' ' || e.key === 'Enter') && e.target === fig){ playing ? pause() : play(); e.preventDefault(); }
+  });
+  $('theme').addEventListener('click', function(){
+    var cur = root.getAttribute('data-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+
+  if ('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){
+      visible = es[0].isIntersecting;
+      if (visible) startLoop(); else stopLoop();
+    }, {rootMargin: '120px'}).observe(fig);
+  }
+
+  // report height to a host page (no forced layout)
+  if (window.parent !== window && 'ResizeObserver' in window){
+    var lastH = 0;
+    new ResizeObserver(function(es){
+      var h = Math.ceil(es[0].contentRect.height);
+      if (h !== lastH){ lastH = h; try { window.parent.postMessage({type: 'draw-figure-height', fig: 'booking-oversell', height: h}, '*'); } catch (_) {} }
+    }).observe(document.documentElement);
+  }
+
+  window.DUR = DUR;
+  window.timeline = function(){ return DUR; };
+  window.seek = seek;
+
+  render();
+  updatePlay();
+})();
+</script>
+</body>
+</html>
