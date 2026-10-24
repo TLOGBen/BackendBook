@@ -1,5 +1,6 @@
 site_name: 後端基本功
-site_description: 給新進後端工程師的 50 篇入門教材：並行與交易、資料庫效能、快取、重試與容錯、訊息佇列、分散式一致性與維運。每篇從具體的出事情境開始，用時間軸和圖講清楚機制。
+site_description: 給新進後端工程師的 59 篇入門教材：並行與交易、資料庫效能、快取、重試與容錯、訊息佇列、分散式一致性、維運、測試與驗證，以及程式設計與分層。每篇先講它要解決的問題和核心理念，再從具體的出事情境開始，用互動圖和時間軸講清楚機制。
+site_url: https://newbiebook-7bdf1c.hy-tech.com.tw/
 docs_dir: docs
 repo_url: https://git.hy-tech.com.tw/ben.tsai/newbiebook
 repo_name: ben.tsai/newbiebook

@@ -4,7 +4,7 @@
 
 | | 網址 |
 |---|---|
-| 網站 | 部署到 GitLab Pages 後，網址在專案的 **Deploy → Pages** 頁面 |
+| 網站 | <https://newbiebook-7bdf1c.hy-tech.com.tw/>（要用公司 GitLab 帳號登入才看得到） |
 | 原始碼 | <https://git.hy-tech.com.tw/ben.tsai/newbiebook> |
 
 ## 內容
