@@ -4,8 +4,8 @@
 
 | | 網址 |
 |---|---|
-| 網站 | <https://newbiebook-7bdf1c.hy-tech.com.tw/>（要用公司 GitLab 帳號登入才看得到） |
-| 原始碼 | <https://git.hy-tech.com.tw/ben.tsai/newbiebook> |
+| 網站 | <https://tlogben.github.io/BackendBook/> |
+| 原始碼 | <https://github.com/TLOGBen/BackendBook> |
 
 ## 內容
 
@@ -57,11 +57,11 @@ python -m venv .venv
 
 Windows 上把 `.venv/bin/` 換成 `.venv\Scripts\`。打開 <http://127.0.0.1:8000> 就能看到網站，改了 `docs/` 裡的檔案會自動重新整理。
 
-## 部署到 GitLab Pages
+## 部署到 GitHub Pages
 
-- 每次 push 到 `main`，`.gitlab-ci.yml` 的 `pages` job 會用 `mkdocs build --strict` 建置，並把結果發布到 GitLab Pages。連結壞掉時建置會失敗，不會發布出壞掉的網站。
-- push 到其他分支時只跑 `check` job，確認建置會過，不會發布。
-- 網站網址在專案的 **Deploy → Pages** 頁面。如果看不到這個選項，代表這台 GitLab 沒有開 Pages 功能，要請管理員開啟。
+- 每次 push 到 `main`，`.github/workflows/pages.yml` 會用 `mkdocs build --strict` 建置，並把結果發布到 GitHub Pages。連結壞掉時建置會失敗，不會發布出壞掉的網站。
+- push 到其他分支或開 PR 時只建置，確認會過，不會發布。
+- Pages 的來源設在 repo 的 **Settings → Pages → Source: GitHub Actions**。
 
 ## 改文章時
 
